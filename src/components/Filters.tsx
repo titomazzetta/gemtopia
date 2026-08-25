@@ -57,6 +57,26 @@ export type FacetKey =
   | "formats"
   | "decades";
 
+/**
+ * Default tempo window. 75–180 covers everything from hip hop and downtempo
+ * up through jungle, and is the range the two scaling buttons work outward
+ * from. It is a *default*, not a limit — the inputs accept 40–260 so a
+ * dubstep or drone crate is not artificially fenced in.
+ */
+export const BPM_FLOOR = 75;
+export const BPM_CEILING = 180;
+export const BPM_HARD_MIN = 40;
+export const BPM_HARD_MAX = 260;
+
+/** A tempo band measured from the user's own catalogue, per style. */
+export interface StyleTempo {
+  style: string;
+  low: number;
+  high: number;
+  median: number;
+  count: number;
+}
+
 export interface Facets {
   artists: Array<[string, number]>;
   genres: Array<[string, number]>;
@@ -70,6 +90,14 @@ export interface Facets {
   minBpm: number;
   maxBpm: number;
   bpmKnown: number;
+  /**
+   * Tempo presets derived from the collection itself: for each style with
+   * enough catalogued BPMs, the 10th–90th percentile of what that style
+   * actually runs at *in this crate*. This is what replaces the hardcoded
+   * "House 118–128" guesses — your Detroit techno might sit at 132–138 and
+   * the chip will say so.
+   */
+  styleTempos: StyleTempo[];
 }
 
 /** Count every facet value across the pool so the UI can rank by frequency. */
@@ -89,6 +117,9 @@ export function computeFacets(pool: Playable[]): Facets {
   let minBpm = Infinity;
   let maxBpm = -Infinity;
   let bpmKnown = 0;
+
+  /** style -> every catalogued BPM for that style in this crate */
+  const tempoByStyle = new Map<string, number[]>();
 
   const bump = (key: FacetKey, value: string) => {
     if (!value) return;
@@ -114,8 +145,41 @@ export function computeFacets(pool: Playable[]): Facets {
       bpmKnown += 1;
       minBpm = Math.min(minBpm, item.bpm);
       maxBpm = Math.max(maxBpm, item.bpm);
+
+      for (const style of item.styles) {
+        const list = tempoByStyle.get(style);
+        if (list) list.push(item.bpm);
+        else tempoByStyle.set(style, [item.bpm]);
+      }
     }
   }
+
+  /* ---- tempo bands per style, from real readings ---- */
+
+  const percentile = (sorted: number[], p: number) =>
+    sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * p)))]!;
+
+  const styleTempos: StyleTempo[] = [...tempoByStyle.entries()]
+    // Four readings is the minimum before a band means anything.
+    .filter(([, values]) => values.length >= 4)
+    .map(([style, values]) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const low = Math.floor(percentile(sorted, 0.1));
+      const high = Math.ceil(percentile(sorted, 0.9));
+      // A zero-width band ("128–128") is technically accurate and practically
+      // useless as a filter — nothing else would ever fall inside it. Open it
+      // up to a mixable window instead.
+      const pad = high - low < 4 ? 2 : 0;
+      return {
+        style,
+        low: Math.max(BPM_HARD_MIN, low - pad),
+        high: Math.min(BPM_HARD_MAX, high + pad),
+        median: Math.round(percentile(sorted, 0.5)),
+        count: values.length,
+      };
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 8);
 
   const rank = (m: Map<string, number>, cap = 400) =>
     [...m.entries()]
@@ -137,9 +201,10 @@ export function computeFacets(pool: Playable[]): Facets {
     decades,
     minYear: Number.isFinite(minYear) ? minYear : 1950,
     maxYear: Number.isFinite(maxYear) ? maxYear : new Date().getFullYear(),
-    minBpm: Number.isFinite(minBpm) ? Math.floor(minBpm) : 60,
-    maxBpm: Number.isFinite(maxBpm) ? Math.ceil(maxBpm) : 200,
+    minBpm: Number.isFinite(minBpm) ? Math.floor(minBpm) : BPM_FLOOR,
+    maxBpm: Number.isFinite(maxBpm) ? Math.ceil(maxBpm) : BPM_CEILING,
     bpmKnown,
+    styleTempos,
   };
 }
 
@@ -286,6 +351,24 @@ function ChipGroup({
   );
 }
 
+/**
+ * Halve or double the active tempo window, clamped to the sane outer bounds.
+ * With no window set, scaling starts from the default one rather than doing
+ * nothing — which is what a DJ pressing ×2 actually expects to happen.
+ */
+function scaleRange(
+  filters: FilterState,
+  factor: 0.5 | 2,
+): Pick<FilterState, "bpmFrom" | "bpmTo"> {
+  const from = filters.bpmFrom ?? BPM_FLOOR;
+  const to = filters.bpmTo ?? BPM_CEILING;
+
+  return {
+    bpmFrom: Math.max(BPM_HARD_MIN, Math.round(from * factor * 10) / 10),
+    bpmTo: Math.min(BPM_HARD_MAX, Math.round(to * factor * 10) / 10),
+  };
+}
+
 function NumberRange({
   label,
   from,
@@ -294,6 +377,8 @@ function NumberRange({
   placeholderTo,
   onChange,
   step,
+  min,
+  max,
 }: {
   label: string;
   from: number | null;
@@ -302,6 +387,8 @@ function NumberRange({
   placeholderTo: number;
   onChange: (from: number | null, to: number | null) => void;
   step?: number;
+  min?: number;
+  max?: number;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -309,6 +396,8 @@ function NumberRange({
         type="number"
         inputMode="numeric"
         step={step}
+        min={min}
+        max={max}
         value={from ?? ""}
         placeholder={String(placeholderFrom)}
         onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null, to)}
@@ -320,6 +409,8 @@ function NumberRange({
         type="number"
         inputMode="numeric"
         step={step}
+        min={min}
+        max={max}
         value={to ?? ""}
         placeholder={String(placeholderTo)}
         onChange={(e) => onChange(from, e.target.value ? Number(e.target.value) : null)}
@@ -369,7 +460,7 @@ export function Filters({
         <label className="relative block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-500" />
           <input
-            id="crate-search"
+            id="dig-search"
             type="search"
             value={filters.query}
             onChange={(e) => onChange({ ...filters, query: e.target.value })}
@@ -414,46 +505,116 @@ export function Filters({
           label="BPM"
           from={filters.bpmFrom}
           to={filters.bpmTo}
-          placeholderFrom={facets.minBpm}
-          placeholderTo={facets.maxBpm}
+          placeholderFrom={BPM_FLOOR}
+          placeholderTo={BPM_CEILING}
+          min={BPM_HARD_MIN}
+          max={BPM_HARD_MAX}
           onChange={(bpmFrom, bpmTo) => onChange({ ...filters, bpmFrom, bpmTo })}
         />
 
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {currentBpm !== null && (
-            <button
-              type="button"
-              onClick={() =>
-                onChange({
-                  ...filters,
-                  bpmFrom: Math.round((currentBpm - 3) * 10) / 10,
-                  bpmTo: Math.round((currentBpm + 3) * 10) / 10,
-                })
-              }
-              className="rounded-full border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent"
-              title="Narrow the crate to what will mix with what's playing"
-            >
-              Mixable with {currentBpm} (±3)
-            </button>
-          )}
-          {(
-            [
-              ["Downtempo", 60, 100],
-              ["House", 118, 128],
-              ["Techno", 128, 145],
-              ["Jungle / DnB", 160, 180],
-            ] as const
-          ).map(([name, low, high]) => (
-            <button
-              key={name}
-              type="button"
-              onClick={() => onChange({ ...filters, bpmFrom: low, bpmTo: high })}
-              className="rounded-full border border-ink-700 bg-ink-850 px-2 py-1 text-[11px] text-neutral-400 hover:border-ink-600 hover:text-neutral-200"
-            >
-              {name}
-            </button>
-          ))}
+        {/*
+          Half-time / double-time. A 140 record sits in a 70 set and a 87 read
+          of a jungle track is the same record as 174 — so the range itself
+          needs to halve and double, not just individual readings.
+        */}
+        <div className="mt-2 flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => onChange({ ...filters, ...scaleRange(filters, 0.5) })}
+            className="flex-1 rounded border border-ink-700 py-1 font-mono text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+            title="Halve the range — find the half-time versions"
+          >
+            ÷2
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ ...filters, ...scaleRange(filters, 2) })}
+            className="flex-1 rounded border border-ink-700 py-1 font-mono text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+            title="Double the range — find the double-time versions"
+          >
+            ×2
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ ...filters, bpmFrom: BPM_FLOOR, bpmTo: BPM_CEILING })}
+            className="flex-[2] rounded border border-ink-700 py-1 text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+            title={`Back to the default ${BPM_FLOOR}–${BPM_CEILING} window`}
+          >
+            {BPM_FLOOR}–{BPM_CEILING}
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange({ ...filters, bpmFrom: null, bpmTo: null })}
+            className="flex-1 rounded border border-ink-700 py-1 text-[10px] text-neutral-500 hover:border-ink-600 hover:text-neutral-100"
+            title="No tempo constraint"
+          >
+            any
+          </button>
         </div>
+
+        {currentBpm !== null && (
+          <button
+            type="button"
+            onClick={() =>
+              onChange({
+                ...filters,
+                bpmFrom: Math.round((currentBpm - 3) * 10) / 10,
+                bpmTo: Math.round((currentBpm + 3) * 10) / 10,
+              })
+            }
+            className="mt-2 w-full rounded-full border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent"
+            title="Narrow the crate to what will mix with what's playing"
+          >
+            Mixable with {currentBpm} (±3)
+          </button>
+        )}
+
+        {/*
+          Tempo presets measured from this collection, not guessed. Each chip
+          is the 10th–90th percentile of what that style actually runs at here.
+        */}
+        {facets.styleTempos.length > 0 && (
+          <div className="mt-2">
+            <p className="mb-1 text-[10px] text-neutral-600">
+              Measured from your own BPM catalogue
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {facets.styleTempos.map((band) => {
+                const active =
+                  filters.bpmFrom === band.low && filters.bpmTo === band.high;
+                return (
+                  <button
+                    key={band.style}
+                    type="button"
+                    onClick={() =>
+                      onChange({ ...filters, bpmFrom: band.low, bpmTo: band.high })
+                    }
+                    aria-pressed={active}
+                    className={`rounded-full border px-2 py-1 text-[11px] transition-colors ${
+                      active
+                        ? "border-accent/60 bg-accent/15 text-accent"
+                        : "border-ink-700 bg-ink-850 text-neutral-400 hover:border-ink-600 hover:text-neutral-200"
+                    }`}
+                    title={`${band.count} catalogued clips, median ${band.median} BPM`}
+                  >
+                    {band.style}
+                    <span className="ml-1 font-mono text-neutral-600">
+                      {band.low}–{band.high}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {facets.bpmKnown === 0 && (
+          <p className="mt-2 text-[10px] leading-relaxed text-neutral-600">
+            No tempos catalogued yet. Hit <kbd className="rounded bg-ink-800 px-1">T</kbd>{" "}
+            in time while something plays, or turn on auto-detect in the player.
+            Style bands appear here once there are a few readings.
+          </p>
+        )}
 
         <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-neutral-400">
           <input

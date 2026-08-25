@@ -169,6 +169,7 @@ export function startSync(options: {
               coverImage: summary?.coverImage ?? "",
               addedAt: summary?.addedAt ?? null,
               notes: null,
+              market: null,
               tracks: [],
               videos: [],
               fetchedAt: Date.now(),

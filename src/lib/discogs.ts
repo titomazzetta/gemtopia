@@ -71,6 +71,55 @@ async function signedFetch(
   return response;
 }
 
+/**
+ * A signed request that changes state on Discogs.
+ *
+ * Kept separate from `getJson` so that every write in the codebase is
+ * greppable, and so a read helper can never be accidentally handed a
+ * mutating method.
+ */
+async function writeRequest(
+  method: "PUT" | "DELETE" | "POST",
+  path: string,
+  user: UserToken,
+): Promise<void> {
+  const authorization = buildAuthHeader(method, `${API}${path}`, {
+    consumerKey: env.DISCOGS_CONSUMER_KEY,
+    consumerSecret: env.DISCOGS_CONSUMER_SECRET,
+    token: user.token,
+    tokenSecret: user.tokenSecret,
+  });
+
+  const response = await fetch(`${API}${path}`, {
+    method,
+    headers: {
+      Authorization: authorization,
+      "User-Agent": USER_AGENT,
+      Accept: "application/json",
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (response.status === 429) {
+    throw new DiscogsError(
+      "Discogs rate limit reached",
+      429,
+      Number(response.headers.get("retry-after") ?? "60"),
+    );
+  }
+
+  // 204 for a successful delete, 201 for an add, 200 for an edit.
+  if (!response.ok && response.status !== 204) {
+    throw new DiscogsError(
+      response.status === 401
+        ? "Discogs rejected the stored credentials"
+        : `Discogs write failed (${response.status})`,
+      response.status,
+    );
+  }
+}
+
 async function getJson<T>(
   path: string,
   user: UserToken,
@@ -233,6 +282,16 @@ const releaseSchema = z.object({
   thumb: z.string().nullish(),
   country: z.string().nullish(),
   notes: z.string().nullish(),
+  // Marketplace signals. Discogs returns these on the release endpoint, so
+  // "is this buyable right now, and roughly for how much" costs no extra call.
+  num_for_sale: z.number().nullish(),
+  lowest_price: z.number().nullish(),
+  community: z
+    .object({
+      have: z.number().nullish(),
+      want: z.number().nullish(),
+    })
+    .nullish(),
   genres: z.array(z.string()).nullish(),
   styles: z.array(z.string()).nullish(),
   artists: z
@@ -486,10 +545,167 @@ export async function getRelease(
     coverImage: data.images?.[0]?.uri ?? data.thumb ?? "",
     addedAt: null,
     notes: data.notes?.slice(0, 4000) ?? null,
+    market: {
+      forSale: data.num_for_sale ?? 0,
+      lowestPrice: data.lowest_price ?? null,
+      have: data.community?.have ?? null,
+      want: data.community?.want ?? null,
+    },
     tracks,
     videos,
     fetchedAt: Date.now(),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Wantlist writes                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Add a release to the signed-in user's wantlist.
+ *
+ * The username comes from the session, never from a request parameter — the
+ * same rule that protects the collection read paths applies to writes, and
+ * matters more here because this one changes data on Discogs.
+ */
+export async function addToWantlist(
+  user: UserToken,
+  username: string,
+  releaseId: number,
+): Promise<void> {
+  await writeRequest(
+    "PUT",
+    `/users/${encodeURIComponent(username)}/wants/${releaseId}`,
+    user,
+  );
+}
+
+export async function removeFromWantlist(
+  user: UserToken,
+  username: string,
+  releaseId: number,
+): Promise<void> {
+  await writeRequest(
+    "DELETE",
+    `/users/${encodeURIComponent(username)}/wants/${releaseId}`,
+    user,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Database search — digging beyond the collection                     */
+/* ------------------------------------------------------------------ */
+
+const searchSchema = z.object({
+  pagination: paginationSchema,
+  results: z.array(
+    z.object({
+      id: z.number(),
+      type: z.string().nullish(),
+      master_id: z.number().nullish(),
+      title: z.string(),
+      year: z.union([z.string(), z.number()]).nullish(),
+      thumb: z.string().nullish(),
+      cover_image: z.string().nullish(),
+      label: z.array(z.string()).nullish(),
+      genre: z.array(z.string()).nullish(),
+      style: z.array(z.string()).nullish(),
+      country: z.string().nullish(),
+      format: z.array(z.string()).nullish(),
+      community: z
+        .object({ have: z.number().nullish(), want: z.number().nullish() })
+        .nullish(),
+    }),
+  ),
+});
+
+export interface SearchHit {
+  id: number;
+  /** Discogs search titles are "Artist - Title"; split for display. */
+  artist: string;
+  title: string;
+  year: number | null;
+  thumb: string;
+  labels: string[];
+  genres: string[];
+  styles: string[];
+  country: string | null;
+  formats: string[];
+  have: number | null;
+  want: number | null;
+}
+
+export interface SearchParams {
+  style?: string;
+  genre?: string;
+  label?: string;
+  artist?: string;
+  country?: string;
+  format?: string;
+  /** Discogs accepts a single year or a "1990-1999" range. */
+  year?: string;
+  query?: string;
+  page?: number;
+  perPage?: number;
+}
+
+export async function searchReleases(
+  user: UserToken,
+  params: SearchParams,
+): Promise<SearchHit[]> {
+  const query = new URLSearchParams();
+  query.set("type", "release");
+  query.set("per_page", String(Math.min(params.perPage ?? 50, 100)));
+  query.set("page", String(params.page ?? 1));
+
+  // Only whitelisted keys reach the upstream query string; values are encoded
+  // by URLSearchParams, so a hostile style name cannot inject extra params.
+  for (const key of [
+    "style",
+    "genre",
+    "label",
+    "artist",
+    "country",
+    "format",
+    "year",
+  ] as const) {
+    const value = params[key];
+    if (value) query.set(key, value);
+  }
+  if (params.query) query.set("q", params.query);
+
+  const data = await getJson(
+    `/database/search?${query.toString()}`,
+    user,
+    searchSchema,
+  );
+
+  return data.results.map((row) => {
+    const dash = row.title.indexOf(" - ");
+    const artist = dash > 0 ? cleanArtistName(row.title.slice(0, dash)) : "";
+    const title = dash > 0 ? row.title.slice(dash + 3) : row.title;
+    const year =
+      typeof row.year === "number"
+        ? row.year
+        : row.year && /^\d{4}$/.test(row.year)
+          ? Number(row.year)
+          : null;
+
+    return {
+      id: row.id,
+      artist: artist || "Various",
+      title,
+      year: year && year > 0 ? year : null,
+      thumb: row.thumb ?? row.cover_image ?? "",
+      labels: (row.label ?? []).map(cleanArtistName).slice(0, 4),
+      genres: row.genre ?? [],
+      styles: row.style ?? [],
+      country: row.country ?? null,
+      formats: row.format ?? [],
+      have: row.community?.have ?? null,
+      want: row.community?.want ?? null,
+    };
+  });
 }
 
 /* ------------------------------------------------------------------ */

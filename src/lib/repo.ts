@@ -51,6 +51,7 @@ interface PlaylistRow {
   id: string;
   name: string;
   notes: string | null;
+  visibility: string;
   created_at: Date;
   updated_at: Date;
 }
@@ -72,6 +73,7 @@ function toPlaylist(row: PlaylistRow, items: PlaylistItemRow[]): Playlist {
     id: row.id,
     name: row.name,
     notes: row.notes,
+    visibility: row.visibility === "unlisted" ? "unlisted" : "private",
     createdAt: row.created_at.getTime(),
     updatedAt: row.updated_at.getTime(),
     items: items.map((i) => i.clipKey),
@@ -81,7 +83,7 @@ function toPlaylist(row: PlaylistRow, items: PlaylistItemRow[]): Playlist {
 
 export async function listPlaylists(userId: string): Promise<Playlist[]> {
   const playlists = await query<PlaylistRow>(
-    `SELECT id, name, notes, created_at, updated_at
+    `SELECT id, name, notes, visibility, created_at, updated_at
        FROM playlists
       WHERE user_id = $1
       ORDER BY updated_at DESC`,
@@ -126,7 +128,7 @@ export async function getPlaylist(
   playlistId: string,
 ): Promise<Playlist | null> {
   const row = await queryOne<PlaylistRow>(
-    `SELECT id, name, notes, created_at, updated_at
+    `SELECT id, name, notes, visibility, created_at, updated_at
        FROM playlists
       WHERE id = $1 AND user_id = $2`,
     [playlistId, userId],
@@ -166,7 +168,7 @@ export async function createPlaylist(
     const created = await client.query<PlaylistRow>(
       `INSERT INTO playlists (user_id, name)
             VALUES ($1, $2)
-         RETURNING id, name, notes, created_at, updated_at`,
+         RETURNING id, name, notes, visibility, created_at, updated_at`,
       [userId, name],
     );
     const row = created.rows[0];
@@ -454,6 +456,69 @@ export async function saveAnalysis(params: {
       params.usedLlm,
     ],
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Dig log                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Remember which releases have been surfaced while digging, so the feed keeps
+ * moving instead of showing the same twelve records every time.
+ *
+ * Best-effort by design: callers `.catch()` this. A failure to record an
+ * impression must never break the dig itself.
+ */
+export async function recordDigSeen(
+  userId: string,
+  releaseIds: number[],
+  seedId: number,
+): Promise<void> {
+  if (releaseIds.length === 0) return;
+  const unique = [...new Set(releaseIds)].slice(0, 200);
+
+  await query(
+    `INSERT INTO dig_log (user_id, release_id, action, seed_id)
+     SELECT $1, t.release_id, 'seen', $3
+       FROM unnest($2::bigint[]) AS t(release_id)
+     ON CONFLICT (user_id, release_id, action) DO NOTHING`,
+    [userId, unique, seedId],
+  );
+}
+
+export async function recordDigAction(
+  userId: string,
+  releaseId: number,
+  action: "previewed" | "wanted" | "dismissed",
+): Promise<void> {
+  await query(
+    `INSERT INTO dig_log (user_id, release_id, action)
+          VALUES ($1, $2, $3)
+     ON CONFLICT (user_id, release_id, action) DO NOTHING`,
+    [userId, releaseId, action],
+  );
+}
+
+/** Release ids already shown to this user, newest first. */
+export async function recentlySeen(
+  userId: string,
+  limit = 800,
+): Promise<number[]> {
+  const rows = await query<{ release_id: string }>(
+    `SELECT release_id
+       FROM dig_log
+      WHERE user_id = $1 AND action = 'seen'
+      ORDER BY created_at DESC
+      LIMIT $2`,
+    [userId, limit],
+  );
+  return rows.map((r) => Number(r.release_id));
+}
+
+export async function clearDigHistory(userId: string): Promise<void> {
+  await query(`DELETE FROM dig_log WHERE user_id = $1 AND action = 'seen'`, [
+    userId,
+  ]);
 }
 
 /* ------------------------------------------------------------------ */

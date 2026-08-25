@@ -1,8 +1,8 @@
 {
-  "name": "crateshuffle",
+  "name": "playtopia",
   "version": "1.0.0",
   "private": true,
-  "description": "Bandcamp-style shuffle player and playlist maker for your Discogs collection and wantlist.",
+  "description": "Private crate-digging, shuffle player and playlist maker for your Discogs collection and wantlist.",
   "engines": {
     "node": ">=20.0.0"
   },

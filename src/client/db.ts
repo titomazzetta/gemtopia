@@ -20,7 +20,7 @@ import type {
  * Export/import JSON is the escape hatch.
  */
 
-const DB_NAME = "crateshuffle";
+const DB_NAME = "playtopia";
 const DB_VERSION = 1;
 
 const STORE_SUMMARY = "summaries";

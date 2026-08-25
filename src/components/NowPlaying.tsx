@@ -5,6 +5,7 @@ import type { BpmSource, Playable } from "@/lib/types";
 import type { PlayerApi } from "@/client/useYouTubePlayer";
 import type { DetectorStatus } from "@/client/useTempoDetector";
 import {
+  Compass,
   Disc,
   Metronome,
   Mic,
@@ -206,11 +207,13 @@ export function NowPlaying({
   shuffleOn,
   repeatOn,
   tempo,
+  digging,
   onToggleShuffle,
   onToggleRepeat,
   onPrev,
   onNext,
   onAddToPlaylist,
+  onDig,
 }: {
   containerRef: RefObject<HTMLDivElement | null>;
   api: PlayerApi;
@@ -220,11 +223,13 @@ export function NowPlaying({
   shuffleOn: boolean;
   repeatOn: boolean;
   tempo: TempoPanelProps;
+  digging: boolean;
   onToggleShuffle: () => void;
   onToggleRepeat: () => void;
   onPrev: () => void;
   onNext: () => void;
   onAddToPlaylist: () => void;
+  onDig: () => void;
 }) {
   const progress = api.duration > 0 ? (api.currentTime / api.duration) * 100 : 0;
 
@@ -394,6 +399,22 @@ export function NowPlaying({
         </div>
 
         <div className="mt-auto space-y-2">
+          <button
+            type="button"
+            onClick={onDig}
+            disabled={!current}
+            className={`flex w-full items-center justify-center gap-1.5 rounded-md border py-2 text-xs font-medium transition-colors disabled:opacity-40 ${
+              digging
+                ? "border-accent/60 bg-accent/15 text-accent"
+                : "border-ink-700 bg-ink-850 text-neutral-300 hover:border-ink-600 hover:text-white"
+            }`}
+            title="Everything this record connects to (D)"
+          >
+            <Compass className="h-3.5 w-3.5" />
+            {digging ? "Digging" : "Dig from this"}
+            <kbd className="ml-1 rounded bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">D</kbd>
+          </button>
+
           <button
             type="button"
             onClick={onAddToPlaylist}

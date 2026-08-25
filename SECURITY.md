@@ -1,6 +1,6 @@
 # Security Design
 
-CrateShuffle holds a third-party OAuth credential granting read access to a
+Playtopia holds a third-party OAuth credential granting read access to a
 user's Discogs account, stores user data in a shared database, renders text
 written by strangers, captures audio from the user's machine, and optionally
 forwards content to an LLM. Each of those is a distinct piece of attack
@@ -31,7 +31,7 @@ This document states what is defended, how, and — just as importantly — what
                     ══════════╪══════════  ← boundary B: signed/keyed egress
                               │
 ┌─ Third party ───────────────────────────────────────────────────────────┐
-│  api.discogs.com     (OAuth 1.0a, HMAC-SHA1)                            │
+│  api.discogs.com     (OAuth 1.0a, HMAC-SHA1; reads + wantlist writes)   │
 │  api.anthropic.com   (optional, API key, server-side only)              │
 │  youtube-nocookie.com (sandboxed iframe, no data flows out)             │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -123,6 +123,7 @@ Server logs record error context only, never tokens.
 | CSRF | Mutating routes are POST/PATCH/PUT/DELETE only, require `SameSite=Lax` cookies to have been sent, check `Origin` against `APP_ORIGIN`, and require a double-submit token compared in constant time. Enforced centrally by `requireUser(request, { mutating: true })` so a route cannot be written without it. Three cases in `test-api.mjs`. |
 | Clickjacking | `frame-ancestors 'none'` + `X-Frame-Options: DENY`. |
 | Skewing another user's recommendations | Seed metadata is client-supplied, but is intersected against the playlist's actual contents read from the database. Seeds for releases not in the playlist are discarded — covered by "seeds for releases outside the playlist are ignored". A user can only influence their own analysis. |
+| **Writing to another user's Discogs account** | `/api/wantlist` is the only route that changes data on a third-party service. The username used to build the upstream URL comes from the session; the request body accepts nothing but a release id, and `.strict()` rejects an attempt to send a `username` field. Four cases in `test-api.mjs`. |
 | **Overwriting a human's tapped BPM** | Not a classic security issue but the same shape of bug: precedence is enforced in the SQL `ON CONFLICT` clause, not in the client. `tap`/`manual` always beat `auto`. Six cases in `test-api.mjs`. |
 | Supply-chain compromise | OAuth 1.0a signing is implemented in-repo (~80 lines) rather than pulled from npm, so no third-party package ever holds the consumer secret. Runtime dependencies total **five**: `next`, `react`, `react-dom`, `zod`, `pg`. The Anthropic call is a plain `fetch`, not an SDK. |
 
@@ -143,7 +144,34 @@ Server logs record error context only, never tokens.
 
 ---
 
-## 5. The LLM boundary
+## 5. Playlist privacy
+
+Playlists are private, and the design makes that structural rather than
+conventional:
+
+1. **No public route exists.** There is no share endpoint, no token-based link,
+   no `/public/*` namespace. `test-api.mjs` probes the three obvious shapes and
+   asserts they 404.
+2. **Every read filters by owner.** `listPlaylists`, `getPlaylist`,
+   `replaceItems`, `renamePlaylist` and `deletePlaylist` all take `userId` as
+   their first argument and put it in the `WHERE` clause. There is no overload
+   that omits it.
+3. **A foreign playlist 404s rather than 403s**, so the response does not
+   confirm the id exists.
+4. **`visibility` is `NOT NULL DEFAULT 'private'`** with a CHECK constraint, and
+   the API schemas reject the field outright — a client cannot set or patch it.
+   Three cases cover this.
+
+The column exists so that a future opt-in share feature has to be written as a
+new repository function that *deliberately* drops the `user_id` predicate. That
+is a change that stands out in review, which is the entire point of putting the
+flag there before the feature.
+
+**Digging leaks nothing between users either.** `/api/dig` takes the seed's
+metadata and the exclusion lists from the caller, and those only shape what that
+caller sees. The `dig_log` table is keyed on `user_id`.
+
+## 6. The LLM boundary
 
 The optional Claude pass is the one place where model output influences what a
 user sees, so it gets its own contract:
@@ -172,7 +200,7 @@ no collection listing.
 
 ---
 
-## 6. Audio capture
+## 7. Audio capture
 
 BPM detection uses `getDisplayMedia({ audio: true })`. Because that is a
 genuinely powerful permission, the constraints are worth stating:
@@ -193,7 +221,7 @@ genuinely powerful permission, the constraints are worth stating:
 
 ---
 
-## 7. HTTP response headers
+## 8. HTTP response headers
 
 Set in `next.config.ts` (static) and `src/proxy.ts` (per-request CSP).
 
@@ -230,7 +258,7 @@ documented fallback for browsers without tab audio capture.
 
 ---
 
-## 8. Verifying the claims
+## 9. Verifying the claims
 
 ```bash
 # 1. Headers and per-request nonce (run twice — the nonce must differ)
@@ -248,7 +276,7 @@ npm run audit:ci && npm ls --prod --depth=0
 # 5. Types, lint, and the test suites
 npm run typecheck && npm run lint
 npm run test:tempo                    # 38 cases, no server needed
-npm run dev & npm run test:api        # 31 cases: auth, CSRF, IDOR, validation
+npm run dev & npm run test:api        # 43 cases: auth, CSRF, IDOR, privacy, validation
 ```
 
 `test-api.mjs` forges its own session cookies using `SESSION_SECRET` — which is
@@ -261,7 +289,7 @@ push, and fails on any of them.
 
 ---
 
-## 9. Residual risks
+## 10. Residual risks
 
 Honest list of what is *not* solved.
 
@@ -283,7 +311,7 @@ Honest list of what is *not* solved.
    list), that was judged acceptable; the Discogs token, which is not
    acceptable to lose, deliberately never goes near the database.
 
-4. **`style-src 'unsafe-inline'`** — see §7.
+4. **`style-src 'unsafe-inline'`** — see §8.
 
 5. **Third-party trust.** Discogs' TLS and their handling of our consumer
    secret are outside our control, as is Anthropic's handling of prompts.
@@ -300,6 +328,6 @@ Honest list of what is *not* solved.
 
 ---
 
-## 10. Reporting
+## 11. Reporting
 
 Open a private security advisory on the repository rather than a public issue.

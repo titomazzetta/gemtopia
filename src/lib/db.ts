@@ -18,7 +18,7 @@ import { env } from "./env";
  */
 
 declare global {
-  var __crateshufflePool: Pool | undefined;
+  var __playtopiaPool: Pool | undefined;
 }
 
 function makePool(): Pool {
@@ -45,16 +45,16 @@ function makePool(): Pool {
 
 function getPool(): Pool {
   if (env.NODE_ENV === "production") {
-    if (!globalThis.__crateshufflePool) {
-      globalThis.__crateshufflePool = makePool();
+    if (!globalThis.__playtopiaPool) {
+      globalThis.__playtopiaPool = makePool();
     }
-    return globalThis.__crateshufflePool;
+    return globalThis.__playtopiaPool;
   }
   // In dev, hot reload would leak a pool per edit without the global.
-  if (!globalThis.__crateshufflePool) {
-    globalThis.__crateshufflePool = makePool();
+  if (!globalThis.__playtopiaPool) {
+    globalThis.__playtopiaPool = makePool();
   }
-  return globalThis.__crateshufflePool;
+  return globalThis.__playtopiaPool;
 }
 
 /** Parameterised query. `text` must never be built by concatenation. */

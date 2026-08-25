@@ -48,13 +48,74 @@ export interface ReleaseSummary {
   coverImage: string;
 }
 
+/** Buy signals. Discogs returns these on the release endpoint for free. */
+export interface MarketInfo {
+  /** Copies listed on the Discogs marketplace right now. */
+  forSale: number;
+  /** Lowest asking price, in the account's currency. */
+  lowestPrice: number | null;
+  /** How many people have it / want it — a rough scarcity read. */
+  have: number | null;
+  want: number | null;
+}
+
 /** A summary plus the data that only the release endpoint can provide. */
 export interface ReleaseDetail extends ReleaseSummary {
   tracks: Track[];
   videos: YouTubeVideo[];
   /** Free-text release notes. Mined for BPM markings. */
   notes: string | null;
+  market: MarketInfo | null;
   /** Server-side epoch ms of when this detail was fetched. */
+  fetchedAt: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Digging                                                             */
+/* ------------------------------------------------------------------ */
+
+/** Which relationship produced a dig result. Drives the UI grouping. */
+export type DigLane =
+  | "same-artist"
+  | "same-label"
+  | "same-style"
+  | "same-era"
+  | "similar-tempo";
+
+export const DIG_LANE_LABELS: Record<DigLane, string> = {
+  "same-artist": "More by this artist",
+  "same-label": "More on this label",
+  "same-style": "Same style",
+  "same-era": "Same era",
+  "similar-tempo": "Mixable tempo",
+};
+
+/** One record surfaced while digging beyond the collection. */
+export interface DigResult {
+  releaseId: number;
+  title: string;
+  artist: string;
+  year: number | null;
+  thumb: string;
+  labels: string[];
+  styles: string[];
+  genres: string[];
+  country: string | null;
+  lane: DigLane;
+  /** Why it surfaced, in words. */
+  reason: string;
+  have: number | null;
+  want: number | null;
+  /** Populated on demand when the user asks to preview it. */
+  market?: MarketInfo | null;
+  discogsUrl: string;
+  marketplaceUrl: string;
+}
+
+export interface DigResponse {
+  seedReleaseId: number;
+  lanes: Array<{ lane: DigLane; label: string; results: DigResult[] }>;
+  /** Release ids in the user's collection / wantlist, echoed for convenience. */
   fetchedAt: number;
 }
 
@@ -109,10 +170,21 @@ export interface PlaylistItemRow {
   position: number;
 }
 
+/**
+ * Playlist visibility.
+ *
+ * 'private' is the only value the application ever writes, and the only value
+ * any read path honours. 'unlisted' exists so that a future share-by-link
+ * feature has to be a deliberate, visible change rather than a default that
+ * quietly leaked. See db/schema.sql.
+ */
+export type PlaylistVisibility = "private" | "unlisted";
+
 export interface Playlist {
   id: string;
   name: string;
   notes: string | null;
+  visibility: PlaylistVisibility;
   createdAt: number;
   updatedAt: number;
   /** Playable keys, in order. Kept for the existing UI code paths. */

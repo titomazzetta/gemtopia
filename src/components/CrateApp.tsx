@@ -29,6 +29,7 @@ import {
   trackMetaApi,
   type InsightsResponse,
 } from "@/client/api";
+import type { FacetKey } from "./Filters";
 import { startSync, type SyncHandle } from "@/client/sync";
 import { buildPlayables, spreadShuffle } from "@/client/playables";
 import { TapTempo } from "@/client/tempo";
@@ -41,11 +42,12 @@ import {
   Filters,
   type FilterState,
 } from "./Filters";
+import { DigDrawer } from "./DigDrawer";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
 import { TrackList } from "./TrackList";
-import { Disc, Refresh, Shuffle } from "./Icons";
+import { Compass, Disc, Refresh, Shuffle } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights";
 
@@ -105,6 +107,15 @@ export function CrateApp({
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [picker, setPicker] = useState<Playable | null>(null);
+
+  /* ---------------- digging ---------------- */
+  const [digTarget, setDigTarget] = useState<Playable | null>(null);
+  /**
+   * Releases previewed from outside the collection. Kept separate from
+   * `details` so they are playable and searchable by key, but never leak into
+   * the crate listing or the facet counts — the crate is what you own.
+   */
+  const [externalDetails, setExternalDetails] = useState<ReleaseDetail[]>([]);
 
   /* ---------------- insights ---------------- */
   const [insights, setInsights] = useState<Record<string, InsightsResponse>>({});
@@ -342,8 +353,8 @@ export function CrateApp({
   }, [trackMeta]);
 
   const allPlayables = useMemo(
-    () => buildPlayables(details, bpmByClip),
-    [details, bpmByClip],
+    () => buildPlayables([...details, ...externalDetails], bpmByClip),
+    [details, externalDetails, bpmByClip],
   );
 
   const byKey = useMemo(() => {
@@ -559,7 +570,7 @@ export function CrateApp({
 
   const exportPlaylists = useCallback(() => {
     const payload = {
-      app: "crateshuffle",
+      app: "playtopia",
       version: 2,
       exportedAt: new Date().toISOString(),
       playlists: playlists.map((p) => ({
@@ -574,7 +585,7 @@ export function CrateApp({
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `crateshuffle-playlists-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = `playtopia-playlists-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   }, [playlists]);
@@ -613,7 +624,7 @@ export function CrateApp({
         say(
           error instanceof ApiError
             ? error.message
-            : "That does not look like a CrateShuffle export.",
+            : "That does not look like a Playtopia export.",
         );
       }
     },
@@ -667,6 +678,60 @@ export function CrateApp({
       }
     },
     [activePlaylist, detailById, sourceIds],
+  );
+
+  /* ================= digging ================= */
+
+  /**
+   * Pivot from a chip in the dig drawer into the main crate filter.
+   * Closes the drawer, because the answer is now the list behind it.
+   */
+  const pivotFilter = useCallback(
+    (facet: FacetKey, value: string) => {
+      setFilters({ ...emptyFilters, [facet]: [value] });
+      setActivePlaylistId(null);
+      setRail("filters");
+      setDigTarget(null);
+      say(`Crate filtered to ${value}`);
+    },
+    [say],
+  );
+
+  /**
+   * Play a release the user does not own. It joins `externalDetails` so it
+   * becomes a real playable with a stable key — which means it can also be
+   * added to a playlist, tapped for BPM, and dug from like anything else.
+   */
+  const previewExternal = useCallback(
+    (release: ReleaseDetail) => {
+      setExternalDetails((previous) =>
+        previous.some((d) => d.id === release.id)
+          ? previous
+          : [...previous, release].slice(-60),
+      );
+
+      const previewables = buildPlayables([release], bpmByClip);
+      if (previewables.length === 0) {
+        say("Discogs has no audio for that release.");
+        return;
+      }
+
+      playFrom(previewables, 0);
+      say(`Previewing ${release.artist} — ${release.title}`);
+    },
+    [bpmByClip, playFrom, say],
+  );
+
+  const applyWantlistChange = useCallback(
+    (releaseId: number, wanted: boolean) => {
+      setSourceIds((previous) => {
+        const wantlist = new Set(previous.wantlist);
+        if (wanted) wantlist.add(releaseId);
+        else wantlist.delete(releaseId);
+        return { ...previous, wantlist };
+      });
+    },
+    [],
   );
 
   /* ================= auth ================= */
@@ -730,6 +795,10 @@ export function CrateApp({
           event.preventDefault();
           handleTap();
           break;
+        case "d":
+          event.preventDefault();
+          setDigTarget((open) => (open ? null : currentRef.current));
+          break;
         case "a":
           event.preventDefault();
           queueForPlaylist(currentRef.current);
@@ -737,7 +806,7 @@ export function CrateApp({
         case "/":
           event.preventDefault();
           setRail("filters");
-          document.getElementById("crate-search")?.focus();
+          document.getElementById("dig-search")?.focus();
           break;
         case "Escape":
           setPicker(null);
@@ -765,7 +834,7 @@ export function CrateApp({
       <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 py-2.5">
         <Disc className="h-5 w-5 shrink-0 text-accent" />
         <span className="hidden text-sm font-semibold tracking-tight text-neutral-100 sm:block">
-          CrateShuffle
+          Playtopia
         </span>
 
         <div className="ml-2 flex rounded-md border border-ink-700 p-0.5">
@@ -795,8 +864,25 @@ export function CrateApp({
 
         <button
           type="button"
+          onClick={() => {
+            if (!current) {
+              say("Play something first, then dig from it.");
+              return;
+            }
+            setDigTarget(current);
+          }}
+          disabled={!current}
+          className="ml-auto flex items-center gap-1.5 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40"
+          title="Dig from what's playing (D)"
+        >
+          <Compass className="h-3.5 w-3.5" />
+          Dig
+        </button>
+
+        <button
+          type="button"
           onClick={shuffleNow}
-          className="ml-auto flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-ink-950 transition-transform hover:scale-105"
+          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-ink-950 transition-transform hover:scale-105"
           title="Shuffle what's on screen (S)"
         >
           <Shuffle className="h-3.5 w-3.5" />
@@ -944,7 +1030,11 @@ export function CrateApp({
         </nav>
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex shrink-0 items-center gap-2 border-b border-ink-800 px-4 py-2">
+          <div
+            className={`flex shrink-0 items-center gap-2 border-b border-ink-800 px-4 py-2 ${
+              digTarget ? "hidden" : ""
+            }`}
+          >
             <h2 className="text-xs font-medium text-neutral-300">
               {activePlaylist ? activePlaylist.name : `Your ${source}`}
             </h2>
@@ -963,7 +1053,23 @@ export function CrateApp({
           </div>
 
           <div className="min-h-0 flex-1">
-            {loading ? (
+            {digTarget ? (
+              <DigDrawer
+                key={digTarget.key}
+                seed={digTarget}
+                seedDetail={detailById.get(digTarget.releaseId) ?? null}
+                pool={pool}
+                collectionIds={sourceIds.collection}
+                wantlistIds={sourceIds.wantlist}
+                onClose={() => setDigTarget(null)}
+                onPlayLocal={playFrom}
+                onAddToPlaylist={queueForPlaylist}
+                onPivot={pivotFilter}
+                onPreviewExternal={previewExternal}
+                onWantlistChange={applyWantlistChange}
+                say={say}
+              />
+            ) : loading ? (
               <div className="flex h-full items-center justify-center text-sm text-neutral-600">
                 Opening your crate…
               </div>
@@ -1019,6 +1125,8 @@ export function CrateApp({
           onPrev={() => (api.currentTime > 4 ? api.seek(0) : advance(-1))}
           onNext={() => advance(1)}
           onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
+          onDig={() => setDigTarget(current)}
+          digging={Boolean(digTarget)}
         />
       </div>
 

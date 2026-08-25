@@ -1,4 +1,4 @@
--- CrateShuffle schema
+-- Playtopia schema
 --
 -- Applied idempotently by `npm run db:migrate` (scripts/migrate.mjs).
 -- Every statement is safe to re-run.
@@ -135,3 +135,52 @@ CREATE TABLE IF NOT EXISTS llm_usage (
 
 CREATE INDEX IF NOT EXISTS llm_usage_user_created_idx
   ON llm_usage (user_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Playlist visibility
+--
+-- Playlists are PRIVATE. There is no route in this application that serves a
+-- playlist to anyone but its owner, and `visibility` exists so that a future
+-- share feature has to be an explicit, deliberate change rather than an
+-- accident: the column defaults to 'private', is NOT NULL, and every read path
+-- in lib/repo.ts filters by user_id regardless of its value.
+--
+-- 'unlisted' is reserved for a future share-by-link feature. Nothing reads it
+-- yet, and adding a public route would mean adding a new function to repo.ts
+-- that deliberately drops the user_id predicate — which is exactly the kind of
+-- change that should stand out in a diff.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE playlists
+  ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlists_visibility_check'
+  ) THEN
+    ALTER TABLE playlists
+      ADD CONSTRAINT playlists_visibility_check
+      CHECK (visibility IN ('private', 'unlisted'));
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- dig_log — what the user has already been shown while digging
+--
+-- Keeps the endless-dig feed from serving the same record every session, and
+-- records what was acted on so scoring can learn which lanes are working.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS dig_log (
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  release_id  BIGINT NOT NULL CHECK (release_id > 0),
+  action      TEXT NOT NULL CHECK (action IN ('seen', 'previewed', 'wanted', 'dismissed')),
+  seed_id     BIGINT CHECK (seed_id IS NULL OR seed_id > 0),
+  lane        TEXT CHECK (lane IS NULL OR length(lane) <= 40),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, release_id, action)
+);
+
+CREATE INDEX IF NOT EXISTS dig_log_user_created_idx
+  ON dig_log (user_id, created_at DESC);

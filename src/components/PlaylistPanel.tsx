@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Playlist } from "@/lib/types";
-import { Play, Plus, Shuffle, Trash } from "./Icons";
+import { Lock, Play, Plus, Shuffle, Trash } from "./Icons";
 
 export function PlaylistPanel({
   playlists,
@@ -108,7 +108,8 @@ export function PlaylistPanel({
                         >
                           {playlist.name}
                         </span>
-                        <span className="text-[10px] text-neutral-600">
+                        <span className="flex items-center gap-1 text-[10px] text-neutral-600">
+                          <Lock className="h-2.5 w-2.5" />
                           {playlist.items.length} clip
                           {playlist.items.length === 1 ? "" : "s"}
                         </span>
@@ -154,6 +155,12 @@ export function PlaylistPanel({
           </ul>
         )}
       </div>
+
+      <p className="flex items-center gap-1.5 border-t border-ink-800 px-3 pt-2 text-[10px] leading-relaxed text-neutral-600">
+        <Lock className="h-3 w-3 shrink-0" />
+        Every playlist is private to your Discogs account. Nothing here is
+        readable by another signed-in user, and there is no public URL.
+      </p>
 
       <div className="flex gap-2 border-t border-ink-800 p-3 text-[11px]">
         <button

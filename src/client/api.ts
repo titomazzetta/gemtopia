@@ -2,8 +2,10 @@
 
 import type {
   AnalysisResult,
+  DigResponse,
   Playlist,
   PlaylistItemRow,
+  ReleaseDetail,
   TrackMeta,
 } from "@/lib/types";
 
@@ -117,6 +119,61 @@ export const trackMetaApi = {
       method: "PUT",
       body: JSON.stringify({ entries }),
     }),
+};
+
+/* ------------------------------------------------------------------ */
+/* Digging                                                             */
+/* ------------------------------------------------------------------ */
+
+export interface DigSeedPayload {
+  releaseId: number;
+  artistIds: number[];
+  artistNames: string[];
+  labelIds: number[];
+  labelNames: string[];
+  styles: string[];
+  genres: string[];
+  year: number | null;
+  country: string | null;
+}
+
+export const digApi = {
+  dig: (payload: {
+    seed: DigSeedPayload;
+    excludeReleaseIds: number[];
+    seenReleaseIds: number[];
+    includeWantlist: boolean;
+    wantlistReleaseIds: number[];
+  }) =>
+    request<DigResponse>("/api/dig", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+};
+
+export const wantlistApi = {
+  add: (releaseId: number) =>
+    request<{ ok: true; releaseId: number; wanted: boolean }>("/api/wantlist", {
+      method: "PUT",
+      body: JSON.stringify({ releaseId }),
+    }),
+
+  remove: (releaseId: number) =>
+    request<{ ok: true; releaseId: number; wanted: boolean }>(
+      `/api/wantlist?releaseId=${releaseId}`,
+      { method: "DELETE" },
+    ),
+};
+
+export const releasesApi = {
+  /** Full detail — tracklist, videos, marketplace signals — for up to 8 ids. */
+  detail: (ids: number[]) =>
+    request<{
+      results: Array<
+        | { id: number; ok: true; release: ReleaseDetail }
+        | { id: number; ok: false; status: number }
+      >;
+    }>(`/api/discogs/releases?ids=${ids.slice(0, 8).join(",")}`),
 };
 
 /* ------------------------------------------------------------------ */

@@ -79,7 +79,7 @@ function actor(username) {
   return {
     username,
     csrf,
-    cookie: `cs_session=${session}; cs_csrf=${csrf}`,
+    cookie: `pt_session=${session}; pt_csrf=${csrf}`,
     async call(path, { method = "GET", body, csrfToken, cookie } = {}) {
       const headers = { accept: "application/json" };
       const jar = cookie === undefined ? this.cookie : cookie;
@@ -130,7 +130,7 @@ await check("anonymous GET /api/playlists is 401", async () => {
 });
 
 await check("a tampered session cookie is rejected", async () => {
-  const tampered = alice.cookie.replace(/cs_session=v1\.[^.]+\./, "cs_session=v1.AAAAAAAAAAAAAAAA.");
+  const tampered = alice.cookie.replace(/pt_session=v1\.[^.]+\./, "pt_session=v1.AAAAAAAAAAAAAAAA.");
   const res = await alice.call("/api/playlists", { cookie: tampered });
   assert.equal(res.status, 401);
 });
@@ -441,6 +441,137 @@ await check("seeds for releases outside the playlist are ignored", async () => {
   // is refused rather than analysed on attacker-chosen metadata.
   assert.equal(res.status, 409);
   assert.equal(res.body?.error?.code, "no_metadata");
+});
+
+
+console.log("\nplaylist privacy");
+
+await check("playlists are created private by default", async () => {
+  const res = await alice.call("/api/playlists", {
+    method: "POST",
+    body: { name: "Privacy check" },
+  });
+  assert.equal(res.status, 201);
+  assert.equal(
+    res.body.playlist.visibility,
+    "private",
+    "a playlist must never default to anything but private",
+  );
+  await alice.call(`/api/playlists/${res.body.playlist.id}`, { method: "DELETE" });
+});
+
+await check("visibility cannot be set from the client", async () => {
+  const res = await alice.call("/api/playlists", {
+    method: "POST",
+    body: { name: "Sneaky", visibility: "public" },
+  });
+  assert.equal(
+    res.status,
+    400,
+    "strict schema must reject an attempt to set visibility",
+  );
+});
+
+await check("visibility cannot be patched from the client", async () => {
+  const res = await alice.call(`/api/playlists/${alicePlaylistId}`, {
+    method: "PATCH",
+    body: { visibility: "unlisted" },
+  });
+  assert.equal(res.status, 400);
+});
+
+await check("there is no public playlist route", async () => {
+  // A share endpoint would be the obvious place for a leak. There isn't one.
+  for (const path of [
+    `/api/playlists/${alicePlaylistId}/public`,
+    `/api/playlists/${alicePlaylistId}/share`,
+    `/api/public/playlists/${alicePlaylistId}`,
+  ]) {
+    const response = await fetch(`${BASE}${path}`);
+    assert.ok(
+      response.status === 404 || response.status === 405,
+      `${path} unexpectedly responded ${response.status}`,
+    );
+  }
+});
+
+console.log("\nwantlist writes");
+
+await check("wantlist add requires authentication", async () => {
+  const res = await alice.call("/api/wantlist", {
+    method: "PUT",
+    body: { releaseId: 12345 },
+    cookie: "",
+  });
+  assert.equal(res.status, 401);
+});
+
+await check("wantlist add requires a CSRF token", async () => {
+  const res = await alice.call("/api/wantlist", {
+    method: "PUT",
+    body: { releaseId: 12345 },
+    csrfToken: null,
+  });
+  assert.equal(res.status, 403);
+});
+
+await check("wantlist rejects a non-numeric release id", async () => {
+  const res = await alice.call("/api/wantlist", {
+    method: "PUT",
+    body: { releaseId: "not-a-number" },
+  });
+  assert.equal(res.status, 400);
+});
+
+await check("wantlist rejects an unknown property", async () => {
+  const res = await alice.call("/api/wantlist", {
+    method: "PUT",
+    body: { releaseId: 123, username: "someone-else" },
+  });
+  assert.equal(
+    res.status,
+    400,
+    "a client must not be able to name the account it writes to",
+  );
+});
+
+console.log("\ndig endpoint");
+
+await check("dig requires authentication", async () => {
+  const res = await alice.call("/api/dig", {
+    method: "POST",
+    body: { seed: { releaseId: 1 } },
+    cookie: "",
+  });
+  assert.equal(res.status, 401);
+});
+
+await check("dig requires a CSRF token", async () => {
+  const res = await alice.call("/api/dig", {
+    method: "POST",
+    body: { seed: { releaseId: 1 } },
+    csrfToken: null,
+  });
+  assert.equal(res.status, 403);
+});
+
+await check("dig rejects an oversized exclude list", async () => {
+  const res = await alice.call("/api/dig", {
+    method: "POST",
+    body: {
+      seed: { releaseId: 1 },
+      excludeReleaseIds: Array.from({ length: 20_001 }, (_, i) => i + 1),
+    },
+  });
+  assert.equal(res.status, 400);
+});
+
+await check("dig rejects an unknown property", async () => {
+  const res = await alice.call("/api/dig", {
+    method: "POST",
+    body: { seed: { releaseId: 1 }, username: "someone-else" },
+  });
+  assert.equal(res.status, 400);
 });
 
 console.log("\ncleanup");

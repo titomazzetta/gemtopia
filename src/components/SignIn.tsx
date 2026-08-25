@@ -14,7 +14,7 @@ export function SignIn({ error }: { error: string | null }) {
         <Disc className="h-8 w-8 text-accent" />
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-neutral-100">
-            CrateShuffle
+            Playtopia
           </h1>
           <p className="text-xs text-neutral-500">
             A Bandcamp-style player for your Discogs crate.
