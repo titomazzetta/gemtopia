@@ -1,7 +1,6 @@
 "use client";
 
 import type {
-  Playlist,
   ReleaseDetail,
   ReleaseSummary,
   Source,
@@ -160,26 +159,51 @@ export async function getDetailIds(): Promise<Set<number>> {
 }
 
 /* ------------------------------------------------------------------ */
-/* Playlists                                                           */
+/* Legacy playlists (pre-server-store)                                 */
+/*                                                                     */
+/* Playlists now live in Postgres so they follow the user between       */
+/* devices. This store is kept only so that anyone who built playlists  */
+/* in v1 gets them lifted into their account once, rather than losing   */
+/* them silently — which is the sort of thing that makes people stop    */
+/* trusting an app.                                                    */
 /* ------------------------------------------------------------------ */
 
-export async function getPlaylists(): Promise<Playlist[]> {
-  const all = await tx<Playlist[]>(STORE_PLAYLIST, "readonly", ([store]) =>
-    store!.getAll(),
+export interface LegacyPlaylist {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  items: string[];
+}
+
+export async function getLegacyPlaylists(): Promise<LegacyPlaylist[]> {
+  const all = await tx<LegacyPlaylist[]>(
+    STORE_PLAYLIST,
+    "readonly",
+    ([store]) => store!.getAll(),
   );
   return all.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
-export async function savePlaylist(playlist: Playlist): Promise<void> {
+export async function clearLegacyPlaylists(): Promise<void> {
   await tx<void>(STORE_PLAYLIST, "readwrite", ([store]) => {
-    store!.put(playlist);
+    store!.clear();
     return Promise.resolve();
   });
 }
 
-export async function deletePlaylist(id: string): Promise<void> {
-  await tx<void>(STORE_PLAYLIST, "readwrite", ([store]) => {
-    store!.delete(id);
+export async function isMigrated(owner: string): Promise<boolean> {
+  const row = await tx<{ key: string; value: boolean } | undefined>(
+    STORE_META,
+    "readonly",
+    ([store]) => store!.get(`migrated:${owner}`),
+  );
+  return row?.value === true;
+}
+
+export async function markMigrated(owner: string): Promise<void> {
+  await tx<void>(STORE_META, "readwrite", ([store]) => {
+    store!.put({ key: `migrated:${owner}`, value: true });
     return Promise.resolve();
   });
 }

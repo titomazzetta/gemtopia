@@ -47,6 +47,38 @@ const schema = z.object({
   /** Contact string embedded in the Discogs User-Agent, per their API rules. */
   DISCOGS_CONTACT: z.string().min(3).default("+https://github.com/"),
 
+  /**
+   * Postgres connection string. On Neon use the **pooled** endpoint (the host
+   * containing `-pooler`) — serverless functions open and drop connections
+   * constantly and would exhaust a direct endpoint.
+   */
+  DATABASE_URL: z
+    .string()
+    .min(1, "DATABASE_URL is missing")
+    .refine((v) => v.startsWith("postgres://") || v.startsWith("postgresql://"), {
+      message: "DATABASE_URL must be a postgres:// connection string",
+    }),
+
+  /**
+   * Optional. When absent, playlist analysis still works — it falls back to
+   * the deterministic Discogs-graph recommender and simply skips the written
+   * summary. Nothing in the app hard-depends on an LLM being available.
+   */
+  ANTHROPIC_API_KEY: z.string().min(10).optional(),
+
+  /** Model used for the ranking pass. Overridable without a code change. */
+  ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-4-5"),
+
+  /**
+   * Per-user ceiling on LLM output tokens per rolling 24h. Stops one user
+   * (or one runaway loop) from spending the deployment's whole budget.
+   */
+  LLM_DAILY_OUTPUT_TOKEN_BUDGET: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(40_000),
+
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
@@ -76,3 +108,6 @@ export const CALLBACK_URL = new URL(
   "/api/auth/callback",
   env.APP_ORIGIN,
 ).toString();
+
+/** Whether the optional Claude ranking layer is available this deployment. */
+export const LLM_ENABLED = Boolean(env.ANTHROPIC_API_KEY);

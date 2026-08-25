@@ -1,0 +1,137 @@
+-- CrateShuffle schema
+--
+-- Applied idempotently by `npm run db:migrate` (scripts/migrate.mjs).
+-- Every statement is safe to re-run.
+--
+-- Design notes:
+--   * Ownership is modelled with a hard FK to `users` and ON DELETE CASCADE,
+--     so "delete my account" is one statement and leaves nothing orphaned.
+--   * Every user-supplied text column carries a CHECK on length, so a client
+--     bug or a hostile request cannot write unbounded data.
+--   * `clip_key` is constrained by regex at the database layer as well as in
+--     Zod. Defence in depth: the DB is the last place a malformed key can be
+--     caught before it is trusted by the recommender.
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ---------------------------------------------------------------------------
+-- users
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS users (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Discogs usernames are case-insensitive in practice; we store the
+  -- lowercased form as the unique key and keep the display form separately.
+  username_key      TEXT NOT NULL UNIQUE
+                      CHECK (username_key = lower(username_key)
+                             AND length(username_key) BETWEEN 1 AND 64),
+  username_display  TEXT NOT NULL CHECK (length(username_display) BETWEEN 1 AND 64),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ---------------------------------------------------------------------------
+-- playlists
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS playlists (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
+  notes       TEXT CHECK (notes IS NULL OR length(notes) <= 2000),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS playlists_user_updated_idx
+  ON playlists (user_id, updated_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- playlist_items
+--
+-- Denormalised on purpose: title/artist/release are copied in so a playlist
+-- renders on a device that has not synced that release yet, and so an export
+-- is meaningful years later even if the Discogs release is edited or deleted.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS playlist_items (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  playlist_id   UUID NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  position      INTEGER NOT NULL CHECK (position >= 0),
+  clip_key      TEXT NOT NULL CHECK (clip_key ~ '^[0-9]+:[A-Za-z0-9_-]{11}$'),
+  release_id    BIGINT NOT NULL CHECK (release_id > 0),
+  video_id      TEXT NOT NULL CHECK (video_id ~ '^[A-Za-z0-9_-]{11}$'),
+  title         TEXT NOT NULL CHECK (length(title) <= 400),
+  artist        TEXT NOT NULL CHECK (length(artist) <= 400),
+  release_title TEXT NOT NULL DEFAULT '' CHECK (length(release_title) <= 400),
+  year          INTEGER CHECK (year IS NULL OR year BETWEEN 1880 AND 2200),
+  added_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS playlist_items_playlist_position_idx
+  ON playlist_items (playlist_id, position);
+
+-- ---------------------------------------------------------------------------
+-- track_meta  — the BPM / key catalogue
+--
+-- Per user, not global: a DJ's tapped tempo is their own truth, and sharing
+-- it across accounts would leak listening behaviour between users.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS track_meta (
+  user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  clip_key       TEXT NOT NULL CHECK (clip_key ~ '^[0-9]+:[A-Za-z0-9_-]{11}$'),
+  bpm            NUMERIC(5,1) CHECK (bpm IS NULL OR bpm BETWEEN 40 AND 260),
+  bpm_source     TEXT CHECK (bpm_source IS NULL OR
+                             bpm_source IN ('tap','auto','discogs','manual')),
+  bpm_confidence REAL CHECK (bpm_confidence IS NULL OR bpm_confidence BETWEEN 0 AND 1),
+  musical_key    TEXT CHECK (musical_key IS NULL OR length(musical_key) <= 8),
+  rating         SMALLINT CHECK (rating IS NULL OR rating BETWEEN 0 AND 5),
+  cue_note       TEXT CHECK (cue_note IS NULL OR length(cue_note) <= 500),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, clip_key)
+);
+
+CREATE INDEX IF NOT EXISTS track_meta_user_bpm_idx
+  ON track_meta (user_id, bpm)
+  WHERE bpm IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- analyses — cached playlist dissections and recommendations
+--
+-- `fingerprint` is a hash of the playlist's clip keys in order. Re-analysing
+-- an unchanged playlist is served from here instead of spending Discogs
+-- requests and LLM tokens again.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS analyses (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  playlist_id     UUID NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  fingerprint     TEXT NOT NULL CHECK (length(fingerprint) = 64),
+  profile         JSONB NOT NULL,
+  recommendations JSONB NOT NULL,
+  used_llm        BOOLEAN NOT NULL DEFAULT false,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS analyses_playlist_fingerprint_idx
+  ON analyses (playlist_id, fingerprint);
+
+CREATE INDEX IF NOT EXISTS analyses_user_created_idx
+  ON analyses (user_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- llm_usage — cost ceiling accounting for the optional Claude layer
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS llm_usage (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  input_tokens  INTEGER NOT NULL DEFAULT 0 CHECK (input_tokens >= 0),
+  output_tokens INTEGER NOT NULL DEFAULT 0 CHECK (output_tokens >= 0),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS llm_usage_user_created_idx
+  ON llm_usage (user_id, created_at DESC);

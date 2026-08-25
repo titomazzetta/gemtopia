@@ -13,10 +13,15 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "keygen": "node -e \"console.log('SESSION_SECRET=' + require('crypto').randomBytes(32).toString('base64url'))\"",
-    "audit:ci": "npm audit --audit-level=high"
+    "audit:ci": "npm audit --audit-level=high",
+    "db:migrate": "node scripts/migrate.mjs",
+    "test:tempo": "node --experimental-strip-types scripts/test-tempo.mjs",
+    "test:api": "node scripts/test-api.mjs",
+    "test": "npm run test:tempo && npm run test:api"
   },
   "dependencies": {
     "next": "16.3.2",
+    "pg": "8.16.3",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "server-only": "0.0.1",
@@ -24,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "22.15.3",
+    "@types/pg": "8.15.5",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.4",
     "autoprefixer": "10.4.21",

@@ -1,9 +1,23 @@
 "use client";
 
 import { useCallback, type RefObject } from "react";
-import type { Playable } from "@/lib/types";
+import type { BpmSource, Playable } from "@/lib/types";
 import type { PlayerApi } from "@/client/useYouTubePlayer";
-import { Disc, Next, Pause, Play, Plus, Prev, Repeat, Shuffle, Volume } from "./Icons";
+import type { DetectorStatus } from "@/client/useTempoDetector";
+import {
+  Disc,
+  Metronome,
+  Mic,
+  Next,
+  Pause,
+  Play,
+  Plus,
+  Prev,
+  Repeat,
+  Shuffle,
+  Volume,
+  Waveform,
+} from "./Icons";
 
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -16,6 +30,173 @@ export function formatTime(seconds: number): string {
     : `${m}:${String(s).padStart(2, "0")}`;
 }
 
+export interface TempoPanelProps {
+  /** Stored BPM for the current clip, if any. */
+  bpm: number | null;
+  bpmSource: BpmSource | null;
+  /** Rolling live estimate from the audio detector. */
+  liveBpm: number | null;
+  liveConfidence: number;
+  detectorStatus: DetectorStatus;
+  detectorError: string | null;
+  tapCount: number;
+  onTap: () => void;
+  onStartDetector: (source: "tab" | "mic") => void;
+  onStopDetector: () => void;
+  /** Halve or double the stored reading — the DnB octave escape hatch. */
+  onScaleBpm: (factor: 0.5 | 2) => void;
+  onClearBpm: () => void;
+}
+
+function TempoPanel({
+  bpm,
+  bpmSource,
+  liveBpm,
+  liveConfidence,
+  detectorStatus,
+  detectorError,
+  tapCount,
+  onTap,
+  onStartDetector,
+  onStopDetector,
+  onScaleBpm,
+  onClearBpm,
+  disabled,
+}: TempoPanelProps & { disabled: boolean }) {
+  const listening = detectorStatus === "listening";
+
+  const sourceLabel: Record<BpmSource, string> = {
+    tap: "tapped",
+    auto: "detected",
+    discogs: "from Discogs",
+    manual: "manual",
+  };
+
+  return (
+    <div className="rounded-md border border-ink-800 bg-ink-850/60 p-2">
+      <div className="flex items-center gap-2">
+        <Metronome className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
+
+        <div className="min-w-0 flex-1">
+          {bpm !== null ? (
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-mono text-sm font-semibold tabular-nums text-neutral-100">
+                {bpm}
+              </span>
+              <span className="text-[10px] text-neutral-600">
+                BPM {bpmSource ? `· ${sourceLabel[bpmSource]}` : ""}
+              </span>
+            </div>
+          ) : (
+            <span className="text-[11px] text-neutral-600">
+              {listening && liveBpm !== null
+                ? `listening… ~${liveBpm}`
+                : "no BPM yet"}
+            </span>
+          )}
+        </div>
+
+        {bpm !== null && (
+          <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              onClick={() => onScaleBpm(0.5)}
+              title="Halve — for when a 174 track reads as 87"
+              className="rounded px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 hover:bg-ink-800 hover:text-neutral-200"
+            >
+              ÷2
+            </button>
+            <button
+              type="button"
+              onClick={() => onScaleBpm(2)}
+              title="Double"
+              className="rounded px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 hover:bg-ink-800 hover:text-neutral-200"
+            >
+              ×2
+            </button>
+            <button
+              type="button"
+              onClick={onClearBpm}
+              title="Clear this reading"
+              className="rounded px-1.5 py-0.5 text-[10px] text-neutral-600 hover:bg-ink-800 hover:text-red-400"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Live confidence meter while the detector runs. */}
+      {listening && liveBpm !== null && (
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-ink-700">
+            <div
+              className="h-full rounded-full bg-accent transition-[width]"
+              style={{ width: `${Math.round(liveConfidence * 100)}%` }}
+            />
+          </div>
+          <span className="font-mono text-[9px] text-neutral-600">
+            {Math.round(liveConfidence * 100)}%
+          </span>
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onTap}
+          disabled={disabled}
+          title="Tap in time with the beat (T)"
+          className="flex flex-1 items-center justify-center gap-1 rounded border border-ink-700 py-1 text-[10px] font-medium text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40"
+        >
+          TAP
+          {tapCount > 0 && (
+            <span className="font-mono text-neutral-600">{tapCount}</span>
+          )}
+        </button>
+
+        {listening ? (
+          <button
+            type="button"
+            onClick={onStopDetector}
+            title="Stop listening"
+            className="flex items-center gap-1 rounded border border-accent/50 bg-accent/10 px-2 py-1 text-[10px] text-accent"
+          >
+            <Waveform className="h-3 w-3" />
+            live
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => onStartDetector("tab")}
+              title="Detect BPM from this tab's audio (Chrome / Edge)"
+              className="flex items-center gap-1 rounded border border-ink-700 px-2 py-1 text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+            >
+              <Waveform className="h-3 w-3" />
+              auto
+            </button>
+            <button
+              type="button"
+              onClick={() => onStartDetector("mic")}
+              title="Detect BPM from the microphone (any browser)"
+              className="rounded border border-ink-700 px-1.5 py-1 text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+            >
+              <Mic className="h-3 w-3" />
+            </button>
+          </>
+        )}
+      </div>
+
+      {detectorError && (
+        <p className="mt-1.5 text-[10px] leading-snug text-amber-300/80">
+          {detectorError}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function NowPlaying({
   containerRef,
   api,
@@ -24,6 +205,7 @@ export function NowPlaying({
   queueLength,
   shuffleOn,
   repeatOn,
+  tempo,
   onToggleShuffle,
   onToggleRepeat,
   onPrev,
@@ -37,6 +219,7 @@ export function NowPlaying({
   queueLength: number;
   shuffleOn: boolean;
   repeatOn: boolean;
+  tempo: TempoPanelProps;
   onToggleShuffle: () => void;
   onToggleRepeat: () => void;
   onPrev: () => void;
@@ -191,6 +374,8 @@ export function NowPlaying({
             <Repeat />
           </button>
         </div>
+
+        <TempoPanel {...tempo} disabled={!current} />
 
         {/* Volume + queue position */}
         <div className="flex items-center gap-2">

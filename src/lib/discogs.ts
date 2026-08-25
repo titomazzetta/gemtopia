@@ -174,10 +174,19 @@ const basicInfoSchema = z.object({
   year: z.number().nullish(),
   thumb: z.string().nullish(),
   cover_image: z.string().nullish(),
+  country: z.string().nullish(),
   artists: z
-    .array(z.object({ name: z.string(), join: z.string().nullish() }))
+    .array(
+      z.object({
+        id: z.number().nullish(),
+        name: z.string(),
+        join: z.string().nullish(),
+      }),
+    )
     .nullish(),
-  labels: z.array(z.object({ name: z.string() })).nullish(),
+  labels: z
+    .array(z.object({ id: z.number().nullish(), name: z.string() }))
+    .nullish(),
   formats: z
     .array(
       z.object({
@@ -222,12 +231,22 @@ const releaseSchema = z.object({
   title: z.string(),
   year: z.number().nullish(),
   thumb: z.string().nullish(),
+  country: z.string().nullish(),
+  notes: z.string().nullish(),
   genres: z.array(z.string()).nullish(),
   styles: z.array(z.string()).nullish(),
   artists: z
-    .array(z.object({ name: z.string(), join: z.string().nullish() }))
+    .array(
+      z.object({
+        id: z.number().nullish(),
+        name: z.string(),
+        join: z.string().nullish(),
+      }),
+    )
     .nullish(),
-  labels: z.array(z.object({ name: z.string() })).nullish(),
+  labels: z
+    .array(z.object({ id: z.number().nullish(), name: z.string() }))
+    .nullish(),
   formats: z
     .array(
       z.object({
@@ -336,6 +355,17 @@ export function youtubeId(uri: string | null | undefined): string | null {
   return null;
 }
 
+function ids(
+  entries: Array<{ id?: number | null }> | null | undefined,
+): number[] {
+  if (!entries) return [];
+  const out: number[] = [];
+  for (const entry of entries) {
+    if (typeof entry.id === "number" && entry.id > 0) out.push(entry.id);
+  }
+  return [...new Set(out)];
+}
+
 function toSummary(
   info: z.infer<typeof basicInfoSchema>,
   addedAt: string | null,
@@ -349,6 +379,9 @@ function toSummary(
     styles: info.styles ?? [],
     labels: (info.labels ?? []).map((l) => cleanArtistName(l.name)),
     formats: flattenFormats(info.formats),
+    country: info.country?.trim() || null,
+    artistIds: ids(info.artists),
+    labelIds: ids(info.labels),
     thumb: info.thumb ?? "",
     coverImage: info.cover_image ?? info.thumb ?? "",
     addedAt,
@@ -446,11 +479,118 @@ export async function getRelease(
     styles: data.styles ?? [],
     labels: (data.labels ?? []).map((l) => cleanArtistName(l.name)),
     formats: flattenFormats(data.formats),
+    country: data.country?.trim() || null,
+    artistIds: ids(data.artists),
+    labelIds: ids(data.labels),
     thumb: data.thumb ?? "",
     coverImage: data.images?.[0]?.uri ?? data.thumb ?? "",
     addedAt: null,
+    notes: data.notes?.slice(0, 4000) ?? null,
     tracks,
     videos,
     fetchedAt: Date.now(),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Graph traversal — used by the recommender                           */
+/* ------------------------------------------------------------------ */
+
+const relatedReleaseSchema = z.object({
+  pagination: paginationSchema,
+  releases: z.array(
+    z.object({
+      // Artist discographies return both `release` and `master` rows; the
+      // master rows point at a group, not a pressing.
+      id: z.number(),
+      type: z.string().nullish(),
+      main_release: z.number().nullish(),
+      title: z.string(),
+      year: z.number().nullish(),
+      thumb: z.string().nullish(),
+      artist: z.string().nullish(),
+      label: z.string().nullish(),
+      role: z.string().nullish(),
+      format: z.string().nullish(),
+    }),
+  ),
+});
+
+export interface RelatedRelease {
+  id: number;
+  title: string;
+  artist: string;
+  year: number | null;
+  thumb: string;
+  label: string | null;
+}
+
+function toRelated(
+  row: z.infer<typeof relatedReleaseSchema>["releases"][number],
+): RelatedRelease | null {
+  // "Main" is the canonical pressing of a master; prefer it when present.
+  const id = row.type === "master" && row.main_release ? row.main_release : row.id;
+  if (!id || id <= 0) return null;
+
+  return {
+    id,
+    title: row.title,
+    artist: row.artist ? cleanArtistName(row.artist) : "Unknown Artist",
+    year: row.year && row.year > 0 ? row.year : null,
+    thumb: row.thumb ?? "",
+    label: row.label ? cleanArtistName(row.label) : null,
+  };
+}
+
+export async function getArtistReleases(
+  user: UserToken,
+  artistId: number,
+  perPage = 100,
+): Promise<RelatedRelease[]> {
+  const data = await getJson(
+    `/artists/${artistId}/releases?per_page=${perPage}&page=1&sort=year&sort_order=desc`,
+    user,
+    relatedReleaseSchema,
+  );
+
+  return data.releases
+    // Skip credits (remixer, producer) — we want records they released.
+    .filter((r) => !r.role || r.role === "Main" || r.role === "TrackAppearance")
+    .map(toRelated)
+    .filter((r): r is RelatedRelease => r !== null);
+}
+
+const labelReleaseSchema = z.object({
+  pagination: paginationSchema,
+  releases: z.array(
+    z.object({
+      id: z.number(),
+      title: z.string(),
+      year: z.number().nullish(),
+      thumb: z.string().nullish(),
+      artist: z.string().nullish(),
+      catno: z.string().nullish(),
+    }),
+  ),
+});
+
+export async function getLabelReleases(
+  user: UserToken,
+  labelId: number,
+  perPage = 100,
+): Promise<RelatedRelease[]> {
+  const data = await getJson(
+    `/labels/${labelId}/releases?per_page=${perPage}&page=1`,
+    user,
+    labelReleaseSchema,
+  );
+
+  return data.releases.map((r) => ({
+    id: r.id,
+    title: r.title,
+    artist: r.artist ? cleanArtistName(r.artist) : "Unknown Artist",
+    year: r.year && r.year > 0 ? r.year : null,
+    thumb: r.thumb ?? "",
+    label: null,
+  }));
 }

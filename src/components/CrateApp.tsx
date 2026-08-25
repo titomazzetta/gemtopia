@@ -1,26 +1,81 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Playable, Playlist, ReleaseDetail, Source, SyncState } from "@/lib/types";
+import type {
+  BpmSource,
+  Playable,
+  Playlist,
+  PlaylistItemRow,
+  ReleaseDetail,
+  Source,
+  SyncState,
+  TrackMeta,
+} from "@/lib/types";
 import {
-  deletePlaylist as dbDeletePlaylist,
+  clearLegacyPlaylists,
   getAllDetails,
-  getPlaylists,
+  getLegacyPlaylists,
   getSummaries,
   getSyncState,
+  isMigrated,
+  markMigrated,
   nuke,
-  savePlaylist,
 } from "@/client/db";
+import {
+  ApiError,
+  insightsApi,
+  playlistsApi,
+  setCsrfToken,
+  trackMetaApi,
+  type InsightsResponse,
+} from "@/client/api";
 import { startSync, type SyncHandle } from "@/client/sync";
 import { buildPlayables, spreadShuffle } from "@/client/playables";
+import { TapTempo } from "@/client/tempo";
+import { useTempoDetector } from "@/client/useTempoDetector";
 import { useYouTubePlayer } from "@/client/useYouTubePlayer";
-import { applyFilters, computeFacets, emptyFilters, Filters, type FilterState } from "./Filters";
+import {
+  applyFilters,
+  computeFacets,
+  emptyFilters,
+  Filters,
+  type FilterState,
+} from "./Filters";
+import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
 import { TrackList } from "./TrackList";
 import { Disc, Refresh, Shuffle } from "./Icons";
 
-type Rail = "filters" | "playlists";
+type Rail = "filters" | "playlists" | "insights";
+
+type NewEntry = Omit<PlaylistItemRow, "position">;
+
+/** A playable becomes a stored entry. Position comes from array order. */
+function toEntry(item: Playable): NewEntry {
+  return {
+    clipKey: item.key,
+    releaseId: item.releaseId,
+    videoId: item.videoId,
+    title: item.title.slice(0, 400),
+    artist: item.artist.slice(0, 400),
+    releaseTitle: item.releaseTitle.slice(0, 400),
+    year: item.year,
+  };
+}
+
+/** An already-stored row, ready to send back. */
+function reEntry(row: PlaylistItemRow): NewEntry {
+  return {
+    clipKey: row.clipKey,
+    releaseId: row.releaseId,
+    videoId: row.videoId,
+    title: row.title,
+    artist: row.artist,
+    releaseTitle: row.releaseTitle,
+    year: row.year,
+  };
+}
 
 export function CrateApp({
   username,
@@ -29,6 +84,8 @@ export function CrateApp({
   username: string;
   csrfToken: string;
 }) {
+  setCsrfToken(csrfToken);
+
   /* ---------------- data ---------------- */
   const [details, setDetails] = useState<ReleaseDetail[]>([]);
   const [sourceIds, setSourceIds] = useState<Record<Source, Set<number>>>({
@@ -36,6 +93,7 @@ export function CrateApp({
     wantlist: new Set(),
   });
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [trackMeta, setTrackMeta] = useState<Map<string, TrackMeta>>(new Map());
   const [source, setSource] = useState<Source>("collection");
   const [sync, setSync] = useState<SyncState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,6 +106,11 @@ export function CrateApp({
   const [toast, setToast] = useState<string | null>(null);
   const [picker, setPicker] = useState<Playable | null>(null);
 
+  /* ---------------- insights ---------------- */
+  const [insights, setInsights] = useState<Record<string, InsightsResponse>>({});
+  const [insightsLoading, setInsightsLoading] = useState(false);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
+
   /* ---------------- playback ---------------- */
   const [queue, setQueue] = useState<Playable[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
@@ -56,26 +119,134 @@ export function CrateApp({
 
   const current = queue[queueIndex] ?? null;
 
+  // Mirrored into a ref so keyboard handlers and the tempo detector's commit
+  // callback can read the current track without being re-created on every
+  // track change. Written in an effect, never during render.
+  const currentRef = useRef<Playable | null>(null);
+  useEffect(() => {
+    currentRef.current = current;
+  }, [current]);
+
   const say = useCallback((message: string) => {
     setToast(message);
-    window.setTimeout(() => setToast((t) => (t === message ? null : t)), 2600);
+    window.setTimeout(() => setToast((t) => (t === message ? null : t)), 2800);
   }, []);
 
-  /* ---------------- boot ---------------- */
+  /* ================= BPM catalogue ================= */
 
-  const reloadFromCache = useCallback(async () => {
-    const [cachedDetails, collection, wantlist, savedPlaylists] = await Promise.all([
+  const saveMeta = useCallback(
+    async (entry: TrackMeta) => {
+      // Optimistic: the DB has precedence rules that may reject the write
+      // (a tap always beats an auto reading), so we reconcile on next load.
+      setTrackMeta((previous) => {
+        const next = new Map(previous);
+        next.set(entry.clipKey, { ...previous.get(entry.clipKey), ...entry });
+        return next;
+      });
+      try {
+        await trackMetaApi.save([entry]);
+      } catch (error) {
+        console.warn("[bpm] save failed", error);
+        if (error instanceof ApiError && error.status !== 429) {
+          say("Could not save that BPM.");
+        }
+      }
+    },
+    [say],
+  );
+
+  const tapper = useRef(new TapTempo());
+  const [tapCount, setTapCount] = useState(0);
+
+  const handleTap = useCallback(() => {
+    const item = currentRef.current;
+    if (!item) return;
+
+    const estimate = tapper.current.tap();
+    setTapCount(tapper.current.count);
+    if (!estimate) return;
+
+    void saveMeta({
+      clipKey: item.key,
+      bpm: estimate.bpm,
+      bpmSource: "tap",
+      bpmConfidence: estimate.confidence,
+      musicalKey: null,
+      rating: null,
+      cueNote: null,
+    });
+  }, [saveMeta]);
+
+  const onDetectorCommit = useCallback(
+    (estimate: { bpm: number; confidence: number }) => {
+      const item = currentRef.current;
+      if (!item) return;
+      void saveMeta({
+        clipKey: item.key,
+        bpm: estimate.bpm,
+        bpmSource: "auto",
+        bpmConfidence: estimate.confidence,
+        musicalKey: null,
+        rating: null,
+        cueNote: null,
+      });
+    },
+    [saveMeta],
+  );
+
+  const detector = useTempoDetector({ onCommit: onDetectorCommit });
+
+  const scaleBpm = useCallback(
+    (factor: 0.5 | 2) => {
+      const item = currentRef.current;
+      if (!item) return;
+      const existing = trackMeta.get(item.key)?.bpm ?? item.bpm;
+      if (existing === null || existing === undefined) return;
+
+      const scaled = Math.round(existing * factor * 10) / 10;
+      if (scaled < 40 || scaled > 260) {
+        say("That would land outside a sensible tempo range.");
+        return;
+      }
+      void saveMeta({
+        clipKey: item.key,
+        bpm: scaled,
+        // A deliberate correction is a manual reading — it must outrank
+        // whatever the detector decides next time it hears this track.
+        bpmSource: "manual",
+        bpmConfidence: 1,
+        musicalKey: null,
+        rating: null,
+        cueNote: null,
+      });
+    },
+    [trackMeta, saveMeta, say],
+  );
+
+  const clearBpm = useCallback(() => {
+    const item = currentRef.current;
+    if (!item) return;
+    setTrackMeta((previous) => {
+      const next = new Map(previous);
+      next.delete(item.key);
+      return next;
+    });
+    say("BPM cleared locally — re-tap to store a new one.");
+  }, [say]);
+
+  /* ================= boot ================= */
+
+  const reloadCache = useCallback(async () => {
+    const [cachedDetails, collection, wantlist] = await Promise.all([
       getAllDetails(),
       getSummaries(username, "collection"),
       getSummaries(username, "wantlist"),
-      getPlaylists(),
     ]);
     setDetails(cachedDetails);
     setSourceIds({
       collection: new Set(collection.map((s) => s.id)),
       wantlist: new Set(wantlist.map((s) => s.id)),
     });
-    setPlaylists(savedPlaylists);
   }, [username]);
 
   const runSync = useCallback(
@@ -88,12 +259,12 @@ export function CrateApp({
         onProgress: (state) => {
           setSync(state);
           if (state.status === "done" || state.status === "detailing") {
-            void reloadFromCache();
+            void reloadCache();
           }
         },
       });
     },
-    [username, reloadFromCache],
+    [username, reloadCache],
   );
 
   useEffect(() => {
@@ -101,15 +272,53 @@ export function CrateApp({
 
     (async () => {
       try {
-        await reloadFromCache();
-        const state = await getSyncState(username, "collection");
+        await reloadCache();
+
+        const [serverPlaylists, meta, state] = await Promise.all([
+          playlistsApi.list().catch(() => [] as Playlist[]),
+          trackMetaApi.list().catch(() => [] as TrackMeta[]),
+          getSyncState(username, "collection"),
+        ]);
         if (cancelled) return;
+
+        setPlaylists(serverPlaylists);
+        setTrackMeta(new Map(meta.map((m) => [m.clipKey, m])));
         setSync(state);
-        // Never synced, or interrupted last time: pick up where we left off.
+
+        // Lift v1's browser-local playlists into the account, once.
+        if (!(await isMigrated(username))) {
+          const legacy = await getLegacyPlaylists();
+          if (legacy.length > 0) {
+            const cached = await getAllDetails();
+            const byKey = new Map(
+              buildPlayables(cached).map((p) => [p.key, p] as const),
+            );
+            const payload = legacy
+              .map((list) => ({
+                name: list.name,
+                entries: list.items
+                  .map((key) => byKey.get(key))
+                  .filter((p): p is Playable => Boolean(p))
+                  .map(toEntry),
+              }))
+              .filter((list) => list.entries.length > 0);
+
+            if (payload.length > 0) {
+              const result = await playlistsApi.importAll(payload);
+              if (!cancelled) {
+                setPlaylists(result.playlists);
+                say(`Moved ${result.imported} playlist(s) into your account.`);
+              }
+            }
+            await clearLegacyPlaylists();
+          }
+          await markMigrated(username);
+        }
+
         if (!state || state.status !== "done") runSync("collection");
       } catch (error) {
         console.error("[boot]", error);
-        say("Could not open the local cache. Try a normal (non-private) window.");
+        if (!cancelled) say("Could not open your crate. Try reloading.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -122,15 +331,32 @@ export function CrateApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ---------------- derived ---------------- */
+  /* ================= derived ================= */
 
-  const allPlayables = useMemo(() => buildPlayables(details), [details]);
+  const bpmByClip = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const [key, meta] of trackMeta) {
+      if (meta.bpm !== null) map.set(key, meta.bpm);
+    }
+    return map;
+  }, [trackMeta]);
+
+  const allPlayables = useMemo(
+    () => buildPlayables(details, bpmByClip),
+    [details, bpmByClip],
+  );
 
   const byKey = useMemo(() => {
     const map = new Map<string, Playable>();
     for (const item of allPlayables) map.set(item.key, item);
     return map;
   }, [allPlayables]);
+
+  const detailById = useMemo(() => {
+    const map = new Map<number, ReleaseDetail>();
+    for (const detail of details) map.set(detail.id, detail);
+    return map;
+  }, [details]);
 
   const pool = useMemo(
     () => allPlayables.filter((p) => sourceIds[source].has(p.releaseId)),
@@ -145,16 +371,44 @@ export function CrateApp({
     [playlists, activePlaylistId],
   );
 
+  /**
+   * Playlist rows resolve through the local cache when possible (so they carry
+   * artwork, styles and BPM), and fall back to the denormalised row stored on
+   * the server when a release has not been synced on this device yet.
+   */
   const playlistItems = useMemo(() => {
     if (!activePlaylist) return [];
-    return activePlaylist.items
-      .map((key) => byKey.get(key))
-      .filter((p): p is Playable => Boolean(p));
-  }, [activePlaylist, byKey]);
+    return activePlaylist.entries.map((entry): Playable => {
+      const cached = byKey.get(entry.clipKey);
+      if (cached) return cached;
+      return {
+        key: entry.clipKey,
+        releaseId: entry.releaseId,
+        videoId: entry.videoId,
+        title: entry.title,
+        artist: entry.artist,
+        releaseTitle: entry.releaseTitle,
+        year: entry.year,
+        genres: [],
+        styles: [],
+        labels: [],
+        thumb: "",
+        country: null,
+        formats: [],
+        duration: null,
+        position: null,
+        bpm: bpmByClip.get(entry.clipKey) ?? null,
+        matchKind: "release",
+      };
+    });
+  }, [activePlaylist, byKey, bpmByClip]);
 
   const visible = activePlaylist ? playlistItems : filtered;
 
-  /* ---------------- player ---------------- */
+  const currentMeta = current ? trackMeta.get(current.key) ?? null : null;
+  const currentBpm = currentMeta?.bpm ?? current?.bpm ?? null;
+
+  /* ================= player ================= */
 
   const advance = useCallback(
     (delta: number) => {
@@ -173,57 +427,57 @@ export function CrateApp({
     onUnplayable: () => window.setTimeout(() => advance(1), 900),
   });
 
-  // Whenever the queue cursor moves, load that clip.
   const lastLoaded = useRef<string | null>(null);
   useEffect(() => {
     if (!api.ready || !current) return;
     if (lastLoaded.current === current.key) return;
     lastLoaded.current = current.key;
     api.load(current.videoId, true);
-  }, [api, current]);
 
-  const playFrom = useCallback(
-    (items: Playable[], index: number) => {
-      if (items.length === 0) return;
-      setQueue(items);
-      setQueueIndex(index);
-      lastLoaded.current = null;
-    },
-    [],
-  );
+    // New track: throw away the tempo evidence gathered for the previous one.
+    detector.reset();
+    tapper.current.reset();
+    setTapCount(0);
+  }, [api, current, detector]);
+
+  const playFrom = useCallback((items: Playable[], index: number) => {
+    if (items.length === 0) return;
+    setQueue(items);
+    setQueueIndex(index);
+    lastLoaded.current = null;
+  }, []);
 
   const shuffleNow = useCallback(() => {
-    const source_ = activePlaylist ? playlistItems : filtered;
-    if (source_.length === 0) {
+    const scope = activePlaylist ? playlistItems : filtered;
+    if (scope.length === 0) {
       say("Nothing to shuffle — loosen the filters.");
       return;
     }
     setShuffleOn(true);
-    playFrom(spreadShuffle(source_), 0);
-    say(`Shuffling ${source_.length.toLocaleString()} clips`);
+    playFrom(spreadShuffle(scope), 0);
+    say(`Shuffling ${scope.length.toLocaleString()} clips`);
   }, [activePlaylist, playlistItems, filtered, playFrom, say]);
 
-  /* ---------------- playlists ---------------- */
+  /* ================= playlists ================= */
 
-  const persist = useCallback(async (playlist: Playlist) => {
-    await savePlaylist(playlist);
-    setPlaylists(await getPlaylists());
+  const refreshPlaylists = useCallback(async () => {
+    setPlaylists(await playlistsApi.list());
   }, []);
 
   const createPlaylist = useCallback(
     async (name: string, seed?: Playable) => {
-      const playlist: Playlist = {
-        id: crypto.randomUUID(),
-        name,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        items: seed ? [seed.key] : [],
-      };
-      await persist(playlist);
-      say(seed ? `Started "${name}" with ${seed.title}` : `Created "${name}"`);
-      return playlist;
+      try {
+        const playlist = await playlistsApi.create(
+          name,
+          seed ? [toEntry(seed)] : [],
+        );
+        setPlaylists((previous) => [playlist, ...previous]);
+        say(seed ? `Started "${name}" with ${seed.title}` : `Created "${name}"`);
+      } catch (error) {
+        say(error instanceof ApiError ? error.message : "Could not create that.");
+      }
     },
-    [persist, say],
+    [say],
   );
 
   const addToPlaylist = useCallback(
@@ -234,17 +488,21 @@ export function CrateApp({
         say(`Already in "${playlist.name}"`);
         return;
       }
-      await persist({
-        ...playlist,
-        items: [...playlist.items, item.key],
-        updatedAt: Date.now(),
-      });
-      say(`Added to "${playlist.name}"`);
+      try {
+        const updated = await playlistsApi.update(playlistId, {
+          entries: [...playlist.entries.map(reEntry), toEntry(item)],
+        });
+        setPlaylists((previous) =>
+          previous.map((p) => (p.id === updated.id ? updated : p)),
+        );
+        say(`Added to "${playlist.name}"`);
+      } catch (error) {
+        say(error instanceof ApiError ? error.message : "Could not add that.");
+      }
     },
-    [playlists, persist, say],
+    [playlists, say],
   );
 
-  /** A on the keyboard, or the + on a row. */
   const queueForPlaylist = useCallback(
     (item: Playable | null) => {
       if (!item) return;
@@ -261,40 +519,53 @@ export function CrateApp({
     [activePlaylist, playlists, addToPlaylist],
   );
 
-  const reorderPlaylist = useCallback(
-    async (from: number, to: number) => {
-      if (!activePlaylist || from === to) return;
-      const items = [...activePlaylist.items];
-      const [moved] = items.splice(from, 1);
-      if (!moved) return;
-      items.splice(to, 0, moved);
-      await persist({ ...activePlaylist, items, updatedAt: Date.now() });
+  const mutateEntries = useCallback(
+    async (playlist: Playlist, entries: NewEntry[]) => {
+      try {
+        const updated = await playlistsApi.update(playlist.id, { entries });
+        setPlaylists((previous) =>
+          previous.map((p) => (p.id === updated.id ? updated : p)),
+        );
+      } catch (error) {
+        say(error instanceof ApiError ? error.message : "Could not save that.");
+        void refreshPlaylists();
+      }
     },
-    [activePlaylist, persist],
+    [say, refreshPlaylists],
+  );
+
+  const reorderPlaylist = useCallback(
+    (from: number, to: number) => {
+      if (!activePlaylist || from === to) return;
+      const entries = activePlaylist.entries.map(reEntry);
+      const [moved] = entries.splice(from, 1);
+      if (!moved) return;
+      entries.splice(to, 0, moved);
+      void mutateEntries(activePlaylist, entries);
+    },
+    [activePlaylist, mutateEntries],
   );
 
   const removeFromPlaylist = useCallback(
-    async (index: number) => {
+    (index: number) => {
       if (!activePlaylist) return;
-      const items = activePlaylist.items.filter((_, i) => i !== index);
-      await persist({ ...activePlaylist, items, updatedAt: Date.now() });
+      void mutateEntries(
+        activePlaylist,
+        activePlaylist.entries.filter((_, i) => i !== index).map(reEntry),
+      );
     },
-    [activePlaylist, persist],
+    [activePlaylist, mutateEntries],
   );
 
   const exportPlaylists = useCallback(() => {
     const payload = {
       app: "crateshuffle",
-      version: 1,
+      version: 2,
       exportedAt: new Date().toISOString(),
-      playlists,
-      // Denormalise so an import on another machine can show titles even
-      // before that machine has synced the same releases.
-      tracks: playlists
-        .flatMap((p) => p.items)
-        .filter((key, i, all) => all.indexOf(key) === i)
-        .map((key) => byKey.get(key))
-        .filter(Boolean),
+      playlists: playlists.map((p) => ({
+        name: p.name,
+        entries: p.entries.map(reEntry),
+      })),
     };
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], {
@@ -306,60 +577,99 @@ export function CrateApp({
     anchor.download = `crateshuffle-playlists-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
-  }, [playlists, byKey]);
+  }, [playlists]);
 
   const importPlaylists = useCallback(
     async (file: File) => {
-      // Treat the file as hostile: cap the size, parse defensively, and accept
-      // only the fields we understand rather than spreading unknown objects
-      // into stored state.
+      // Treat the file as hostile: cap the size, and let the server's Zod
+      // schema be the thing that decides what a valid entry looks like.
       if (file.size > 5_000_000) {
         say("That file is too big to be a playlist export.");
         return;
       }
-
       try {
         const raw: unknown = JSON.parse(await file.text());
-        if (
-          typeof raw !== "object" ||
-          raw === null ||
-          !Array.isArray((raw as { playlists?: unknown }).playlists)
-        ) {
-          throw new Error("shape");
-        }
+        const lists = (raw as { playlists?: unknown })?.playlists;
+        if (!Array.isArray(lists)) throw new Error("shape");
 
-        let imported = 0;
-        for (const entry of (raw as { playlists: unknown[] }).playlists) {
-          if (typeof entry !== "object" || entry === null) continue;
-          const candidate = entry as Record<string, unknown>;
-          const name = typeof candidate.name === "string" ? candidate.name.slice(0, 80) : null;
-          const items = Array.isArray(candidate.items)
-            ? candidate.items.filter(
-                (k): k is string => typeof k === "string" && /^\d+:[A-Za-z0-9_-]{11}$/.test(k),
-              )
-            : [];
-          if (!name) continue;
+        const payload = lists
+          .filter(
+            (l): l is { name: string; entries: unknown[] } =>
+              typeof l === "object" &&
+              l !== null &&
+              typeof (l as { name?: unknown }).name === "string",
+          )
+          .map((l) => ({
+            name: String(l.name).slice(0, 80),
+            entries: Array.isArray(l.entries)
+              ? (l.entries as Omit<PlaylistItemRow, "position">[])
+              : [],
+          }));
 
-          await savePlaylist({
-            id: crypto.randomUUID(),
-            name,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            items,
-          });
-          imported += 1;
-        }
-
-        setPlaylists(await getPlaylists());
-        say(imported > 0 ? `Imported ${imported} playlist(s)` : "Nothing importable in that file.");
-      } catch {
-        say("That does not look like a CrateShuffle export.");
+        const result = await playlistsApi.importAll(payload);
+        setPlaylists(result.playlists);
+        say(`Imported ${result.imported} playlist(s)`);
+      } catch (error) {
+        say(
+          error instanceof ApiError
+            ? error.message
+            : "That does not look like a CrateShuffle export.",
+        );
       }
     },
     [say],
   );
 
-  /* ---------------- auth ---------------- */
+  /* ================= insights ================= */
+
+  const analyse = useCallback(
+    async (refresh: boolean) => {
+      if (!activePlaylist) return;
+      setInsightsLoading(true);
+      setInsightsError(null);
+
+      try {
+        // Seeds come from the local cache: the server would otherwise need one
+        // Discogs request per release just to learn what it already knows.
+        const seedIds = [
+          ...new Set(activePlaylist.entries.map((e) => e.releaseId)),
+        ];
+        const seeds = seedIds
+          .map((id) => detailById.get(id))
+          .filter((d): d is ReleaseDetail => Boolean(d))
+          .map((d) => ({
+            releaseId: d.id,
+            artistIds: d.artistIds,
+            artistNames: d.artist.split(/,\s*|\s+&\s+/).slice(0, 24),
+            labelIds: d.labelIds,
+            labelNames: d.labels,
+            styles: d.styles,
+            genres: d.genres,
+            country: d.country,
+            year: d.year,
+          }));
+
+        const result = await insightsApi.analyse({
+          playlistId: activePlaylist.id,
+          refresh,
+          seeds,
+          ownedReleaseIds: [...sourceIds.collection],
+          wantlistReleaseIds: [...sourceIds.wantlist],
+        });
+
+        setInsights((previous) => ({ ...previous, [activePlaylist.id]: result }));
+      } catch (error) {
+        setInsightsError(
+          error instanceof ApiError ? error.message : "Analysis failed.",
+        );
+      } finally {
+        setInsightsLoading(false);
+      }
+    },
+    [activePlaylist, detailById, sourceIds],
+  );
+
+  /* ================= auth ================= */
 
   const signOut = useCallback(async () => {
     await fetch("/api/auth/logout", {
@@ -369,13 +679,13 @@ export function CrateApp({
     });
     await nuke();
     // Deliberate hard navigation: a client-side route change would keep the
-    // in-memory queue, playlists and cached crate alive in this tab after we
-    // have just wiped them from disk. Signing out should leave nothing behind.
+    // in-memory queue and cached crate alive in this tab after we have just
+    // wiped them from disk.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = "/";
   }, [csrfToken]);
 
-  /* ---------------- keyboard ---------------- */
+  /* ================= keyboard ================= */
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -416,9 +726,13 @@ export function CrateApp({
         case "r":
           setRepeatOn((v) => !v);
           break;
+        case "t":
+          event.preventDefault();
+          handleTap();
+          break;
         case "a":
           event.preventDefault();
-          queueForPlaylist(current);
+          queueForPlaylist(currentRef.current);
           break;
         case "/":
           event.preventDefault();
@@ -435,17 +749,19 @@ export function CrateApp({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [api, advance, shuffleNow, queueForPlaylist, current]);
+  }, [api, advance, shuffleNow, queueForPlaylist, handleTap]);
 
-  /* ---------------- render ---------------- */
+  /* ================= render ================= */
 
-  const syncing = sync?.status === "listing" || sync?.status === "detailing" || sync?.status === "paused";
+  const syncing =
+    sync?.status === "listing" ||
+    sync?.status === "detailing" ||
+    sync?.status === "paused";
   const progress =
     sync && sync.total > 0 ? Math.round((sync.detailed / sync.total) * 100) : 0;
 
   return (
     <div className="flex h-full flex-col">
-      {/* Top bar */}
       <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 py-2.5">
         <Disc className="h-5 w-5 shrink-0 text-accent" />
         <span className="hidden text-sm font-semibold tracking-tight text-neutral-100 sm:block">
@@ -501,19 +817,18 @@ export function CrateApp({
           <summary className="cursor-pointer list-none rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-neutral-100">
             {username}
           </summary>
-          <div className="absolute right-0 z-30 mt-1 w-44 rounded-md border border-ink-700 bg-ink-850 p-1 shadow-xl">
+          <div className="absolute right-0 z-30 mt-1 w-48 rounded-md border border-ink-700 bg-ink-850 p-1 shadow-xl">
             <button
               type="button"
               onClick={signOut}
               className="w-full rounded px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-ink-800"
             >
-              Sign out &amp; wipe cache
+              Sign out &amp; wipe local cache
             </button>
           </div>
         </details>
       </header>
 
-      {/* Sync strip */}
       {sync && sync.status !== "done" && (
         <div className="shrink-0 border-b border-ink-800 bg-ink-850 px-4 py-1.5">
           <div className="flex items-center gap-3 text-[11px] text-neutral-400">
@@ -533,12 +848,10 @@ export function CrateApp({
         </div>
       )}
 
-      {/* Body */}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {/* Left rail */}
-        <nav className="flex shrink-0 flex-col border-b border-ink-800 bg-ink-900 lg:w-[280px] lg:border-b-0 lg:border-r">
+        <nav className="flex shrink-0 flex-col border-b border-ink-800 bg-ink-900 lg:w-[300px] lg:border-b-0 lg:border-r">
           <div className="flex shrink-0 border-b border-ink-800">
-            {(["filters", "playlists"] as const).map((value) => (
+            {(["filters", "playlists", "insights"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -557,52 +870,79 @@ export function CrateApp({
             ))}
           </div>
 
-          <div className="min-h-[220px] flex-1 overflow-hidden lg:min-h-0">
-            {rail === "filters" ? (
+          <div className="min-h-[240px] flex-1 overflow-hidden lg:min-h-0">
+            {rail === "filters" && (
               <Filters
                 facets={facets}
                 filters={filters}
                 onChange={setFilters}
                 matched={filtered.length}
                 total={pool.length}
+                currentBpm={currentBpm}
               />
-            ) : (
+            )}
+
+            {rail === "playlists" && (
               <PlaylistPanel
                 playlists={playlists}
                 activeId={activePlaylistId}
                 onSelect={setActivePlaylistId}
                 onCreate={(name) => void createPlaylist(name)}
                 onDelete={async (id) => {
-                  await dbDeletePlaylist(id);
-                  if (activePlaylistId === id) setActivePlaylistId(null);
-                  setPlaylists(await getPlaylists());
+                  try {
+                    await playlistsApi.remove(id);
+                    if (activePlaylistId === id) setActivePlaylistId(null);
+                    setPlaylists((previous) => previous.filter((p) => p.id !== id));
+                  } catch {
+                    say("Could not delete that playlist.");
+                  }
                 }}
-                onRename={(id, name) => {
-                  const playlist = playlists.find((p) => p.id === id);
-                  if (playlist) void persist({ ...playlist, name, updatedAt: Date.now() });
+                onRename={async (id, name) => {
+                  try {
+                    const updated = await playlistsApi.update(id, { name });
+                    setPlaylists((previous) =>
+                      previous.map((p) => (p.id === updated.id ? updated : p)),
+                    );
+                  } catch {
+                    say("Could not rename that playlist.");
+                  }
                 }}
                 onPlay={(id, shuffled) => {
                   const playlist = playlists.find((p) => p.id === id);
-                  if (!playlist) return;
-                  const items = playlist.items
-                    .map((key) => byKey.get(key))
-                    .filter((p): p is Playable => Boolean(p));
-                  if (items.length === 0) {
-                    say("Those clips are not in the local cache yet.");
+                  if (!playlist || playlist.entries.length === 0) {
+                    say("That playlist is empty.");
                     return;
                   }
                   setActivePlaylistId(id);
                   setShuffleOn(shuffled);
-                  playFrom(shuffled ? spreadShuffle(items) : items, 0);
+                  const items = playlist.entries.map(
+                    (entry) => byKey.get(entry.clipKey) ?? null,
+                  );
+                  const resolved = items.filter((p): p is Playable => Boolean(p));
+                  if (resolved.length === 0) {
+                    say("Those clips are not in the local cache yet.");
+                    return;
+                  }
+                  playFrom(shuffled ? spreadShuffle(resolved) : resolved, 0);
                 }}
                 onExport={exportPlaylists}
                 onImport={(file) => void importPlaylists(file)}
               />
             )}
+
+            {rail === "insights" && (
+              <InsightsPanel
+                playlistName={activePlaylist?.name ?? null}
+                data={activePlaylist ? insights[activePlaylist.id] ?? null : null}
+                loading={insightsLoading}
+                error={insightsError}
+                onAnalyse={() => void analyse(false)}
+                onRefresh={() => void analyse(true)}
+              />
+            )}
           </div>
         </nav>
 
-        {/* List */}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center gap-2 border-b border-ink-800 px-4 py-2">
             <h2 className="text-xs font-medium text-neutral-300">
@@ -634,17 +974,17 @@ export function CrateApp({
                 onPlay={(index) => playFrom(visible, index)}
                 onAdd={activePlaylist ? undefined : (item) => queueForPlaylist(item)}
                 onRemove={
-                  activePlaylist ? (_item, index) => void removeFromPlaylist(index) : undefined
+                  activePlaylist ? (_item, index) => removeFromPlaylist(index) : undefined
                 }
                 reorderable={Boolean(activePlaylist)}
-                onReorder={(from, to) => void reorderPlaylist(from, to)}
+                onReorder={reorderPlaylist}
                 emptyMessage={
                   activePlaylist
                     ? "This playlist is empty. Add clips with the + button or the A key."
                     : syncing
                       ? "Still pulling your crate from Discogs…"
                       : pool.length === 0
-                        ? `Nothing cached for your ${source} yet. Hit the refresh button to sync.`
+                        ? `Nothing cached for your ${source} yet. Hit refresh to sync.`
                         : "No clips match those filters."
                 }
               />
@@ -660,15 +1000,28 @@ export function CrateApp({
           queueLength={queue.length}
           shuffleOn={shuffleOn}
           repeatOn={repeatOn}
+          tempo={{
+            bpm: currentBpm,
+            bpmSource: (currentMeta?.bpmSource ?? null) as BpmSource | null,
+            liveBpm: detector.live?.bpm ?? null,
+            liveConfidence: detector.live?.confidence ?? 0,
+            detectorStatus: detector.status,
+            detectorError: detector.error,
+            tapCount,
+            onTap: handleTap,
+            onStartDetector: (kind) => void detector.start(kind),
+            onStopDetector: detector.stop,
+            onScaleBpm: scaleBpm,
+            onClearBpm: clearBpm,
+          }}
           onToggleShuffle={shuffleNow}
           onToggleRepeat={() => setRepeatOn((v) => !v)}
           onPrev={() => (api.currentTime > 4 ? api.seek(0) : advance(-1))}
           onNext={() => advance(1)}
-          onAddToPlaylist={() => queueForPlaylist(current)}
+          onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
         />
       </div>
 
-      {/* Playlist picker */}
       {picker && (
         <div
           className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
@@ -735,7 +1088,6 @@ export function CrateApp({
         </div>
       )}
 
-      {/* Toast */}
       {toast && (
         <div
           role="status"

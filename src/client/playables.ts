@@ -1,6 +1,7 @@
 "use client";
 
 import type { Playable, ReleaseDetail, Track } from "@/lib/types";
+import { parseBpmFromText } from "./tempo";
 
 /**
  * Turning Discogs data into a playable queue.
@@ -100,24 +101,41 @@ export function parseDuration(value: string | null): number | null {
   return null;
 }
 
-export function buildPlayables(details: ReleaseDetail[]): Playable[] {
+/**
+ * Build the playable list.
+ *
+ * `bpmByClip` merges the server-held BPM catalogue in as the playables are
+ * constructed, so filtering and sorting by tempo needs no second lookup.
+ */
+export function buildPlayables(
+  details: ReleaseDetail[],
+  bpmByClip: Map<string, number> = new Map(),
+): Playable[] {
   const out: Playable[] = [];
 
   for (const release of details) {
+    // BPM markings written into the release notes apply to the whole record;
+    // per-track markings in the title win over them.
+    const releaseBpm = parseBpmFromText(release.notes);
+
     for (const video of release.videos) {
       const track = matchTrack(video.title, release.artist, release.tracks);
+      const key = `${release.id}:${video.id}`;
 
-      const title = track
-        ? track.title
-        : video.title || release.title;
+      const title = track ? track.title : video.title || release.title;
 
       const artist =
         track && track.artists.length > 0
           ? track.artists.join(", ")
           : release.artist;
 
+      const parsedBpm =
+        parseBpmFromText(track?.title) ??
+        parseBpmFromText(video.title) ??
+        releaseBpm;
+
       out.push({
-        key: `${release.id}:${video.id}`,
+        key,
         releaseId: release.id,
         videoId: video.id,
         title,
@@ -128,8 +146,12 @@ export function buildPlayables(details: ReleaseDetail[]): Playable[] {
         styles: release.styles,
         labels: release.labels,
         thumb: release.thumb,
+        country: release.country,
+        formats: release.formats,
         duration: video.duration ?? (track ? parseDuration(track.duration) : null),
         position: track?.position ?? null,
+        // A catalogued reading (tapped or detected) always beats text parsing.
+        bpm: bpmByClip.get(key) ?? parsedBpm,
         matchKind: track ? "track" : "release",
       });
     }

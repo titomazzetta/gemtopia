@@ -73,6 +73,33 @@ export const Refresh = ({ className = base }: Props) => (
   </svg>
 );
 
+export const Sparkle = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+    <path d="M12 2.5 13.9 8 19.5 9.9 13.9 11.8 12 17.4 10.1 11.8 4.5 9.9 10.1 8ZM18.5 14.5l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9ZM5.5 2.5l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z" />
+  </svg>
+);
+
+export const Metronome = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M9 3h6l3.5 18h-13Z" />
+    <path d="M6.6 15h10.8" />
+    <path d="M12 19V7.5" />
+  </svg>
+);
+
+export const Mic = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="9" y="2.5" width="6" height="11" rx="3" />
+    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+  </svg>
+);
+
+export const Waveform = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+    <path d="M3 12h2l2-6 3 15 3-11 2.5 6 2-4H21" />
+  </svg>
+);
+
 export const Disc = ({ className = base }: Props) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
     <circle cx="12" cy="12" r="9" />

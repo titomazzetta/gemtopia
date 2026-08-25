@@ -12,10 +12,34 @@ on:
 permissions:
   contents: read
 
+env:
+  # Build- and test-time placeholders. Real values live in Vercel and are never
+  # needed to compile — if a build ever required a real secret, that would
+  # itself be the bug.
+  DISCOGS_CONSUMER_KEY: ci-placeholder-key
+  DISCOGS_CONSUMER_SECRET: ci-placeholder-secret
+  SESSION_SECRET: Y2ktb25seS1wbGFjZWhvbGRlci1rZXktMzJieXRlcy0
+  APP_ORIGIN: http://localhost:3000
+  DISCOGS_CONTACT: +https://example.invalid
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/crateshuffle_ci
+
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: crateshuffle_ci
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
@@ -39,16 +63,13 @@ jobs:
       - name: Audit dependencies
         run: npm run audit:ci
 
+      - name: Tempo estimator tests
+        run: npm run test:tempo
+
+      - name: Apply schema
+        run: npm run db:migrate
+
       - name: Build
-        env:
-          # Build-time placeholders. Real values live in Vercel and are never
-          # needed to compile — if a build ever required a real secret, that
-          # would itself be the bug.
-          DISCOGS_CONSUMER_KEY: ci-placeholder-key
-          DISCOGS_CONSUMER_SECRET: ci-placeholder-secret
-          SESSION_SECRET: Y2ktb25seS1wbGFjZWhvbGRlci1rZXktMzJieXRlcy0
-          APP_ORIGIN: https://example.invalid
-          DISCOGS_CONTACT: +https://example.invalid
         run: npm run build
 
       - name: Assert no secret reached the client bundle
@@ -58,3 +79,12 @@ jobs:
             exit 1
           fi
           echo "Client bundle is clean."
+
+      - name: API integration tests
+        run: |
+          npm run start -- --port 3000 &
+          for i in $(seq 1 40); do
+            if curl -sf -o /dev/null http://localhost:3000/; then break; fi
+            sleep 1
+          done
+          BASE=http://localhost:3000 npm run test:api
