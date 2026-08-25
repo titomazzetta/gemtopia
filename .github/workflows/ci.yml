@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  schedule:
+    # Weekly, so a newly disclosed advisory in a pinned dependency shows up
+    # even when nobody has pushed.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (locked)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Audit dependencies
+        run: npm run audit:ci
+
+      - name: Build
+        env:
+          # Build-time placeholders. Real values live in Vercel and are never
+          # needed to compile — if a build ever required a real secret, that
+          # would itself be the bug.
+          DISCOGS_CONSUMER_KEY: ci-placeholder-key
+          DISCOGS_CONSUMER_SECRET: ci-placeholder-secret
+          SESSION_SECRET: Y2ktb25seS1wbGFjZWhvbGRlci1rZXktMzJieXRlcy0
+          APP_ORIGIN: https://example.invalid
+          DISCOGS_CONTACT: +https://example.invalid
+        run: npm run build
+
+      - name: Assert no secret reached the client bundle
+        run: |
+          if grep -rl "ci-placeholder-secret" .next/static/ 2>/dev/null; then
+            echo "::error::A server-only secret was inlined into the client bundle"
+            exit 1
+          fi
+          echo "Client bundle is clean."
