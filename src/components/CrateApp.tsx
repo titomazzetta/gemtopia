@@ -25,6 +25,7 @@ import {
   ApiError,
   insightsApi,
   playlistsApi,
+  prefsApi,
   setCsrfToken,
   trackMetaApi,
   type InsightsResponse,
@@ -42,7 +43,9 @@ import {
   Filters,
   type FilterState,
 } from "./Filters";
+import { analyseSequence, smoothOrder, DEFAULT_PITCH_PERCENT, type MixCheck } from "@/lib/mixing";
 import { DigDrawer } from "./DigDrawer";
+import { SetPrepBar } from "./SetPrepBar";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
@@ -107,6 +110,9 @@ export function CrateApp({
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [picker, setPicker] = useState<Playable | null>(null);
+
+  /** Deck pitch range, in percent. Drives every mixability calculation. */
+  const [pitchPercent, setPitchPercent] = useState(DEFAULT_PITCH_PERCENT);
 
   /* ---------------- digging ---------------- */
   const [digTarget, setDigTarget] = useState<Playable | null>(null);
@@ -285,15 +291,17 @@ export function CrateApp({
       try {
         await reloadCache();
 
-        const [serverPlaylists, meta, state] = await Promise.all([
+        const [serverPlaylists, meta, prefs, state] = await Promise.all([
           playlistsApi.list().catch(() => [] as Playlist[]),
           trackMetaApi.list().catch(() => [] as TrackMeta[]),
+          prefsApi.get().catch(() => ({ pitchPercent: DEFAULT_PITCH_PERCENT })),
           getSyncState(username, "collection"),
         ]);
         if (cancelled) return;
 
         setPlaylists(serverPlaylists);
         setTrackMeta(new Map(meta.map((m) => [m.clipKey, m])));
+        setPitchPercent(prefs.pitchPercent);
         setSync(state);
 
         // Lift v1's browser-local playlists into the account, once.
@@ -415,6 +423,28 @@ export function CrateApp({
   }, [activePlaylist, byKey, bpmByClip]);
 
   const visible = activePlaylist ? playlistItems : filtered;
+
+  /**
+   * Set-prep analysis for the open playlist. Recomputed on every reorder,
+   * which is cheap: it is one subtraction and one division per adjacent pair.
+   */
+  const sequenceReport = useMemo(
+    () =>
+      activePlaylist
+        ? analyseSequence(
+            playlistItems.map((item) => item.bpm),
+            pitchPercent,
+          )
+        : null,
+    [activePlaylist, playlistItems, pitchPercent],
+  );
+
+  const transitions = useMemo(() => {
+    const map = new Map<number, MixCheck>();
+    if (!sequenceReport) return map;
+    for (const step of sequenceReport.steps) map.set(step.index, step.check);
+    return map;
+  }, [sequenceReport]);
 
   const currentMeta = current ? trackMeta.get(current.key) ?? null : null;
   const currentBpm = currentMeta?.bpm ?? current?.bpm ?? null;
@@ -679,6 +709,48 @@ export function CrateApp({
     },
     [activePlaylist, detailById, sourceIds],
   );
+
+  /* ================= set prep ================= */
+
+  const changePitch = useCallback(
+    async (percent: number) => {
+      const clamped = Math.max(1, Math.min(100, Math.round(percent)));
+      setPitchPercent(clamped);
+      try {
+        await prefsApi.setPitch(clamped);
+      } catch {
+        say("Could not save your deck setting.");
+      }
+    },
+    [say],
+  );
+
+  /**
+   * Reorder the open playlist so consecutive records beatmatch.
+   *
+   * Deliberately an explicit action rather than something that happens on its
+   * own: a set order is a creative decision, and silently rearranging one
+   * would be the most annoying possible feature.
+   */
+  const applySmoothOrder = useCallback(() => {
+    if (!activePlaylist) return;
+    const order = smoothOrder(
+      playlistItems.map((item) => item.bpm),
+      pitchPercent,
+    );
+
+    const reordered = order
+      .map((index) => activePlaylist.entries[index])
+      .filter((entry): entry is PlaylistItemRow => Boolean(entry));
+
+    if (reordered.length !== activePlaylist.entries.length) {
+      say("Could not reorder that playlist safely.");
+      return;
+    }
+
+    void mutateEntries(activePlaylist, reordered.map(reEntry));
+    say("Reordered so the tempos climb.");
+  }, [activePlaylist, playlistItems, pitchPercent, mutateEntries, say]);
 
   /* ================= digging ================= */
 
@@ -965,6 +1037,7 @@ export function CrateApp({
                 matched={filtered.length}
                 total={pool.length}
                 currentBpm={currentBpm}
+                pitchPercent={pitchPercent}
               />
             )}
 
@@ -1052,6 +1125,16 @@ export function CrateApp({
             )}
           </div>
 
+          {activePlaylist && sequenceReport && !digTarget && (
+            <SetPrepBar
+              report={sequenceReport}
+              pitchPercent={pitchPercent}
+              onPitchChange={(percent) => void changePitch(percent)}
+              onSmoothOrder={applySmoothOrder}
+              busy={loading}
+            />
+          )}
+
           <div className="min-h-0 flex-1">
             {digTarget ? (
               <DigDrawer
@@ -1061,6 +1144,7 @@ export function CrateApp({
                 pool={pool}
                 collectionIds={sourceIds.collection}
                 wantlistIds={sourceIds.wantlist}
+                pitchPercent={pitchPercent}
                 onClose={() => setDigTarget(null)}
                 onPlayLocal={playFrom}
                 onAddToPlaylist={queueForPlaylist}
@@ -1084,6 +1168,7 @@ export function CrateApp({
                 }
                 reorderable={Boolean(activePlaylist)}
                 onReorder={reorderPlaylist}
+                transitions={activePlaylist ? transitions : undefined}
                 emptyMessage={
                   activePlaylist
                     ? "This playlist is empty. Add clips with the + button or the A key."

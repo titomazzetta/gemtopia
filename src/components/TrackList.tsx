@@ -2,11 +2,44 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Playable } from "@/lib/types";
+import { VERDICT_META, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { Play, Plus, Trash } from "./Icons";
 
-const ROW_HEIGHT = 56;
+const BASE_ROW_HEIGHT = 56;
+/** Extra height for the transition strip when set-prep mode is on. */
+const TRANSITION_HEIGHT = 22;
 const OVERSCAN = 8;
+
+const TONE_CLASS: Record<string, string> = {
+  good: "text-accent/80 border-accent/25 bg-accent/5",
+  shift: "text-sky-300/90 border-sky-400/25 bg-sky-400/5",
+  warn: "text-amber-300/90 border-amber-400/30 bg-amber-400/5",
+  bad: "text-red-300/90 border-red-400/30 bg-red-400/5",
+  muted: "text-neutral-600 border-ink-800 bg-transparent",
+};
+
+/**
+ * The strip between two records in a playlist.
+ *
+ * Reads as one line a DJ can scan while packing a bag: can these two be
+ * beatmatched, at what tempo, and how far each fader has to move. When they
+ * cannot, it says what pitch range *would* have worked — that is the number
+ * that tells you whether to swap the record or swap the deck.
+ */
+function TransitionStrip({ check }: { check: MixCheck }) {
+  const meta = VERDICT_META[check.verdict];
+  return (
+    <div
+      className={`flex h-[22px] items-center gap-1.5 border-l-2 px-3 text-[10px] ${TONE_CLASS[meta.tone]}`}
+      title={check.summary}
+    >
+      <span className="font-mono opacity-70">↳</span>
+      <span className="font-medium">{meta.label}</span>
+      <span className="truncate opacity-80">{check.summary}</span>
+    </div>
+  );
+}
 
 /**
  * Windowed list.
@@ -25,6 +58,7 @@ export function TrackList({
   emptyMessage,
   reorderable = false,
   onReorder,
+  transitions,
 }: {
   items: Playable[];
   currentKey: string | null;
@@ -34,7 +68,13 @@ export function TrackList({
   emptyMessage: string;
   reorderable?: boolean;
   onReorder?: (from: number, to: number) => void;
+  /** Mix check for the transition *into* each index. Index 0 has none. */
+  transitions?: Map<number, MixCheck>;
 }) {
+  const showTransitions = Boolean(transitions && transitions.size > 0);
+  const ROW_HEIGHT = showTransitions
+    ? BASE_ROW_HEIGHT + TRANSITION_HEIGHT
+    : BASE_ROW_HEIGHT;
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(600);
@@ -92,10 +132,20 @@ export function TrackList({
                   onReorder?.(dragIndex.current, index);
                   dragIndex.current = null;
                 }}
-                className={`group flex items-center gap-3 border-b border-ink-850 px-3 ${
+                className={`group border-b border-ink-850 ${
                   active ? "bg-accent/10" : "hover:bg-ink-850"
                 } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""}`}
               >
+                {showTransitions &&
+                  (transitions?.get(index) ? (
+                    <TransitionStrip check={transitions.get(index)!} />
+                  ) : (
+                    <div className="h-[22px] px-3 text-[10px] leading-[22px] text-neutral-700">
+                      {index === 0 ? "opens the set" : ""}
+                    </div>
+                  ))}
+
+                <div className="flex items-center gap-3 px-3" style={{ height: BASE_ROW_HEIGHT }}>
                 <button
                   type="button"
                   onClick={() => onPlay(index)}
@@ -179,6 +229,7 @@ export function TrackList({
                     <Trash className="h-3.5 w-3.5" />
                   </button>
                 )}
+                </div>
               </li>
             );
           })}

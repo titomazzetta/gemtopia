@@ -574,6 +574,56 @@ await check("dig rejects an unknown property", async () => {
   assert.equal(res.status, 400);
 });
 
+
+console.log("\ndeck preferences");
+
+await check("defaults to the Technics ±8", async () => {
+  const res = await alice.call("/api/prefs");
+  assert.equal(res.status, 200);
+  assert.equal(res.body.pitchPercent, 8);
+});
+
+await check("can be changed to a wide range", async () => {
+  const res = await alice.call("/api/prefs", {
+    method: "PATCH",
+    body: { pitchPercent: 16 },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.pitchPercent, 16);
+
+  const after = await alice.call("/api/prefs");
+  assert.equal(after.body.pitchPercent, 16, "did not persist");
+});
+
+await check("rejects a nonsense pitch range", async () => {
+  for (const value of [0, -8, 500, 1.5, "eight"]) {
+    const res = await alice.call("/api/prefs", {
+      method: "PATCH",
+      body: { pitchPercent: value },
+    });
+    assert.equal(res.status, 400, `accepted ${JSON.stringify(value)}`);
+  }
+});
+
+await check("requires a CSRF token to change", async () => {
+  const res = await alice.call("/api/prefs", {
+    method: "PATCH",
+    body: { pitchPercent: 10 },
+    csrfToken: null,
+  });
+  assert.equal(res.status, 403);
+});
+
+await check("is per user, not global", async () => {
+  const res = await mallory.call("/api/prefs");
+  assert.equal(res.status, 200);
+  assert.equal(
+    res.body.pitchPercent,
+    8,
+    "another user inherited someone else's deck setting",
+  );
+});
+
 console.log("\ncleanup");
 
 await check("delete removes the playlist", async () => {

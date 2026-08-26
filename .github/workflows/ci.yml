@@ -66,6 +66,9 @@ jobs:
       - name: Tempo estimator tests
         run: npm run test:tempo
 
+      - name: Mixability tests
+        run: npm run test:mixing
+
       - name: Apply schema
         run: npm run db:migrate
 

@@ -29,6 +29,7 @@ part I'd point at first.
 - [What it does](#what-it-does)
 - [The digging model](#the-digging-model)
 - [BPM, and how it actually works](#bpm-and-how-it-actually-works)
+- [Set prep: will these records actually mix?](#set-prep-will-these-records-actually-mix)
 - [Where the data comes from](#where-the-data-comes-from)
 - [Privacy](#privacy)
 - [Deploy it](#deploy-it)
@@ -47,6 +48,7 @@ part I'd point at first.
 | **Dig from anything** | Hit `D` on whatever's playing and pivot on any field. Two lanes: what else you own, and what exists beyond it. |
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. |
 | **BPM catalogue** | Detect tempo from the audio as it plays, or tap it in. Filter by range, or by what mixes with what's playing. |
+| **Set prep** | Every transition in a playlist checked against your decks' pitch range. Flags the ones that won't beatmatch before you pack the bag. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
 
@@ -185,6 +187,67 @@ The style presets underneath aren't guesses. Once you've catalogued a few tempos
 Playtopia computes the 10th–90th percentile of what each style actually runs at
 **in your collection** and offers those as chips. Your Detroit techno might sit at
 132–138; the chip will say so.
+
+---
+
+## Set prep: will these records actually mix?
+
+Open a playlist and every transition is checked against the pitch range of the
+decks you play on. The strip between two records tells you whether they
+beatmatch, at what tempo, and how far each fader has to move:
+
+```
+  Basement Cut · Moodymann                                      124
+↳ Mixes         Meet at 125 · ±0.8% each                              ← green
+  Chrome Cut · Theo Parrish                                     126
+↳ Mixes         Meet at 128.5 · ±1.9% each
+  Sunset Cut · Larry Heard                                      131
+↳ Out of range  Needs ±15.4% — wider than your ±8%                    ← amber
+  Nocturne Cut · Omar-S                                          96
+↳ Half-time     Meet at 91.3 at half-time · ±4.9% each                ← blue
+  Midnight Cut · Moodymann                                      174
+```
+
+A summary bar above shows the shape of the set at a glance — *"2 of 6 won't
+beatmatch"* — and **Smooth order** reorders the playlist so they do.
+
+### The maths, because it is easy to get wrong
+
+**A pitch fader is a percentage, not a BPM offset.** ±8% on a Technics is ±7.2
+BPM at 90 and ±13.9 BPM at 174. Implementing "±8" as "within 8 BPM" would be
+wrong at both ends.
+
+**Both decks have a pitch fader.** You are not obliged to hold the outgoing
+record at zero and drag the incoming one to meet it — pull one up, push the
+other down, meet in the middle. Two records at A and B BPM can meet if
+
+```
+A·(1 + x) = B·(1 − x)   for some pitch fraction x ≤ your range
+```
+
+which solves to `x = |B − A| / (A + B)`, and they meet at `2AB/(A + B)` — the
+harmonic mean. So the whole test is one subtraction and one division.
+
+This is not a detail. **124 → 140** needs 11.4% if only the incoming record
+moves, which is off the end of a 1200. Meeting in the middle it needs 6.1% —
+comfortably inside. A one-sided check would tell you to leave that record at
+home for no reason.
+
+**Half and double time count.** An 87 BPM record and a 174 BPM record share a
+beat grid at 2:1 with no pitch change at all. Every pair is tested at 1:1, 2:1
+and 1:2, and the cheapest fit wins.
+
+### Deck presets
+
+Default is **±8% — Technics SL-1200/1210**, because that is what is in most
+booths. Also built in: Pioneer CDJ ±6 and ±10, the ±16 wide range on an
+SL-1200MK7 / PLX-1000 / CDJ, and ±50 for digital. Or type any number. The
+setting is stored against your account and drives the playlist checks, the
+"mixes with" filter, and the tempo lane in the dig drawer.
+
+The mixable window shown in the filter is *not* `bpm ± range` — with both decks
+pitching, ±8% around 124 BPM reaches **105.6–145.7**, which is a good deal more
+of your crate than the 114–134 a naive reading suggests.
 
 ---
 
@@ -332,7 +395,8 @@ db/schema.sql                  tables, constraints, ownership cascades
 scripts/
 ├── migrate.mjs                idempotent schema application
 ├── test-tempo.mjs             estimator vs synthetic signals (38 cases)
-└── test-api.mjs               auth, CSRF, IDOR, privacy, validation (43 cases)
+├── test-mixing.mjs            beatmatch maths vs hand-computed answers (34 cases)
+└── test-api.mjs               auth, CSRF, IDOR, privacy, validation (48 cases)
 src/
 ├── proxy.ts                   per-request CSP + script nonce
 ├── lib/                       server-only
@@ -345,6 +409,7 @@ src/
 │   ├── repo.ts                data access — every query scoped by user_id
 │   ├── discogs.ts             signed client, graph traversal, search, writes
 │   ├── dig.ts                 four-lane dig from one seed release
+│   ├── mixing.ts              beatmatch maths, deck presets, set sequencing
 │   ├── recommend.ts           playlist profiling and candidate scoring
 │   ├── llm.ts                 optional Claude pass + anti-hallucination filter
 │   ├── validation.ts          every accepted payload shape, in one file
@@ -368,7 +433,8 @@ src/
 ```bash
 npm run test           # everything below
 npm run test:tempo     # 38 cases, no server needed
-npm run test:api       # 43 cases, needs a running server + Postgres
+npm run test:mixing    # 34 cases, no server needed
+npm run test:api       # 48 cases, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci
@@ -380,6 +446,11 @@ caught two real bugs during development: integer lag resolution breaking above
 160 BPM, and then a *worse* first fix where interpolating the signal at
 fractional lags flattened sharp onsets. The comments in `tempo.ts` explain both,
 because the second one is the sort of mistake that's easy to make twice.
+
+**`test-mixing.mjs`** checks the beatmatch maths against tempos worked out by
+hand rather than against the implementation — which is how it caught the author
+asserting that 90 → 128 needs ±17.4%, when counting the 128 at half-time gets
+there for ±16.9%. That case is still in the file with a comment saying so.
 
 **`test-api.mjs`** runs against a live server and a real Postgres. It forges its
 own session cookies using `SESSION_SECRET` — which is only possible *because* the
@@ -399,7 +470,10 @@ ever landed in the client bundle.
 - Clips that are private, deleted, or region-blocked on YouTube auto-skip after ~1s.
 - Discogs' video data is patchy. Some releases have none; that's upstream.
 - The rate limiter is per serverless instance — see *Residual risks* in SECURITY.md.
-- Musical key / Camelot harmonic mixing isn't built. The column exists.
+- Musical key / Camelot harmonic mixing isn't built. The column exists, and it
+  is the natural companion to the tempo checks.
+- Transition checks assume a constant tempo per record. Live drummers and
+  hand-played records drift; the flag is a guide, not a guarantee.
 - No session revocation list yet — see SECURITY.md §9, item 2.
 
 ---

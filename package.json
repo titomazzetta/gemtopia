@@ -17,7 +17,8 @@
     "db:migrate": "node scripts/migrate.mjs",
     "test:tempo": "node --experimental-strip-types scripts/test-tempo.mjs",
     "test:api": "node scripts/test-api.mjs",
-    "test": "npm run test:tempo && npm run test:api"
+    "test": "npm run test:tempo && npm run test:mixing && npm run test:api",
+    "test:mixing": "node --experimental-strip-types scripts/test-mixing.mjs"
   },
   "dependencies": {
     "next": "16.3.2",

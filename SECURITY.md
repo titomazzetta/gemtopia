@@ -124,6 +124,7 @@ Server logs record error context only, never tokens.
 | Clickjacking | `frame-ancestors 'none'` + `X-Frame-Options: DENY`. |
 | Skewing another user's recommendations | Seed metadata is client-supplied, but is intersected against the playlist's actual contents read from the database. Seeds for releases not in the playlist are discarded — covered by "seeds for releases outside the playlist are ignored". A user can only influence their own analysis. |
 | **Writing to another user's Discogs account** | `/api/wantlist` is the only route that changes data on a third-party service. The username used to build the upstream URL comes from the session; the request body accepts nothing but a release id, and `.strict()` rejects an attempt to send a `username` field. Four cases in `test-api.mjs`. |
+| Reading or setting another user's deck preference | `/api/prefs` resolves the row from the session's user id; the request body carries nothing but a number. Five cases, including one asserting a second user does not inherit the first's setting. |
 | **Overwriting a human's tapped BPM** | Not a classic security issue but the same shape of bug: precedence is enforced in the SQL `ON CONFLICT` clause, not in the client. `tap`/`manual` always beat `auto`. Six cases in `test-api.mjs`. |
 | Supply-chain compromise | OAuth 1.0a signing is implemented in-repo (~80 lines) rather than pulled from npm, so no third-party package ever holds the consumer secret. Runtime dependencies total **five**: `next`, `react`, `react-dom`, `zod`, `pg`. The Anthropic call is a plain `fetch`, not an SDK. |
 
@@ -276,7 +277,8 @@ npm run audit:ci && npm ls --prod --depth=0
 # 5. Types, lint, and the test suites
 npm run typecheck && npm run lint
 npm run test:tempo                    # 38 cases, no server needed
-npm run dev & npm run test:api        # 43 cases: auth, CSRF, IDOR, privacy, validation
+npm run test:mixing                   # 34 cases, no server needed
+npm run dev & npm run test:api        # 48 cases: auth, CSRF, IDOR, privacy, validation
 ```
 
 `test-api.mjs` forges its own session cookies using `SESSION_SECRET` — which is

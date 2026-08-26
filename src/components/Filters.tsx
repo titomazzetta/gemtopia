@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Playable } from "@/lib/types";
+import { DEFAULT_PITCH_PERCENT, mixableWindow } from "@/lib/mixing";
 import { Search } from "./Icons";
 
 /**
@@ -428,6 +429,7 @@ export function Filters({
   matched,
   total,
   currentBpm,
+  pitchPercent = DEFAULT_PITCH_PERCENT,
 }: {
   facets: Facets;
   filters: FilterState;
@@ -436,7 +438,12 @@ export function Filters({
   total: number;
   /** BPM of whatever is playing, for the "mixable with this" shortcut. */
   currentBpm: number | null;
+  /** Deck pitch range. Decides how wide "mixable" actually is. */
+  pitchPercent?: number;
 }) {
+  // Not bpm ± n. A pitch fader is a percentage and both decks have one, so the
+  // window is asymmetric and wider than it looks. See lib/mixing.ts.
+  const window = currentBpm !== null ? mixableWindow(currentBpm, pitchPercent) : null;
   const toggle = (key: FacetKey) => (value: string) => {
     const current = filters[key];
     onChange({
@@ -552,20 +559,19 @@ export function Filters({
           </button>
         </div>
 
-        {currentBpm !== null && (
+        {currentBpm !== null && window && (
           <button
             type="button"
             onClick={() =>
-              onChange({
-                ...filters,
-                bpmFrom: Math.round((currentBpm - 3) * 10) / 10,
-                bpmTo: Math.round((currentBpm + 3) * 10) / 10,
-              })
+              onChange({ ...filters, bpmFrom: window.low, bpmTo: window.high })
             }
             className="mt-2 w-full rounded-full border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent"
-            title="Narrow the crate to what will mix with what's playing"
+            title={`Both decks at ±${pitchPercent}% can meet anywhere from ${window.low} to ${window.high}`}
           >
-            Mixable with {currentBpm} (±3)
+            Mixes with {currentBpm}
+            <span className="ml-1 font-mono text-accent/70">
+              {window.low}–{window.high}
+            </span>
           </button>
         )}
 

@@ -253,6 +253,7 @@ export function DigDrawer({
   pool,
   collectionIds,
   wantlistIds,
+  pitchPercent,
   onClose,
   onPlayLocal,
   onAddToPlaylist,
@@ -266,6 +267,8 @@ export function DigDrawer({
   pool: Playable[];
   collectionIds: Set<number>;
   wantlistIds: Set<number>;
+  /** Deck pitch range, so the "mixes with" lane reflects your actual gear. */
+  pitchPercent: number;
   onClose: () => void;
   onPlayLocal: (items: Playable[], index: number) => void;
   onAddToPlaylist: (item: Playable) => void;
@@ -303,8 +306,8 @@ export function DigDrawer({
   } | null>(null);
 
   const localLanes: LocalLane[] = useMemo(
-    () => digWithinCollection(seed, pool),
-    [seed, pool],
+    () => digWithinCollection(seed, pool, { pitchPercent }),
+    [seed, pool, pitchPercent],
   );
 
   const buildSeed = useCallback(

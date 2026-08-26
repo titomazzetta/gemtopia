@@ -122,6 +122,20 @@ export const trackMetaApi = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Preferences                                                         */
+/* ------------------------------------------------------------------ */
+
+export const prefsApi = {
+  get: () => request<{ pitchPercent: number }>("/api/prefs"),
+
+  setPitch: (pitchPercent: number) =>
+    request<{ pitchPercent: number }>("/api/prefs", {
+      method: "PATCH",
+      body: JSON.stringify({ pitchPercent }),
+    }),
+};
+
+/* ------------------------------------------------------------------ */
 /* Digging                                                             */
 /* ------------------------------------------------------------------ */
 

@@ -184,3 +184,26 @@ CREATE TABLE IF NOT EXISTS dig_log (
 
 CREATE INDEX IF NOT EXISTS dig_log_user_created_idx
   ON dig_log (user_id, created_at DESC);
+
+-- ---------------------------------------------------------------------------
+-- Deck pitch range
+--
+-- A turntable's pitch fader is a percentage, so this is stored as one. The
+-- default is 8 — the Technics SL-1200 range, which is what is in most booths.
+-- Everything about mixability (playlist sequencing checks, the "mixes with"
+-- filter, the dig drawer's tempo lane) reads from this one number.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS pitch_percent SMALLINT NOT NULL DEFAULT 8;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'users_pitch_percent_check'
+  ) THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_pitch_percent_check
+      CHECK (pitch_percent BETWEEN 1 AND 100);
+  END IF;
+END $$;

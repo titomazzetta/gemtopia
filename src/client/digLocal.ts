@@ -1,6 +1,7 @@
 "use client";
 
 import type { Playable } from "@/lib/types";
+import { checkMix, DEFAULT_PITCH_PERCENT } from "@/lib/mixing";
 
 /**
  * Digging *inside* your own crate. No network, no latency.
@@ -37,9 +38,9 @@ function unique(items: Playable[], excludeKey: string): Playable[] {
 export function digWithinCollection(
   seed: Playable,
   pool: Playable[],
-  options: { bpmTolerance?: number } = {},
+  options: { pitchPercent?: number } = {},
 ): LocalLane[] {
-  const tolerance = options.bpmTolerance ?? 3;
+  const pitchPercent = options.pitchPercent ?? DEFAULT_PITCH_PERCENT;
   const lanes: LocalLane[] = [];
 
   /* ---- same artist ---- */
@@ -119,26 +120,24 @@ export function digWithinCollection(
   /* ---- mixable tempo ---- */
   if (seed.bpm !== null) {
     const target = seed.bpm;
-    const matches = pool
-      .filter((p) => {
-        if (p.bpm === null || p.key === seed.key) return false;
-        // Half and double time count as mixable — a 140 track drops into a
-        // 70 set and vice versa, which is the whole point of the ×2 / ÷2
-        // controls elsewhere in the app.
-        return (
-          Math.abs(p.bpm - target) <= tolerance ||
-          Math.abs(p.bpm - target * 2) <= tolerance * 2 ||
-          Math.abs(p.bpm - target / 2) <= tolerance
-        );
-      })
-      .sort((a, b) => Math.abs((a.bpm ?? 0) - target) - Math.abs((b.bpm ?? 0) - target));
 
-    if (matches.length > 0) {
+    // Not "within N BPM" — a pitch fader is a percentage, and both decks have
+    // one. `checkMix` handles that, plus the half- and double-time cases.
+    const scored = pool
+      .filter((p) => p.bpm !== null && p.key !== seed.key)
+      .map((p) => ({ item: p, check: checkMix(target, p.bpm, pitchPercent) }))
+      .filter(({ check }) => check.verdict !== "stretch" && check.verdict !== "impossible")
+      .sort(
+        (a, b) =>
+          (a.check.requiredPercent ?? 99) - (b.check.requiredPercent ?? 99),
+      );
+
+    if (scored.length > 0) {
       lanes.push({
         key: "tempo",
         label: "Mixes with",
-        pivot: `${target} BPM`,
-        results: matches.slice(0, MAX_PER_LANE),
+        pivot: `${target} BPM at ±${pitchPercent}%`,
+        results: scored.slice(0, MAX_PER_LANE).map((s) => s.item),
       });
     }
   }

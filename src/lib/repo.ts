@@ -459,6 +459,38 @@ export async function saveAnalysis(params: {
 }
 
 /* ------------------------------------------------------------------ */
+/* Preferences                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface UserPrefs {
+  /** Deck pitch range as a percentage. 8 = Technics SL-1200. */
+  pitchPercent: number;
+}
+
+export async function getPrefs(userId: string): Promise<UserPrefs> {
+  const row = await queryOne<{ pitch_percent: number }>(
+    `SELECT pitch_percent FROM users WHERE id = $1`,
+    [userId],
+  );
+  return { pitchPercent: row?.pitch_percent ?? 8 };
+}
+
+export async function setPitchPercent(
+  userId: string,
+  pitchPercent: number,
+): Promise<UserPrefs> {
+  // The CHECK constraint on the column is the real guard; clamping here just
+  // turns a hostile value into a sane one instead of a 500.
+  const clamped = Math.max(1, Math.min(100, Math.round(pitchPercent)));
+
+  const row = await queryOne<{ pitch_percent: number }>(
+    `UPDATE users SET pitch_percent = $2 WHERE id = $1 RETURNING pitch_percent`,
+    [userId, clamped],
+  );
+  return { pitchPercent: row?.pitch_percent ?? clamped };
+}
+
+/* ------------------------------------------------------------------ */
 /* Dig log                                                             */
 /* ------------------------------------------------------------------ */
 
