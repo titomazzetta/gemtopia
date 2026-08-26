@@ -32,7 +32,7 @@ part I'd point at first.
 - [Set prep: will these records actually mix?](#set-prep-will-these-records-actually-mix)
 - [Where the data comes from](#where-the-data-comes-from)
 - [Privacy](#privacy)
-- [Deploy it](#deploy-it)
+- [Deploy it](#deploy-it) — full walkthrough in [DEPLOYING.md](./DEPLOYING.md)
 - [Architecture](#architecture)
 - [Testing](#testing)
 - [Known limits](#known-limits)
@@ -308,60 +308,51 @@ in [SECURITY.md §6](./SECURITY.md).
 
 ## Deploy it
 
-### 1. Discogs application
+**Full walkthrough: [DEPLOYING.md](./DEPLOYING.md)** — eleven sequenced steps, a
+first-run test checklist, and troubleshooting. What follows is the summary; the
+ordering in that file matters and this one glosses over it.
 
-[discogs.com/settings/developers](https://www.discogs.com/settings/developers) →
-*Create an application*.
+### The short version
 
-- **Callback URL** must be exactly `https://YOUR-APP.vercel.app/api/auth/callback`
-- Copy the Consumer Key and Consumer Secret
-- Register a second app for `http://localhost:3000/api/auth/callback` if you want to develop locally
+1. **Neon** — create a project, database `gemtopia`, copy the **pooled**
+   connection string (the host containing `-pooler`).
+2. **`npm run keygen`** — your `SESSION_SECRET`.
+3. **A Discogs app** pointed at `http://localhost:3000/api/auth/callback`.
+4. **Run it locally** — `cp .env.example .env.local`, fill it in,
+   `npm run db:migrate`, `npm run dev`.
+5. **Push to GitHub**, then import to Vercel.
+6. **A second Discogs app** pointed at your real Vercel URL.
+7. **Set the environment in Vercel**, redeploy.
 
-### 2. Postgres
+### The trap, since it catches everyone
 
-[Neon](https://neon.tech) free tier. Create a project and a database called
-`gemtopia`, then copy the **pooled** connection string — the host with `-pooler`
-in it. Serverless functions open and drop connections constantly and would
-exhaust a direct endpoint.
+A Discogs application holds **one** callback URL that must match `APP_ORIGIN`
+character for character — but your Vercel URL does not exist until after you have
+deployed. So you cannot register the production callback up front.
 
-### 3. Deploy
+Hence two Discogs applications, and hence the first Vercel deploy being expected
+to **fail**: it runs without configuration purely so Vercel will tell you the URL.
+The failure is [`src/lib/env.ts`](./src/lib/env.ts) validating at build time, which
+is what stops a misconfigured deploy from 500ing at users later instead.
 
-```bash
-npx vercel && npx vercel --prod
-```
+### Environment variables
 
-### 4. Environment
-
-```bash
-npm run keygen                                       # prints a SESSION_SECRET
-
-npx vercel env add DISCOGS_CONSUMER_KEY    production
-npx vercel env add DISCOGS_CONSUMER_SECRET production
-npx vercel env add SESSION_SECRET          production
-npx vercel env add APP_ORIGIN              production   # https://your-app.vercel.app
-npx vercel env add DISCOGS_CONTACT         production
-npx vercel env add DATABASE_URL            production   # the -pooler string
-npx vercel env add ANTHROPIC_API_KEY       production   # optional
-```
-
-`APP_ORIGIN` must match the deployment URL exactly, **no trailing slash** — it
-builds the OAuth callback and rejects mismatched origins.
-
-### 5. Tables
-
-```bash
-DATABASE_URL="<pooled string>" npm run db:migrate
-```
-
-Idempotent, so it's safe on every deploy.
+| Variable | Required | Notes |
+|---|---|---|
+| `DISCOGS_CONSUMER_KEY` | yes | |
+| `DISCOGS_CONSUMER_SECRET` | yes | Never leaves the server |
+| `SESSION_SECRET` | yes | 32 bytes base64url — `npm run keygen` |
+| `APP_ORIGIN` | yes | No trailing slash |
+| `DATABASE_URL` | yes | Neon **pooled** string |
+| `DISCOGS_CONTACT` | advised | Discogs requires a contact in the User-Agent |
+| `ANTHROPIC_API_KEY` | optional | Enables the written playlist analysis |
 
 ### Local
 
 Node 22 or newer (`.nvmrc` pins it) — the two pure-logic test suites use Node's
 built-in TypeScript stripping. The app itself is not fussy.
 
-The quickest route is to point local development at the same Neon database, so
-there is no local Postgres to install:
+Pointing local development at the same Neon database avoids installing Postgres:
 
 ```bash
 cp .env.example .env.local     # npm run keygen for SESSION_SECRET
@@ -378,7 +369,13 @@ sync runs about **10–12 minutes** in the background while you use whatever has
 already loaded. Progress saves after every batch — close the tab and it resumes.
 Later syncs only fetch what you've added.
 
----
+### GitHub's role
+
+Vercel deploys on every push to `main`; GitHub Actions runs CI on the same push.
+**They are independent — a red CI run does not block a Vercel deploy** unless you
+add a branch protection rule requiring the `verify` check. Preview deployments
+build fine but cannot complete OAuth, because their URLs don't match `APP_ORIGIN`.
+Both covered in [DEPLOYING.md](./DEPLOYING.md).
 
 ## Architecture
 
@@ -413,7 +410,7 @@ Four properties worth calling out:
 db/schema.sql                  tables, constraints, ownership cascades
 scripts/
 ├── migrate.mjs                idempotent schema application
-├── test-tempo.mjs             estimator vs synthetic signals (38 cases)
+├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths vs hand-computed answers (34 cases)
 └── test-api.mjs               auth, CSRF, IDOR, revocation, privacy (59 cases)
 src/
@@ -451,7 +448,7 @@ src/
 
 ```bash
 npm run test           # everything below
-npm run test:tempo     # 38 cases, no server needed
+npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 34 cases, no server needed
 npm run test:api       # 59 cases, needs a running server + Postgres
 npm run typecheck

@@ -330,7 +330,7 @@ npm run audit:ci && npm ls --prod --depth=0
 
 # 5. Types, lint, and the test suites
 npm run typecheck && npm run lint
-npm run test:tempo                    # 38 cases, no server needed
+npm run test:tempo                    # 37 cases, no server needed
 npm run test:mixing                   # 34 cases, no server needed
 npm run dev & npm run test:api        # 59 cases: auth, CSRF, IDOR, revocation, privacy, validation
 ```

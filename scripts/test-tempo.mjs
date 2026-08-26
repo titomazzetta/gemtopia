@@ -15,8 +15,10 @@ import { estimateTempo, TapTempo, parseBpmFromText, whiten } from "../src/client
 
 const HOP = 0.01; // 100 Hz envelope, matching the browser capture rate
 let failures = 0;
+let ran = 0;
 
 function check(name, fn) {
+  ran += 1;
   try {
     fn();
     console.log(`  ok   ${name}`);
@@ -298,7 +300,7 @@ for (const [input, expected] of bpmCases) {
 
 console.log(
   failures === 0
-    ? "\nAll tempo tests passed.\n"
-    : `\n${failures} test(s) failed.\n`,
+    ? `\nAll ${ran} tempo tests passed.\n`
+    : `\n${failures} of ${ran} tempo tests failed.\n`,
 );
 process.exit(failures === 0 ? 0 : 1);
