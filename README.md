@@ -357,6 +357,12 @@ Idempotent, so it's safe on every deploy.
 
 ### Local
 
+Node 22 or newer (`.nvmrc` pins it) — the two pure-logic test suites use Node's
+built-in TypeScript stripping. The app itself is not fussy.
+
+The quickest route is to point local development at the same Neon database, so
+there is no local Postgres to install:
+
 ```bash
 cp .env.example .env.local     # npm run keygen for SESSION_SECRET
 npm install
