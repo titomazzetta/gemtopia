@@ -39,7 +39,7 @@ const schema = z.object({
     ),
 
   /**
-   * Canonical public origin, e.g. https://playtopia.vercel.app
+   * Canonical public origin, e.g. https://gemtopia.vercel.app
    * Used to build the OAuth callback URL and to reject host-header spoofing.
    */
   APP_ORIGIN: z.string().url("APP_ORIGIN must be an absolute URL"),
@@ -101,7 +101,7 @@ export const env = Object.freeze(parsed.data);
 export const APP_VERSION = "1.0.0";
 
 /** RFC 1945 compliant User-Agent. Discogs rejects generic agents outright. */
-export const USER_AGENT = `Playtopia/${APP_VERSION} ${env.DISCOGS_CONTACT}`;
+export const USER_AGENT = `Gemtopia/${APP_VERSION} ${env.DISCOGS_CONTACT}`;
 
 /** Absolute OAuth callback URL registered with Discogs. */
 export const CALLBACK_URL = new URL(

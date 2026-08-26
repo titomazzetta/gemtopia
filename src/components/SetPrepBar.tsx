@@ -34,7 +34,7 @@ export function SetPrepBar({
     return (
       <div className="flex items-center gap-2 border-b border-ink-800 bg-ink-900 px-4 py-1.5 text-[11px] text-neutral-600">
         <Metronome className="h-3 w-3" />
-        Add a second track and Playtopia will check whether they beatmatch.
+        Add a second track and Gemtopia will check whether they beatmatch.
       </div>
     );
   }

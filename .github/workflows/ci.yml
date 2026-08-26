@@ -21,7 +21,7 @@ env:
   SESSION_SECRET: Y2ktb25seS1wbGFjZWhvbGRlci1rZXktMzJieXRlcy0
   APP_ORIGIN: http://localhost:3000
   DISCOGS_CONTACT: +https://example.invalid
-  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/playtopia_ci
+  DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/gemtopia_ci
 
 jobs:
   verify:
@@ -33,7 +33,7 @@ jobs:
         image: postgres:16
         env:
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: playtopia_ci
+          POSTGRES_DB: gemtopia_ci
         ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready

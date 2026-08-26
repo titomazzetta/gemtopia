@@ -1,6 +1,6 @@
 # Security Design
 
-Playtopia holds a third-party OAuth credential granting read access to a
+Gemtopia holds a third-party OAuth credential granting read access to a
 user's Discogs account, stores user data in a shared database, renders text
 written by strangers, captures audio from the user's machine, and optionally
 forwards content to an LLM. Each of those is a distinct piece of attack

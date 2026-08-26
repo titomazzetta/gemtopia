@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  * YouTube's API terms require an embedded player to keep a viewport of at
  * least 200x200 px and forbid covering it with overlays. Extracting the audio
  * stream and dropping the video is a terms violation and would get an app
- * pulled. So Playtopia keeps a real, visible, minimum-size player — it just
+ * pulled. So Gemtopia keeps a real, visible, minimum-size player — it just
  * demotes it to the role of album art in the corner, and drives everything
  * through custom transport controls. You get the Bandcamp flow without
  * building something that breaks the moment anyone looks at it.

@@ -1,4 +1,4 @@
--- Playtopia schema
+-- Gemtopia schema
 --
 -- Applied idempotently by `npm run db:migrate` (scripts/migrate.mjs).
 -- Every statement is safe to re-run.

@@ -2,11 +2,11 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Playtopia",
+  title: "Gemtopia",
   description:
     "Shuffle and build playlists from your Discogs collection and wantlist.",
   robots: { index: false, follow: false },
-  applicationName: "Playtopia",
+  applicationName: "Gemtopia",
 };
 
 export const viewport: Viewport = {

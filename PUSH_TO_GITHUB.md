@@ -8,19 +8,19 @@ Dependabot, licence, and a `.gitignore` that already excludes `.env.local`.
 ## Option A — GitHub CLI (one command)
 
 ```bash
-cd playtopia
-gh repo create playtopia --public --source=. --remote=origin --push
+cd gemtopia
+gh repo create gemtopia --public --source=. --remote=origin --push
 ```
 
 ## Option B — web UI
 
-1. Create an empty repo at <https://github.com/new> named `playtopia`.
+1. Create an empty repo at <https://github.com/new> named `gemtopia`.
    **Do not** add a README, licence or .gitignore — this repo has them.
 2. Then:
 
 ```bash
-cd playtopia
-git remote add origin https://github.com/titomazzetta/playtopia.git
+cd gemtopia
+git remote add origin https://github.com/titomazzetta/gemtopia.git
 git branch -M main
 git push -u origin main
 ```
@@ -52,6 +52,6 @@ name is read from `process.env` — never a value.
 
 ## Deploying from the repo
 
-Vercel → Add New Project → import `playtopia`. Then set the environment variables
+Vercel → Add New Project → import `gemtopia`. Then set the environment variables
 listed in the README, run `npm run db:migrate` against your Neon database, and
 redeploy. Every push to `main` deploys automatically after that.

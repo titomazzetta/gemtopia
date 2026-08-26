@@ -19,9 +19,9 @@ import { env } from "./env";
 const isProd = env.NODE_ENV === "production";
 
 /** `__Host-` locks the cookie to this exact origin, path `/`, Secure-only. */
-export const SESSION_COOKIE = isProd ? "__Host-pt_session" : "pt_session";
-export const HANDSHAKE_COOKIE = isProd ? "__Host-pt_oauth" : "pt_oauth";
-export const CSRF_COOKIE = isProd ? "__Host-pt_csrf" : "pt_csrf";
+export const SESSION_COOKIE = isProd ? "__Host-gt_session" : "gt_session";
+export const HANDSHAKE_COOKIE = isProd ? "__Host-gt_oauth" : "gt_oauth";
+export const CSRF_COOKIE = isProd ? "__Host-gt_csrf" : "gt_csrf";
 
 const SESSION_MAX_AGE = 60 * 60 * 24 * 14; // 14 days
 const HANDSHAKE_MAX_AGE = 60 * 10; // 10 minutes to finish the OAuth dance

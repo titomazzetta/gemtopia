@@ -81,7 +81,7 @@ function actor(username, sessionVersion = 1) {
     username,
     csrf,
     sessionVersion,
-    cookie: `pt_session=${session}; pt_csrf=${csrf}`,
+    cookie: `gt_session=${session}; gt_csrf=${csrf}`,
     async call(path, { method = "GET", body, csrfToken, cookie } = {}) {
       const headers = { accept: "application/json" };
       const jar = cookie === undefined ? this.cookie : cookie;
@@ -132,7 +132,7 @@ await check("anonymous GET /api/playlists is 401", async () => {
 });
 
 await check("a tampered session cookie is rejected", async () => {
-  const tampered = alice.cookie.replace(/pt_session=v1\.[^.]+\./, "pt_session=v1.AAAAAAAAAAAAAAAA.");
+  const tampered = alice.cookie.replace(/gt_session=v1\.[^.]+\./, "gt_session=v1.AAAAAAAAAAAAAAAA.");
   const res = await alice.call("/api/playlists", { cookie: tampered });
   assert.equal(res.status, 401);
 });

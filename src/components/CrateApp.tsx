@@ -601,7 +601,7 @@ export function CrateApp({
 
   const exportPlaylists = useCallback(() => {
     const payload = {
-      app: "playtopia",
+      app: "gemtopia",
       version: 2,
       exportedAt: new Date().toISOString(),
       playlists: playlists.map((p) => ({
@@ -616,7 +616,7 @@ export function CrateApp({
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `playtopia-playlists-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = `gemtopia-playlists-${new Date().toISOString().slice(0, 10)}.json`;
     anchor.click();
     URL.revokeObjectURL(url);
   }, [playlists]);
@@ -655,7 +655,7 @@ export function CrateApp({
         say(
           error instanceof ApiError
             ? error.message
-            : "That does not look like a Playtopia export.",
+            : "That does not look like a Gemtopia export.",
         );
       }
     },
@@ -826,7 +826,7 @@ export function CrateApp({
    */
   const revokeEverywhere = useCallback(async () => {
     const confirmed = window.confirm(
-      "Sign out of Playtopia on every device?\n\n" +
+      "Sign out of Gemtopia on every device?\n\n" +
         "Every browser signed in to this Discogs account will be signed out " +
         "immediately, including this one. Your playlists and BPM catalogue are " +
         "not affected.",
@@ -931,7 +931,7 @@ export function CrateApp({
       <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 py-2.5">
         <Disc className="h-5 w-5 shrink-0 text-accent" />
         <span className="hidden text-sm font-semibold tracking-tight text-neutral-100 sm:block">
-          Playtopia
+          Gemtopia
         </span>
 
         <div className="ml-2 flex rounded-md border border-ink-700 p-0.5">

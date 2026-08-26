@@ -2,9 +2,11 @@ import { Disc } from "./Icons";
 
 const FEATURES = [
   ["Shuffle the crate", "Fisher–Yates across every clip Discogs has for your collection, spread so the same release never lands back to back."],
-  ["Filter, then shuffle", "Cut to a style, a label, a year range — then shuffle what's left. Rebuild the pool in a couple of clicks mid-set."],
-  ["Playlists on the fly", "Hit A while something is playing. Reorder by drag, play in order or shuffled, export as JSON."],
-  ["Wantlist too", "Same flow against your wantlist, for when you are auditioning rather than digging."],
+  ["Filter, then shuffle", "Style, label, artist, country, decade, tempo — every option counted from your own records. Cut the crate down, then shuffle what's left."],
+  ["Playlists on the fly", "Hit A while something is playing. Reorder by drag, play in order or shuffled. Private to your account."],
+  ["Know it'll beatmatch", "Tap the BPM in as you listen, or let it detect. Every transition in a playlist checked against your decks' pitch range."],
+  ["Dig from anything", "Press D on a record for its full metadata, everything else you own that connects to it, and records you don't own yet."],
+  ["Wantlist both ways", "Shuffle it like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist."],
 ];
 
 export function SignIn({ error }: { error: string | null }) {
@@ -14,7 +16,7 @@ export function SignIn({ error }: { error: string | null }) {
         <Disc className="h-8 w-8 text-accent" />
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-neutral-100">
-            Playtopia
+            Gemtopia
           </h1>
           <p className="text-xs text-neutral-500">
             A Bandcamp-style player for your Discogs crate.
@@ -63,9 +65,18 @@ export function SignIn({ error }: { error: string | null }) {
             What this app stores.
           </strong>{" "}
           Your Discogs token lives in an encrypted, HttpOnly cookie and nowhere
-          else. Your collection index and playlists are cached in your own
-          browser. There is no server-side database — logging out and clearing
-          site data removes everything.
+          else — never in a database. Your collection index stays in this
+          browser and is never uploaded. Playlists and your BPM catalogue are
+          stored against your account so they follow you between devices; they
+          are private, and no route serves them to anyone but you.
+        </p>
+        <p>
+          <strong className="font-medium text-neutral-400">
+            What it does on your behalf.
+          </strong>{" "}
+          It reads your collection and wantlist, and — only when you press the
+          heart on a record — adds to your wantlist. It never edits your
+          collection, never posts, and never lists anything for sale.
         </p>
       </section>
     </main>

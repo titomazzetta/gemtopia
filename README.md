@@ -1,11 +1,11 @@
 <div align="center">
 
-# Playtopia
+# Gemtopia
 
 **Dig through your Discogs collection anywhere, hear it, build playlists from it,
 and fall sideways into the records you don't own yet.**
 
-[![CI](https://github.com/titomazzetta/playtopia/actions/workflows/ci.yml/badge.svg)](https://github.com/titomazzetta/playtopia/actions/workflows/ci.yml)
+[![CI](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml/badge.svg)](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml)
 [![Security](https://img.shields.io/badge/threat%20model-SECURITY.md-4ade80)](./SECURITY.md)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
@@ -13,7 +13,7 @@ and fall sideways into the records you don't own yet.**
 
 ---
 
-Playtopia is a DJ tool built on top of the Discogs API. It turns a record collection
+Gemtopia is a DJ tool built on top of the Discogs API. It turns a record collection
 into something you can actually *play* — shuffle it, filter it by tempo and style,
 build playlists on the move, catalogue BPMs as you listen, and dig outward into
 records you don't own but probably should.
@@ -117,7 +117,7 @@ everything you've already been shown, so the feed always moves.
 ### Why not a black-box recommender
 
 Spotify's radio is a learned embedding — it works, and it can't tell you why.
-Playtopia goes the other way: every result is a real Discogs release ID reached
+Gemtopia goes the other way: every result is a real Discogs release ID reached
 by a relationship you can see named on the card. When you're deciding whether to
 spend £30 on a record, "because Moodymann released it on Peacefrog in 1997" is a
 better answer than "listeners like you also enjoyed".
@@ -137,7 +137,7 @@ structured so an adapter can drop in later without a rewrite.
 **Browsing stores with recent finds** — not possible. The Discogs API exposes no
 way to enumerate sellers or their recent stock. What it *does* expose is per
 release: how many copies are for sale and the lowest asking price, both of which
-Playtopia shows with a deep link to the marketplace page.
+Gemtopia shows with a deep link to the marketplace page.
 
 ---
 
@@ -184,7 +184,7 @@ scale the *whole window*, for finding half- and double-time versions of what
 you're playing.
 
 The style presets underneath aren't guesses. Once you've catalogued a few tempos,
-Playtopia computes the 10th–90th percentile of what each style actually runs at
+Gemtopia computes the 10th–90th percentile of what each style actually runs at
 **in your collection** and offers those as chips. Your Detroit techno might sit at
 132–138; the chip will say so.
 
@@ -320,7 +320,7 @@ in [SECURITY.md §6](./SECURITY.md).
 ### 2. Postgres
 
 [Neon](https://neon.tech) free tier. Create a project and a database called
-`playtopia`, then copy the **pooled** connection string — the host with `-pooler`
+`gemtopia`, then copy the **pooled** connection string — the host with `-pooler`
 in it. Serverless functions open and drop connections constantly and would
 exhaust a direct endpoint.
 
@@ -500,5 +500,5 @@ ever landed in the client bundle.
 
 MIT — see [LICENSE](./LICENSE).
 
-Not affiliated with Discogs, YouTube, Bandcamp, Spotify, or Anthropic. Playtopia
+Not affiliated with Discogs, YouTube, Bandcamp, Spotify, or Anthropic. Gemtopia
 uses the Discogs API under their terms and embeds YouTube's player under theirs.
