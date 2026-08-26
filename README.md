@@ -291,6 +291,19 @@ which is the point.
 Your collection index never leaves your device. Only playlists, the BPM
 catalogue, and cached analyses are stored server-side.
 
+### Signing out everywhere
+
+Sessions are stateless — your Discogs token lives in a sealed cookie, not in a
+database — which is good for what a breach would yield and awkward for
+revocation. **Sign out everywhere** in the account menu bumps a version number
+stored against your account; that version is sealed into every cookie and
+checked on each request, so a laptop left at a venue or a phone in a stolen bag
+stops working immediately. Signing back in works straight away.
+
+It costs no extra database round trip: resolving your session into a user id
+was already a query, and the version comes back in the same row. Full write-up
+in [SECURITY.md §6](./SECURITY.md).
+
 ---
 
 ## Deploy it
@@ -396,7 +409,7 @@ scripts/
 ├── migrate.mjs                idempotent schema application
 ├── test-tempo.mjs             estimator vs synthetic signals (38 cases)
 ├── test-mixing.mjs            beatmatch maths vs hand-computed answers (34 cases)
-└── test-api.mjs               auth, CSRF, IDOR, privacy, validation (48 cases)
+└── test-api.mjs               auth, CSRF, IDOR, revocation, privacy (59 cases)
 src/
 ├── proxy.ts                   per-request CSP + script nonce
 ├── lib/                       server-only
@@ -434,7 +447,7 @@ src/
 npm run test           # everything below
 npm run test:tempo     # 38 cases, no server needed
 npm run test:mixing    # 34 cases, no server needed
-npm run test:api       # 48 cases, needs a running server + Postgres
+npm run test:api       # 59 cases, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci
@@ -474,7 +487,6 @@ ever landed in the client bundle.
   is the natural companion to the tempo checks.
 - Transition checks assume a constant tempo per record. Live drummers and
   hand-played records drift; the flag is a guide, not a guarantee.
-- No session revocation list yet — see SECURITY.md §9, item 2.
 
 ---
 

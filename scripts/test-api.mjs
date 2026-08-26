@@ -67,18 +67,20 @@ function seal(payload) {
 }
 
 /** A signed-in browser, as far as the server is concerned. */
-function actor(username) {
+function actor(username, sessionVersion = 1) {
   const csrf = `csrf-${username}-${randomBytes(6).toString("hex")}`;
   const session = seal({
     t: "token",
     s: "secret",
     u: username,
+    v: sessionVersion,
     iat: Math.floor(Date.now() / 1000),
   });
 
   return {
     username,
     csrf,
+    sessionVersion,
     cookie: `pt_session=${session}; pt_csrf=${csrf}`,
     async call(path, { method = "GET", body, csrfToken, cookie } = {}) {
       const headers = { accept: "application/json" };
@@ -621,6 +623,108 @@ await check("is per user, not global", async () => {
     res.body.pitchPercent,
     8,
     "another user inherited someone else's deck setting",
+  );
+});
+
+
+console.log("\nsession revocation");
+
+// A dedicated account so revoking does not disturb the other suites.
+const revoker = actor(`revoke_${randomBytes(4).toString("hex")}`);
+
+await check("a fresh session works", async () => {
+  const res = await revoker.call("/api/playlists");
+  assert.equal(res.status, 200);
+});
+
+await check("a session claiming a future version is refused", async () => {
+  const impostor = actor(revoker.username, 99);
+  const res = await impostor.call("/api/playlists", { cookie: impostor.cookie });
+  assert.equal(res.status, 401);
+  assert.equal(res.body?.error?.code, "session_revoked");
+});
+
+await check("revoke requires a CSRF token", async () => {
+  const res = await revoker.call("/api/auth/revoke", {
+    method: "POST",
+    csrfToken: null,
+  });
+  assert.equal(res.status, 403);
+});
+
+await check("revoke requires authentication", async () => {
+  const res = await revoker.call("/api/auth/revoke", {
+    method: "POST",
+    cookie: "",
+  });
+  assert.equal(res.status, 401);
+});
+
+let bumpedVersion = null;
+
+await check("signing out everywhere bumps the version", async () => {
+  const res = await revoker.call("/api/auth/revoke", { method: "POST" });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.ok, true);
+  assert.ok(res.body.sessionVersion > 1, "version did not advance");
+  bumpedVersion = res.body.sessionVersion;
+});
+
+await check("...and the cookie that did it is now dead", async () => {
+  const res = await revoker.call("/api/playlists");
+  assert.equal(res.status, 401);
+  assert.equal(res.body?.error?.code, "session_revoked");
+});
+
+await check("...as is a cookie held on another device", async () => {
+  // Same account, same original version — the "phone left in a bag" case.
+  const otherDevice = actor(revoker.username, 1);
+  const res = await otherDevice.call("/api/playlists", {
+    cookie: otherDevice.cookie,
+  });
+  assert.equal(res.status, 401);
+  assert.equal(res.body?.error?.code, "session_revoked");
+});
+
+await check("every route rejects a revoked session, not just playlists", async () => {
+  const dead = actor(revoker.username, 1);
+  const routes = [
+    ["/api/playlists", "GET", undefined],
+    ["/api/track-meta", "GET", undefined],
+    ["/api/prefs", "GET", undefined],
+    ["/api/prefs", "PATCH", { pitchPercent: 10 }],
+    ["/api/wantlist", "PUT", { releaseId: 1 }],
+    ["/api/dig", "POST", { seed: { releaseId: 1 } }],
+  ];
+  for (const [path, method, body] of routes) {
+    const res = await dead.call(path, { method, body, cookie: dead.cookie });
+    assert.equal(res.status, 401, `${method} ${path} allowed a revoked session`);
+    assert.equal(res.body?.error?.code, "session_revoked", `${method} ${path}`);
+  }
+});
+
+await check("a session issued after the bump works again", async () => {
+  const reissued = actor(revoker.username, bumpedVersion);
+  const res = await reissued.call("/api/playlists", { cookie: reissued.cookie });
+  assert.equal(res.status, 200, "signing back in should work immediately");
+});
+
+await check("revoking is per account, not global", async () => {
+  const res = await alice.call("/api/playlists");
+  assert.equal(
+    res.status,
+    200,
+    "another user was signed out by someone else's revoke",
+  );
+});
+
+await check("the revoked user's data survived", async () => {
+  const reissued = actor(revoker.username, bumpedVersion);
+  const prefs = await reissued.call("/api/prefs", { cookie: reissued.cookie });
+  assert.equal(prefs.status, 200);
+  assert.ok(
+    typeof prefs.body.pitchPercent === "number",
+    "revocation should kill sessions, not data",
   );
 });
 

@@ -72,6 +72,7 @@ a database breach would yield.
 | Session fixation via the OAuth callback | The request token is sealed into a single-use, HttpOnly, 10-minute cookie. The callback refuses unless the `oauth_token` Discogs returns matches it (`safeEqual`, constant time). RFC 5849 §11.7. |
 | Impersonating Discogs at the callback | The `oauth_verifier` is spent against Discogs over TLS with a signed request. |
 | Stolen cookie replayed elsewhere | `__Host-` prefix + `Secure` + `SameSite=Lax` + `Path=/`, no `Domain`. |
+| **A stolen cookie used before it expires** | `users.session_version` is sealed into the cookie and checked on every authenticated request. "Sign out everywhere" bumps it, killing every cookie that account holds on their next request. See §6. |
 | Claiming another user's data | The internal `user_id` is resolved from the *session's* Discogs username via `ensureUser()`. No route accepts a username or user id as input. |
 
 ### Tampering
@@ -172,7 +173,60 @@ flag there before the feature.
 metadata and the exclusion lists from the caller, and those only shape what that
 caller sees. The `dig_log` table is keyed on `user_id`.
 
-## 6. The LLM boundary
+## 6. Session lifetime and revocation
+
+Sessions are stateless: the Discogs token lives inside a sealed cookie and
+there is no session table. That is deliberate — a database breach yields no
+tokens — but it costs something, and until this release the cost was real: an
+exfiltrated cookie stayed valid for its full 14 days, and the only kill switch
+was rotating `SESSION_SECRET`, which signs out every user of the deployment.
+
+`users.session_version` closes that without giving up the property that made
+stateless sessions worth having.
+
+**How it works.** The version is sealed into the cookie when it is issued and
+compared against the stored value on every authenticated request. Bumping the
+column invalidates every cookie that account holds, everywhere, on its next
+request.
+
+**It costs nothing.** `requireUser` already had to resolve the session's
+Discogs username into an internal user id — one `INSERT … ON CONFLICT DO
+UPDATE … RETURNING` per request. The version comes back in that same row. No
+extra round trip, no session store, no cache to invalidate.
+
+```
+cookie  { u: "titomazzetta", v: 3, … }   sealed, HttpOnly, AES-256-GCM
+                    │
+                    ▼
+  INSERT … ON CONFLICT … RETURNING id, session_version    ← already happening
+                    │
+        v === session_version ?
+           yes → userId          no → 401 session_revoked
+```
+
+**Order of operations in the guard**, which matters:
+
+1. decrypt and integrity-check the cookie (no database),
+2. for a write, verify Origin and the CSRF token,
+3. compare against the stored `session_version`.
+
+`getSession()` deliberately does *not* do step 3 — it answers "is this cookie
+ours and intact", not "is this session live". Anything calling it directly has
+to do the liveness check itself, which is why the server component that renders
+the app does so too rather than showing a shell to someone who has signed out.
+
+**What it does not do.** It does not revoke the OAuth grant on Discogs' side —
+that lives in the user's Discogs settings and is theirs to revoke. And there is
+no per-device revocation, because stateless sessions carry nothing to
+distinguish devices by. An all-or-nothing control that says so is better than a
+per-device list that quietly does the same thing.
+
+Eleven test cases cover this, including that a cookie from another device dies
+too, that every route honours it rather than just the one that was checked
+first, that signing back in works immediately, that one account's revoke does
+not touch another's, and that revocation kills sessions without touching data.
+
+## 7. The LLM boundary
 
 The optional Claude pass is the one place where model output influences what a
 user sees, so it gets its own contract:
@@ -201,7 +255,7 @@ no collection listing.
 
 ---
 
-## 7. Audio capture
+## 8. Audio capture
 
 BPM detection uses `getDisplayMedia({ audio: true })`. Because that is a
 genuinely powerful permission, the constraints are worth stating:
@@ -222,7 +276,7 @@ genuinely powerful permission, the constraints are worth stating:
 
 ---
 
-## 8. HTTP response headers
+## 9. HTTP response headers
 
 Set in `next.config.ts` (static) and `src/proxy.ts` (per-request CSP).
 
@@ -259,7 +313,7 @@ documented fallback for browsers without tab audio capture.
 
 ---
 
-## 9. Verifying the claims
+## 10. Verifying the claims
 
 ```bash
 # 1. Headers and per-request nonce (run twice — the nonce must differ)
@@ -278,7 +332,7 @@ npm run audit:ci && npm ls --prod --depth=0
 npm run typecheck && npm run lint
 npm run test:tempo                    # 38 cases, no server needed
 npm run test:mixing                   # 34 cases, no server needed
-npm run dev & npm run test:api        # 48 cases: auth, CSRF, IDOR, privacy, validation
+npm run dev & npm run test:api        # 59 cases: auth, CSRF, IDOR, revocation, privacy, validation
 ```
 
 `test-api.mjs` forges its own session cookies using `SESSION_SECRET` — which is
@@ -291,7 +345,7 @@ push, and fails on any of them.
 
 ---
 
-## 10. Residual risks
+## 11. Residual risks
 
 Honest list of what is *not* solved.
 
@@ -301,35 +355,41 @@ Honest list of what is *not* solved.
    *Fix if this took real traffic:* Vercel WAF rate rules, or move the buckets
    to Upstash Redis. Traded away deliberately to keep the deployment simple.
 
-2. **No token revocation list.** Sessions are stateless, so an exfiltrated
-   cookie is valid until its 14-day expiry. The only kill switch is rotating
-   `SESSION_SECRET`, which logs out everybody. Now that a database exists this
-   is fixable — a `session_version` column on `users` would do it — and it is
-   the most defensible next hardening step.
+2. **Revocation is all-or-nothing per account.** `session_version` (§6) kills
+   every session a user holds, which is the honest primitive for stateless
+   sessions but means you cannot sign out one lost phone and keep the laptop.
+   Per-device revocation would need per-device identity in the cookie and a
+   table to track it — which reintroduces the session store this design
+   avoided. A reasonable middle ground, if it ever matters: a `device_label`
+   sealed into the cookie and a per-user list of revoked labels.
 
-3. **Database encryption is Neon's, not ours.** Playlists and BPM readings are
+3. **A revoked session is rejected on its next request, not instantly.**
+   There is no push channel; a tab sitting idle stays rendered until it next
+   calls the API. In practice that is seconds, but it is not zero.
+
+4. **Database encryption is Neon's, not ours.** Playlists and BPM readings are
    encrypted at rest by the provider but not application-level encrypted. A
    provider-side compromise exposes them. Given the sensitivity (a DJ's track
    list), that was judged acceptable; the Discogs token, which is not
    acceptable to lose, deliberately never goes near the database.
 
-4. **`style-src 'unsafe-inline'`** — see §8.
+5. **`style-src 'unsafe-inline'`** — see §9.
 
-5. **Third-party trust.** Discogs' TLS and their handling of our consumer
+6. **Third-party trust.** Discogs' TLS and their handling of our consumer
    secret are outside our control, as is Anthropic's handling of prompts.
 
-6. **The YouTube iframe is third-party script** in the user's browser. CSP
+7. **The YouTube iframe is third-party script** in the user's browser. CSP
    confines it to `frame-src` with no access to our DOM or cookies, but it is
    not nothing.
 
-7. **XSS would still be serious** even though it cannot read the token. An
+8. **XSS would still be serious** even though it cannot read the token. An
    attacker with script execution could drive the app's own authenticated
    `fetch` calls. `HttpOnly` limits blast radius; it does not eliminate it.
 
-8. **No formal pen test.** This is one developer's threat model, not an audit.
+9. **No formal pen test.** This is one developer's threat model, not an audit.
 
 ---
 
-## 11. Reporting
+## 12. Reporting
 
 Open a private security advisory on the repository rather than a public issue.

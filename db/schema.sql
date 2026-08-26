@@ -207,3 +207,32 @@ BEGIN
       CHECK (pitch_percent BETWEEN 1 AND 100);
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Session revocation
+--
+-- Sessions are stateless — the Discogs token lives inside a sealed cookie and
+-- there is no session table to delete rows from. That is good for the blast
+-- radius of a database breach and bad for revocation: without this column, an
+-- exfiltrated cookie stays valid until it expires, and the only kill switch is
+-- rotating SESSION_SECRET, which logs out every user at once.
+--
+-- `session_version` fixes that at the cost of nothing. The version is sealed
+-- into the cookie when it is issued and compared on every authenticated
+-- request. Bumping it invalidates every session that user holds, everywhere,
+-- immediately — and it costs no extra round trip, because the request already
+-- touches this row to resolve the username into a user id.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 1;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'users_session_version_check'
+  ) THEN
+    ALTER TABLE users
+      ADD CONSTRAINT users_session_version_check CHECK (session_version >= 1);
+  END IF;
+END $$;

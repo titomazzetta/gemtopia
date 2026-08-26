@@ -19,14 +19,22 @@ import type { Playlist, PlaylistItemRow, TrackMeta } from "./types";
 interface UserRow {
   id: string;
   username_display: string;
+  session_version: number;
 }
 
 /**
  * Resolve the Discogs username from the session into our internal user id,
  * creating the row on first sight. The username is the identity Discogs
  * asserted during OAuth; it never comes from client input.
+ *
+ * Also returns the current `session_version`, which the caller compares
+ * against the one sealed into the cookie. Doing both in this single statement
+ * is the whole trick behind revocation being free: the request had to touch
+ * this row anyway.
  */
-export async function ensureUser(discogsUsername: string): Promise<string> {
+export async function ensureUser(
+  discogsUsername: string,
+): Promise<{ userId: string; sessionVersion: number }> {
   const key = discogsUsername.toLowerCase();
 
   const row = await queryOne<UserRow>(
@@ -35,12 +43,50 @@ export async function ensureUser(discogsUsername: string): Promise<string> {
      ON CONFLICT (username_key)
        DO UPDATE SET last_seen_at = now(),
                      username_display = EXCLUDED.username_display
-       RETURNING id, username_display`,
+       RETURNING id, username_display, session_version`,
     [key, discogsUsername],
   );
 
   if (!row) throw new Error("failed to upsert user");
-  return row.id;
+  return { userId: row.id, sessionVersion: row.session_version };
+}
+
+/**
+ * Validate a session and resolve it to a user id.
+ *
+ * Returns `null` when the sealed version is behind the stored one — meaning
+ * the user has since revoked their sessions and this cookie, though
+ * cryptographically intact, is dead.
+ */
+export async function resolveSession(
+  discogsUsername: string,
+  sessionVersion: number,
+): Promise<string | null> {
+  const { userId, sessionVersion: current } = await ensureUser(discogsUsername);
+  return sessionVersion === current ? userId : null;
+}
+
+/**
+ * Invalidate every session this user holds, on every device, immediately.
+ *
+ * This is the kill switch that stateless sessions otherwise lack. It takes
+ * effect on the very next request anywhere, including the one that called it,
+ * because every authenticated request re-reads this column.
+ *
+ * Note it does *not* reach into Discogs — the user's OAuth grant there is
+ * theirs to revoke from their Discogs settings. What this guarantees is that
+ * no cookie previously issued by us can be used to act on their behalf again.
+ */
+export async function revokeAllSessions(userId: string): Promise<number> {
+  const row = await queryOne<{ session_version: number }>(
+    `UPDATE users
+        SET session_version = session_version + 1
+      WHERE id = $1
+      RETURNING session_version`,
+    [userId],
+  );
+  if (!row) throw new Error("no such user");
+  return row.session_version;
 }
 
 /* ------------------------------------------------------------------ */

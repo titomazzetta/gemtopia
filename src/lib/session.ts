@@ -44,6 +44,15 @@ const sessionSchema = z.object({
   s: z.string().min(1),
   /** Discogs username. */
   u: z.string().min(1),
+  /**
+   * The user's `session_version` at the moment this cookie was issued.
+   *
+   * Every authenticated request compares this against the stored value, so
+   * bumping that value kills this cookie and every other one the user holds.
+   * It is the revocation mechanism that stateless sessions otherwise lack —
+   * see repo.revokeAllSessions and SECURITY.md §6.
+   */
+  v: z.number().int().positive(),
   /** Issued-at, epoch seconds. */
   iat: z.number().int().positive(),
 });
@@ -54,11 +63,13 @@ export async function createSession(data: {
   token: string;
   tokenSecret: string;
   username: string;
+  sessionVersion: number;
 }): Promise<void> {
   const payload: Session = {
     t: data.token,
     s: data.tokenSecret,
     u: data.username,
+    v: data.sessionVersion,
     iat: Math.floor(Date.now() / 1000),
   };
 
@@ -77,6 +88,15 @@ export async function createSession(data: {
   });
 }
 
+/**
+ * Decode and integrity-check the session cookie.
+ *
+ * Deliberately does *not* touch the database — it answers "is this cookie
+ * ours and intact", not "is this session still live". The liveness check lives
+ * in `auth.requireUser`, which folds it into a query it was making anyway.
+ * Anything that calls this directly must do the same, or it is trusting a
+ * cookie that may have been revoked.
+ */
 export async function getSession(): Promise<Session | null> {
   const jar = await cookies();
   const raw = jar.get(SESSION_COOKIE)?.value;

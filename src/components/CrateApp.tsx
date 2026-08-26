@@ -23,6 +23,7 @@ import {
 } from "@/client/db";
 import {
   ApiError,
+  authApi,
   insightsApi,
   playlistsApi,
   prefsApi,
@@ -809,18 +810,42 @@ export function CrateApp({
   /* ================= auth ================= */
 
   const signOut = useCallback(async () => {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "x-csrf-token": csrfToken },
-    });
+    await authApi.logout().catch(() => {});
     await nuke();
     // Deliberate hard navigation: a client-side route change would keep the
     // in-memory queue and cached crate alive in this tab after we have just
     // wiped them from disk.
     // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.href = "/";
-  }, [csrfToken]);
+  }, []);
+
+  /**
+   * Sign out everywhere. Bumps the account's session version server-side, so
+   * every cookie ever issued to it — this one, the phone in a bag, the laptop
+   * left at a venue — stops working on its next request.
+   */
+  const revokeEverywhere = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Sign out of Playtopia on every device?\n\n" +
+        "Every browser signed in to this Discogs account will be signed out " +
+        "immediately, including this one. Your playlists and BPM catalogue are " +
+        "not affected.",
+    );
+    if (!confirmed) return;
+
+    try {
+      await authApi.revokeAll();
+    } catch (error) {
+      // A 401 here means it worked and this session died with the rest.
+      if (!(error instanceof ApiError) || error.status !== 401) {
+        say("Could not sign out everywhere. Try again.");
+        return;
+      }
+    }
+    await nuke();
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+    window.location.href = "/";
+  }, [say]);
 
   /* ================= keyboard ================= */
 
@@ -982,6 +1007,18 @@ export function CrateApp({
               className="w-full rounded px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-ink-800"
             >
               Sign out &amp; wipe local cache
+            </button>
+
+            <button
+              type="button"
+              onClick={() => void revokeEverywhere()}
+              className="mt-0.5 w-full rounded px-2 py-1.5 text-left text-xs text-red-300/90 hover:bg-ink-800"
+              title="Invalidate every session for this account, on every device"
+            >
+              Sign out everywhere
+              <span className="mt-0.5 block text-[10px] leading-snug text-neutral-600">
+                Kills every signed-in browser, including this one
+              </span>
             </button>
           </div>
         </details>

@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { getSession, CSRF_COOKIE } from "@/lib/session";
+import { resolveSession } from "@/lib/repo";
 import { SignIn } from "@/components/SignIn";
 import { CrateApp } from "@/components/CrateApp";
 
@@ -22,9 +23,21 @@ export default async function Home({
   const session = await getSession();
   const params = await searchParams;
 
-  if (!session) {
+  // The API routes reject a revoked session on their own, so the app would be
+  // inert anyway — but rendering the shell for someone who has signed out
+  // everywhere is a confusing lie. Check here too.
+  const live = session
+    ? await resolveSession(session.u, session.v).catch(() => null)
+    : null;
+
+  if (!session || !live) {
     const code = typeof params.auth_error === "string" ? params.auth_error : null;
-    return <SignIn error={code ? (AUTH_ERRORS[code] ?? AUTH_ERRORS.failed!) : null} />;
+    const message = code
+      ? (AUTH_ERRORS[code] ?? AUTH_ERRORS.failed!)
+      : session && !live
+        ? "You signed out of every device. Sign in again to carry on."
+        : null;
+    return <SignIn error={message} />;
   }
 
   const jar = await cookies();

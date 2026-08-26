@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { accessToken, getIdentity } from "@/lib/discogs";
 import { consumeHandshake, createSession } from "@/lib/session";
+import { ensureUser } from "@/lib/repo";
 import { safeEqual } from "@/lib/crypto";
 import { env } from "@/lib/env";
 import { callerId, rateLimit } from "@/lib/ratelimit";
@@ -58,10 +59,16 @@ export async function GET(request: NextRequest) {
       tokenSecret: granted.tokenSecret,
     });
 
+    // Seal the user's *current* session version into the cookie. Signing in
+    // after a "sign out everywhere" therefore works immediately, while every
+    // cookie issued before it stays dead.
+    const { sessionVersion } = await ensureUser(username);
+
     await createSession({
       token: granted.token,
       tokenSecret: granted.tokenSecret,
       username,
+      sessionVersion,
     });
 
     return NextResponse.redirect(new URL("/", env.APP_ORIGIN), { status: 302 });

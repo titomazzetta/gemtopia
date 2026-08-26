@@ -55,6 +55,16 @@ async function request<T>(
     const body = (await response.json().catch(() => null)) as {
       error?: { code?: string; message?: string; retryAfter?: number };
     } | null;
+
+    // A revoked session cannot be recovered by retrying. Send the user back to
+    // sign-in once, rather than letting every panel surface its own error.
+    // A hard navigation on purpose: the in-memory queue, cached crate and
+    // playlists all belong to a session that no longer exists.
+    if (body?.error?.code === "session_revoked" && typeof window !== "undefined") {
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.href = "/";
+    }
+
     throw new ApiError(
       body?.error?.message ?? `Request failed (${response.status})`,
       body?.error?.code ?? "unknown",
@@ -118,6 +128,20 @@ export const trackMetaApi = {
     request<{ written: number }>("/api/track-meta", {
       method: "PUT",
       body: JSON.stringify({ entries }),
+    }),
+};
+
+/* ------------------------------------------------------------------ */
+/* Session                                                             */
+/* ------------------------------------------------------------------ */
+
+export const authApi = {
+  logout: () => request<{ ok: true }>("/api/auth/logout", { method: "POST" }),
+
+  /** Invalidate every session this account holds, on every device. */
+  revokeAll: () =>
+    request<{ ok: true; sessionVersion: number }>("/api/auth/revoke", {
+      method: "POST",
     }),
 };
 
