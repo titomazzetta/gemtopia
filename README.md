@@ -2,8 +2,7 @@
 
 # Gemtopia
 
-**Dig through your Discogs collection anywhere, hear it, build playlists from it,
-and fall sideways into the records you don't own yet.**
+**Dig your record collection when you're nowhere near your turntables.**
 
 [![CI](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml/badge.svg)](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml)
 [![Security](https://img.shields.io/badge/threat%20model-SECURITY.md-4ade80)](./SECURITY.md)
@@ -13,19 +12,62 @@ and fall sideways into the records you don't own yet.**
 
 ---
 
-Gemtopia is a DJ tool built on top of the Discogs API. It turns a record collection
-into something you can actually *play* — shuffle it, filter it by tempo and style,
-build playlists on the move, catalogue BPMs as you listen, and dig outward into
-records you don't own but probably should.
+## Who this is for
 
-It was built to be used on trains and in hotel rooms, and to be read by people
-who care how software is put together. The [threat model](./SECURITY.md) is the
-part I'd point at first.
+**Vinyl DJs, away from the decks.**
+
+If you play records, the crate is the instrument — and you can only really use it
+standing in front of it. Everywhere else, a collection is an inventory: a list of
+things you own and can't hear. Meanwhile the useful thinking happens exactly where
+the records aren't. On a train. In a hotel the night before. Three weeks out from a
+gig, when you know roughly what you want the set to feel like and can't audition a
+single record to find it.
+
+Gemtopia is for those hours. Your collection becomes something you can **hear,
+sort, sequence and argue with from a phone** — so the set is half-built before you
+get home, and pulling the records becomes twenty minutes of picking rather than an
+evening of rediscovery.
+
+Two things it's built to do:
+
+### Prep a set on the road
+
+Shuffle your own records and actually listen. Cut the crate to a style, a label, a
+decade, a tempo. Build the playlist as you go. Tap the BPMs in while they play —
+and get told, before you pack the bag, whether the records in that order will
+**actually beatmatch on your decks**, at your pitch range, with the exact fader
+move each transition needs.
+
+### Fall down a hole from a record you already own
+
+This is the part that surprised me. When you're going through your own collection,
+you keep bumping into a record and thinking *"I want more of this."* Normally that
+thought dies there, because you're not near a shop and you can't remember the
+label.
+
+Press `D` and it doesn't die. You get everything else **you already own** that
+connects to that record — same artist, same label, same style, same year, same
+mixable tempo — instantly, no network. And then, one click further, **everything
+that exists beyond your collection**: the rest of that artist's discography, the
+rest of that label's catalogue, records from the same scene and the same three
+years. Preview the audio without owning them. Heart the ones you want. Dig again
+from *those*, and keep going.
+
+So a collection stops being a closed box. **The records you own become the map for
+finding the ones you don't** — which is what digging in a shop feels like, and what
+browsing a database usually doesn't.
+
+---
+
+It's built on the Discogs API, meant to be used on trains and in hotel rooms, and
+written to be read by people who care how software is put together. The
+[threat model](./SECURITY.md) is the part I'd point at first.
 
 ---
 
 ## Contents
 
+- [Who this is for](#who-this-is-for)
 - [What it does](#what-it-does)
 - [The digging model](#the-digging-model)
 - [BPM, and how it actually works](#bpm-and-how-it-actually-works)
@@ -267,6 +309,24 @@ computeFacets()  ──counts across your synced pool──▶  the chips you se
 The number beside each chip is how many clips in your crate carry that tag, and
 the whole panel re-ranks as the sync fills in. If a style shows up, it's because
 you own records tagged with it.
+
+### Playlists are Gemtopia's, not Discogs'
+
+Discogs has no playlist concept. The nearest thing is a **List**, and a List is
+release-level, unordered for playback, and **read-only through the API** — there
+is no endpoint to create one. So a Gemtopia playlist could not be mirrored onto
+your Discogs account even if that were wanted.
+
+They're also a different shape. A playlist row is keyed on `releaseId:videoId` —
+one specific clip on one specific release, in a specific position, carrying its
+own BPM and the mixability verdict for the transition into the next one. A List
+can hold none of that. Playlists live in Gemtopia's own Postgres, in
+`playlists` / `playlist_items`, private to your account.
+
+**The only thing this app ever writes to Discogs is the wantlist heart.**
+`addToWantlist` and `removeFromWantlist` are the only two write calls in the
+codebase — grep for `writeRequest` and you'll find exactly those two callers.
+Your collection, your Lists, your profile, the marketplace: read-only, always.
 
 ---
 
