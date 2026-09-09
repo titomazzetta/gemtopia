@@ -72,6 +72,9 @@ jobs:
       - name: Playable de-duplication tests
         run: npm run test:playables
 
+      - name: Crate sorting tests
+        run: npm run test:sorting
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 

@@ -30,7 +30,33 @@ export interface FilterState {
   bpmTo: number | null;
   tracksOnly: boolean;
   withBpmOnly: boolean;
+  /*
+   * Whether a facet with several values selected means "any of these" or "all
+   * of these".
+   *
+   * Every facet was OR-within, AND-across: pick Techno and Deep House and you
+   * get records tagged either way, and there was no way to ask for the ones
+   * tagged *both*. Both questions are worth asking and they find different
+   * records — "any" widens the crate, "all" finds the specific corner where
+   * two tags overlap, which on a well-tagged collection is often the most
+   * interesting shelf in it.
+   *
+   * Only the genuinely multi-valued facets appear here. A release has one
+   * artist string, one country and one decade in this model, so "all" would
+   * always be empty for those and the control is not offered.
+   */
+  matchAll: Partial<Record<MultiFacetKey, boolean>>;
 }
+
+/** Facets where a release can carry more than one value at once. */
+export type MultiFacetKey = "genres" | "styles" | "labels" | "formats";
+
+export const MULTI_FACETS: readonly MultiFacetKey[] = [
+  "genres",
+  "styles",
+  "labels",
+  "formats",
+];
 
 export const emptyFilters: FilterState = {
   query: "",
@@ -47,6 +73,7 @@ export const emptyFilters: FilterState = {
   bpmTo: null,
   tracksOnly: false,
   withBpmOnly: false,
+  matchAll: {},
 };
 
 export type FacetKey =
@@ -209,6 +236,22 @@ export function computeFacets(pool: Playable[]): Facets {
   };
 }
 
+/** Does one record satisfy one multi-valued facet selection? */
+function facetMatches(
+  values: readonly string[],
+  selected: Set<string>,
+  all: boolean | undefined,
+): boolean {
+  if (selected.size === 0) return true;
+  if (all) {
+    for (const wanted of selected) {
+      if (!values.includes(wanted)) return false;
+    }
+    return true;
+  }
+  return values.some((value) => selected.has(value));
+}
+
 export function applyFilters(
   pool: Playable[],
   filters: FilterState,
@@ -239,10 +282,19 @@ export function applyFilters(
     }
 
     if (sets.artists.size > 0 && !sets.artists.has(item.artist)) return false;
-    if (sets.genres.size > 0 && !item.genres.some((g) => sets.genres.has(g))) return false;
-    if (sets.styles.size > 0 && !item.styles.some((s) => sets.styles.has(s))) return false;
-    if (sets.labels.size > 0 && !item.labels.some((l) => sets.labels.has(l))) return false;
-    if (sets.formats.size > 0 && !item.formats.some((f) => sets.formats.has(f))) return false;
+    /*
+     * "any" is satisfied when the record carries at least one of the selected
+     * values; "all" when it carries every one of them. Note the direction of
+     * the "all" test: it asks whether each *selected* value is present on the
+     * record, not whether each of the record's tags was selected — a record
+     * tagged Techno, Deep House and Detroit still matches "Techno AND Deep
+     * House". Getting that backwards would make "all" mean "exactly these",
+     * which almost nobody wants and which returns nothing on real data.
+     */
+    if (!facetMatches(item.genres, sets.genres, filters.matchAll?.genres)) return false;
+    if (!facetMatches(item.styles, sets.styles, filters.matchAll?.styles)) return false;
+    if (!facetMatches(item.labels, sets.labels, filters.matchAll?.labels)) return false;
+    if (!facetMatches(item.formats, sets.formats, filters.matchAll?.formats)) return false;
 
     if (sets.countries.size > 0) {
       if (!item.country || !sets.countries.has(item.country)) return false;
@@ -271,12 +323,17 @@ function ChipGroup({
   selected,
   onToggle,
   collapsedCount = 10,
+  matchAll,
+  onMatchAllChange,
 }: {
   label: string;
   options: Array<[string, number]>;
   selected: string[];
   onToggle: (value: string) => void;
   collapsedCount?: number;
+  /** Undefined for facets where a record can only hold one value. */
+  matchAll?: boolean;
+  onMatchAllChange?: (all: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
@@ -299,11 +356,47 @@ function ChipGroup({
         <h3 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
           {label}
         </h3>
-        {selected.length > 0 && (
-          <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">
-            {selected.length}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {/*
+            any / all, and only once there are two things selected — with one
+            value the distinction does not exist, and a control that is inert
+            most of the time teaches people to ignore it.
+          */}
+          {onMatchAllChange && selected.length > 1 && (
+            <div
+              className="flex overflow-hidden rounded border border-ink-700"
+              role="group"
+              aria-label={`${label} match mode`}
+            >
+              {([false, true] as const).map((all) => (
+                <button
+                  key={String(all)}
+                  type="button"
+                  onClick={() => onMatchAllChange(all)}
+                  aria-pressed={Boolean(matchAll) === all}
+                  title={
+                    all
+                      ? `Records tagged with every selected ${label.toLowerCase()}`
+                      : `Records tagged with any selected ${label.toLowerCase()}`
+                  }
+                  className={`px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide transition-colors ${
+                    Boolean(matchAll) === all
+                      ? "bg-accent/20 text-accent"
+                      : "text-neutral-600 hover:text-neutral-300"
+                  }`}
+                >
+                  {all ? "all" : "any"}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {selected.length > 0 && (
+            <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">
+              {selected.length}
+            </span>
+          )}
+        </div>
       </div>
 
       {options.length > collapsedCount && (
@@ -451,6 +544,13 @@ export function Filters({
       [key]: current.includes(value)
         ? current.filter((v) => v !== value)
         : [...current, value],
+    });
+  };
+
+  const setMatchAll = (key: MultiFacetKey) => (all: boolean) => {
+    onChange({
+      ...filters,
+      matchAll: { ...filters.matchAll, [key]: all },
     });
   };
 
@@ -659,11 +759,11 @@ export function Filters({
       </section>
 
       <ChipGroup label="Decade" options={facets.decades} selected={filters.decades} onToggle={toggle("decades")} collapsedCount={12} />
-      <ChipGroup label="Style" options={facets.styles} selected={filters.styles} onToggle={toggle("styles")} />
-      <ChipGroup label="Genre" options={facets.genres} selected={filters.genres} onToggle={toggle("genres")} collapsedCount={8} />
-      <ChipGroup label="Label" options={facets.labels} selected={filters.labels} onToggle={toggle("labels")} collapsedCount={8} />
+      <ChipGroup label="Style" options={facets.styles} selected={filters.styles} onToggle={toggle("styles")} matchAll={filters.matchAll?.styles ?? false} onMatchAllChange={setMatchAll("styles")} />
+      <ChipGroup label="Genre" options={facets.genres} selected={filters.genres} onToggle={toggle("genres")} matchAll={filters.matchAll?.genres ?? false} onMatchAllChange={setMatchAll("genres")} collapsedCount={8} />
+      <ChipGroup label="Label" options={facets.labels} selected={filters.labels} onToggle={toggle("labels")} matchAll={filters.matchAll?.labels ?? false} onMatchAllChange={setMatchAll("labels")} collapsedCount={8} />
       <ChipGroup label="Artist" options={facets.artists} selected={filters.artists} onToggle={toggle("artists")} collapsedCount={8} />
-      <ChipGroup label="Format" options={facets.formats} selected={filters.formats} onToggle={toggle("formats")} collapsedCount={8} />
+      <ChipGroup label="Format" options={facets.formats} selected={filters.formats} onToggle={toggle("formats")} matchAll={filters.matchAll?.formats ?? false} onMatchAllChange={setMatchAll("formats")} collapsedCount={8} />
       <ChipGroup label="Country" options={facets.countries} selected={filters.countries} onToggle={toggle("countries")} collapsedCount={8} />
     </div>
   );

@@ -6,6 +6,7 @@ import { VERDICT_META, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { formatBpm } from "@/lib/mixing";
 import { Play, Plus, Trash } from "./Icons";
+import type { SortKey, SortState } from "@/client/sorting";
 
 const BASE_ROW_HEIGHT = 56;
 /** Extra height for the transition strip when set-prep mode is on. */
@@ -50,6 +51,57 @@ function TransitionStrip({ check }: { check: MixCheck }) {
  * slice — ~30 rows — and translate the viewport. Fixed row height keeps this
  * to about forty lines instead of pulling in a virtualisation library.
  */
+/**
+ * A clickable column heading.
+ *
+ * The arrow shows the direction only for the active column. Showing a faint
+ * arrow on every sortable column — a common pattern — makes the active one
+ * harder to spot, which is the one thing the row has to communicate.
+ */
+function SortHeader({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className = "",
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: SortState | null | undefined;
+  onSort: (key: SortKey) => void;
+  className?: string;
+}) {
+  const active = sort?.key === sortKey;
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(sortKey)}
+      /*
+       * The state goes in the label rather than aria-sort, because aria-sort
+       * belongs on a columnheader and this is not a table — it is a virtualised
+       * list, and scattering table roles across it would describe a structure
+       * that is not there. A label that says what the control currently does is
+       * both accurate and more useful read aloud.
+       */
+      aria-label={
+        active
+          ? `Sort by ${label}, currently ${sort?.direction === "asc" ? "ascending" : "descending"}`
+          : `Sort by ${label}`
+      }
+      className={`flex items-center gap-0.5 text-[10px] uppercase tracking-wider transition-colors ${
+        active ? "text-accent" : "text-neutral-600 hover:text-neutral-300"
+      } ${className}`}
+    >
+      {label}
+      {active && (
+        <span aria-hidden="true" className="text-[8px]">
+          {sort?.direction === "asc" ? "▲" : "▼"}
+        </span>
+      )}
+    </button>
+  );
+}
+
 export function TrackList({
   items,
   currentKey,
@@ -60,6 +112,8 @@ export function TrackList({
   reorderable = false,
   onReorder,
   transitions,
+  sort,
+  onSort,
 }: {
   items: Playable[];
   currentKey: string | null;
@@ -71,6 +125,10 @@ export function TrackList({
   onReorder?: (from: number, to: number) => void;
   /** Mix check for the transition *into* each index. Index 0 has none. */
   transitions?: Map<number, MixCheck>;
+  /** Current column sort, or null for the list's own order. */
+  sort?: SortState | null;
+  /** Omitted where sorting makes no sense — a playlist has a real order. */
+  onSort?: (key: SortKey) => void;
 }) {
   const showTransitions = Boolean(transitions && transitions.size > 0);
   const ROW_HEIGHT = showTransitions
@@ -111,7 +169,53 @@ export function TrackList({
   }
 
   return (
-    <div ref={viewportRef} onScroll={onScroll} className="h-full overflow-y-auto">
+    <div className="flex h-full flex-col">
+      {/*
+        The header sits outside the scrolling viewport, not inside it. The list
+        is virtualised — only the visible rows exist — so a header row placed
+        among them would be recycled away the moment you scrolled.
+
+        It appears only when `onSort` is passed, which is the crate. A playlist
+        has a real order that means something, and offering to re-sort the view
+        would put the displayed order and the stored order into disagreement —
+        with transition checks between rows that are no longer adjacent.
+      */}
+      {onSort && (
+        <div className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900/60 px-3 py-1.5">
+          <span className="w-9 shrink-0" aria-hidden="true" />
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <SortHeader label="Title" sortKey="title" sort={sort} onSort={onSort} />
+            <SortHeader label="Artist" sortKey="artist" sort={sort} onSort={onSort} />
+            <SortHeader label="Label" sortKey="label" sort={sort} onSort={onSort} />
+          </div>
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            <SortHeader
+              label="Year"
+              sortKey="year"
+              sort={sort}
+              onSort={onSort}
+              className="w-8 justify-end"
+            />
+            <SortHeader
+              label="BPM"
+              sortKey="bpm"
+              sort={sort}
+              onSort={onSort}
+              className="w-11 justify-end"
+            />
+            <SortHeader
+              label="Len"
+              sortKey="duration"
+              sort={sort}
+              onSort={onSort}
+              className="w-10 justify-end"
+            />
+          </div>
+          {(onAdd || onRemove) && <span className="w-7 shrink-0" aria-hidden="true" />}
+        </div>
+      )}
+
+      <div ref={viewportRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
       <div style={{ height: items.length * ROW_HEIGHT, position: "relative" }}>
         <ul
           style={{ transform: `translateY(${start * ROW_HEIGHT}px)` }}
@@ -198,11 +302,9 @@ export function TrackList({
                         {item.styles[0]}
                       </span>
                     )}
-                    {item.year && (
-                      <span className="font-mono text-[10px] text-neutral-600">
-                        {item.year}
-                      </span>
-                    )}
+                    <span className="w-8 text-right font-mono text-[10px] text-neutral-600">
+                      {item.year ?? ""}
+                    </span>
                     {/*
                       BPM sits immediately left of the runtime and holds its
                       column whether or not there is a reading, so the numbers
@@ -260,6 +362,7 @@ export function TrackList({
             );
           })}
         </ul>
+      </div>
       </div>
     </div>
   );

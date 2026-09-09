@@ -34,6 +34,7 @@ import {
 import type { FacetKey } from "./Filters";
 import { startSync, type SyncHandle } from "@/client/sync";
 import { buildPlayables, spreadShuffle } from "@/client/playables";
+import { nextSort, sortItems, type SortKey, type SortState } from "@/client/sorting";
 import { TapTempo } from "@/client/tempo";
 import {
   advanceSweep,
@@ -130,6 +131,13 @@ export function CrateApp({
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [picker, setPicker] = useState<Playable | null>(null);
+
+  /*
+   * Column sort for the crate. Null means the list's own order, which for a
+   * crate is a shuffle — so clearing the sort has to be reachable, and
+   * `nextSort` makes the third click on a column do exactly that.
+   */
+  const [sort, setSort] = useState<SortState | null>(null);
 
   /** Deck pitch range, in percent. Drives every mixability calculation. */
   const [pitchPercent, setPitchPercent] = useState(DEFAULT_PITCH_PERCENT);
@@ -677,7 +685,20 @@ export function CrateApp({
     });
   }, [activePlaylist, byKey, bpmByClip]);
 
-  const visible = activePlaylist ? playlistItems : filtered;
+  /*
+   * A playlist keeps its own order — that order is the set, and the transition
+   * checks between consecutive rows only mean anything while the displayed
+   * order is the stored one. So sorting applies to the crate only.
+   */
+  const visible = useMemo(
+    () =>
+      activePlaylist
+        ? playlistItems
+        : sort
+          ? sortItems(filtered, sort)
+          : filtered,
+    [activePlaylist, playlistItems, filtered, sort],
+  );
 
   /*
    * Key -> playable for whatever is on screen, so the sweep can find the next
@@ -1538,6 +1559,12 @@ export function CrateApp({
                 reorderable={Boolean(activePlaylist)}
                 onReorder={reorderPlaylist}
                 transitions={activePlaylist ? transitions : undefined}
+                sort={activePlaylist ? null : sort}
+                onSort={
+                  activePlaylist
+                    ? undefined
+                    : (key: SortKey) => setSort((current) => nextSort(current, key))
+                }
                 emptyMessage={
                   activePlaylist
                     ? "This playlist is empty. Add clips with the + button or the A key."

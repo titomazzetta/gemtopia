@@ -86,7 +86,8 @@ written to be read by people who care how software is put together. The
 | | |
 |---|---|
 | **Shuffle the crate** | Fisher–Yates over every clip Discogs has for your collection, spread so the same release never lands twice in a row. |
-| **Filter on real metadata** | Style, genre, label, artist, format, country, decade, year and tempo — every option counted from *your* synced collection. |
+| **Filter on real metadata** | Style, genre, label, artist, format, country, decade, year and tempo — every option counted from *your* synced collection. Multi-select is **any** or **all**, so you can ask for Techno *or* Deep House, or for the shelf tagged both. |
+| **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
 | **Dig from anything** | Hit `D` on whatever's playing and pivot on any field. Two lanes: what else you own, and what exists beyond it. |
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. |
 | **BPM catalogue** | Detect tempo from the audio as it plays, or tap it in. **Measure** plays through everything on screen and measures it unattended, skipping what is already done. Filter by range, or by what mixes with what's playing. |
@@ -499,6 +500,7 @@ scripts/
 ├── test-env.mjs               configuration contract (36 cases)
 ├── test-headers.mjs           security headers, both directions (20 cases)
 ├── test-playables.mjs         clip de-duplication and best-clip choice (18 cases)
+├── test-sorting.mjs           crate ordering, and where unknowns go (17 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths and set length (55 cases)
 └── test-api.mjs               auth, CSRF, IDOR, sharing, privacy (80 cases)
@@ -540,6 +542,7 @@ npm run test           # everything below
 npm run test:env       # 36 cases, no server needed
 npm run test:headers   # 20 cases, no server needed
 npm run test:playables # 18 cases, no server needed
+npm run test:sorting   # 17 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 55 cases, no server needed
 npm run test:api       # 80 cases, needs a running server + Postgres
