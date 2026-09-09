@@ -71,12 +71,30 @@ export function rateLimit(
  * Prefers the authenticated username; falls back to the Vercel-provided client
  * IP. We never trust a raw `X-Forwarded-For` we did not put there ourselves.
  */
-export function callerId(request: Request, username?: string): string {
-  if (username) return `u:${username}`;
+/**
+ * The key a rate-limit bucket is counted under.
+ *
+ * `scope` is required, and that is the point. Buckets are keyed by this string
+ * alone, so two routes passing the same identifier share one counter — which
+ * meant every route using a bare caller id drew on the same allowance, and the
+ * smallest limit any of them declared silently became the limit for all of
+ * them. A minute of BPM writes from the detector (120/min, legitimately) would
+ * exhaust the 20/min a share link is allowed and lock the user out of a
+ * feature they had not touched.
+ *
+ * Making the scope an argument rather than a convention means the compiler
+ * finds every call site, and a new route cannot forget.
+ */
+export function callerId(
+  request: Request,
+  scope: string,
+  username?: string,
+): string {
+  if (username) return `${scope}:u:${username}`;
   const ip =
     request.headers.get("x-real-ip") ??
     request.headers.get("x-vercel-forwarded-for") ??
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
     "unknown";
-  return `ip:${ip}`;
+  return `${scope}:ip:${ip}`;
 }

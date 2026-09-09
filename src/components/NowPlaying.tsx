@@ -4,6 +4,7 @@ import { useCallback, type RefObject } from "react";
 import type { BpmSource, Playable } from "@/lib/types";
 import type { PlayerApi } from "@/client/useYouTubePlayer";
 import type { DetectorStatus } from "@/client/useTempoDetector";
+import { formatBpm } from "@/lib/mixing";
 import {
   Compass,
   Disc,
@@ -82,7 +83,7 @@ function TempoPanel({
           {bpm !== null ? (
             <div className="flex items-baseline gap-1.5">
               <span className="font-mono text-sm font-semibold tabular-nums text-neutral-100">
-                {bpm}
+                {formatBpm(bpm, { precise: true })}
               </span>
               <span className="text-[10px] text-neutral-600">
                 BPM {bpmSource ? `· ${sourceLabel[bpmSource]}` : ""}
@@ -91,7 +92,7 @@ function TempoPanel({
           ) : (
             <span className="text-[11px] text-neutral-600">
               {listening && liveBpm !== null
-                ? `listening… ~${liveBpm}`
+                ? `listening… ~${formatBpm(liveBpm)}`
                 : "no BPM yet"}
             </span>
           )}

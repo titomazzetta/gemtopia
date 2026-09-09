@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
 
   // 12 batches/min x 8 = 96 upstream calls/min ceiling per user. The client
   // paces below that; this is the hard stop if it misbehaves.
-  const limit = rateLimit(callerId(request, session.u), 12, 60_000);
+  const limit = rateLimit(callerId(request, "discogs-releases", session.u), 12, 60_000);
   if (!limit.ok) {
     return fail("rate_limited", "Sync is going too fast; pausing.", 429, {
       retryAfter: limit.resetSeconds,

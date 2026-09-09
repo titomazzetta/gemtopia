@@ -507,3 +507,46 @@ export function pitchQuip(percent: number): string | null {
   if (percent <= 50) return "That isn't pitch, that's time travel.";
   return "Beyond here it isn't really the same record any more.";
 }
+
+/* ------------------------------------------------------------------ */
+/* Displaying a tempo                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A tempo, formatted for reading.
+ *
+ * Two questions get conflated here, and they have different answers.
+ *
+ * **What do we store?** One decimal, and no coarser. A record pressed at 123.7
+ * really is 123.7, and the difference between 123.7 and 124 is 0.24% — which
+ * over a five-minute record is about three quarters of a second of drift.
+ * Audible, and exactly the drift a DJ is riding the pitch fader to correct.
+ * Quantising to whole numbers, or to a 0.5 grid, throws that away for nothing:
+ * records are not pressed on a grid, so a grid is a fiction that makes two
+ * genuinely different tempos look identical. Every mixability calculation in
+ * this file reads the stored value, not this one.
+ *
+ * **What do we show?** Depends where. Scanning a list of forty records to
+ * order a set, the decimal is noise — you are asking "is this a 124 or a 130",
+ * and a column of `123.7 / 128.0 / 131.4` is harder to read than `124 / 128 /
+ * 131` for no gain. Looking at one track, the decimal is the useful part.
+ *
+ * Hence a flag rather than one rule. `precise` for the now-playing readout and
+ * the dig drawer; the default everywhere a list is being scanned.
+ *
+ * Detection uncertainty is also real — a reading from a 14-second window is
+ * good to a few tenths, not to a hundredth — which is a second reason not to
+ * render more precision than one decimal anywhere.
+ */
+export function formatBpm(
+  bpm: number | null | undefined,
+  { precise = false }: { precise?: boolean } = {},
+): string {
+  if (bpm === null || bpm === undefined || !Number.isFinite(bpm)) return "—";
+  if (!precise) return String(Math.round(bpm));
+
+  const rounded = Math.round(bpm * 10) / 10;
+  // "124" rather than "124.0": a trailing zero claims precision the reading
+  // does not have, and it is the thing that makes a column look untidy.
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}

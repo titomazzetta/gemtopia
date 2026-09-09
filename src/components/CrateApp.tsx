@@ -198,6 +198,57 @@ export function CrateApp({
     [say],
   );
 
+  // Mirrored so clearBpm can restore a failed delete without depending on
+  // trackMeta and being rebuilt on every reading that lands.
+  const trackMetaRef = useRef<Map<string, TrackMeta>>(new Map());
+  useEffect(() => {
+    trackMetaRef.current = trackMeta;
+  }, [trackMeta]);
+
+  /*
+   * Which playlists currently have a live share link.
+   *
+   * Held here rather than on the Playlist type because the *token* must never
+   * reach the client list endpoint — a list call that returned every token
+   * would mean one compromised response leaked every share link at once. The
+   * URL is returned exactly once, by the call that mints it, and after that
+   * the client knows only that sharing is on.
+   */
+  const [sharedIds, setSharedIds] = useState<Set<string>>(new Set());
+
+  const sharePlaylist = useCallback(
+    async (id: string, shared: boolean) => {
+      try {
+        const result = await playlistsApi.setShared(id, shared);
+
+        setSharedIds((previous) => {
+          const next = new Set(previous);
+          if (result.shared) next.add(id);
+          else next.delete(id);
+          return next;
+        });
+
+        if (result.shared && result.shareUrl) {
+          try {
+            await navigator.clipboard.writeText(result.shareUrl);
+            say("Link copied. Anyone with it can read this set.");
+          } catch {
+            // Clipboard needs a permission some browsers withhold; the link
+            // is useless if the user cannot get at it, so show it.
+            window.prompt("Share this link:", result.shareUrl);
+          }
+        } else {
+          say("Link revoked. It will not work again.");
+        }
+      } catch (error) {
+        say(
+          error instanceof ApiError ? error.message : "Could not change sharing.",
+        );
+      }
+    },
+    [say],
+  );
+
   const tapper = useRef(new TapTempo());
   const [tapCount, setTapCount] = useState(0);
 
@@ -266,15 +317,46 @@ export function CrateApp({
     [trackMeta, saveMeta, say],
   );
 
+  /**
+   * Forget this track's reading, on the server as well as here.
+   *
+   * This used to clear the local map only, and said so in the toast — which
+   * was honest but not much use: the value came straight back on reload, and
+   * because an automatic reading only replaces another automatic reading when
+   * it is *more confident*, a confidently wrong number could not be re-measured
+   * at all. You could tap over it, or live with it.
+   */
   const clearBpm = useCallback(() => {
     const item = currentRef.current;
     if (!item) return;
+
+    const previousEntry = trackMetaRef.current.get(item.key);
+
     setTrackMeta((previous) => {
       const next = new Map(previous);
       next.delete(item.key);
       return next;
     });
-    say("BPM cleared locally — re-tap to store a new one.");
+
+    void (async () => {
+      try {
+        await trackMetaApi.forget(item.key);
+        say("Reading cleared. Play it through, or tap T.");
+      } catch (error) {
+        // Put it back rather than leave the UI claiming something the server
+        // does not agree with.
+        if (previousEntry) {
+          setTrackMeta((previous) => {
+            const next = new Map(previous);
+            next.set(item.key, previousEntry);
+            return next;
+          });
+        }
+        say(
+          error instanceof ApiError ? error.message : "Could not clear that BPM.",
+        );
+      }
+    })();
   }, [say]);
 
   /* ================= boot ================= */
@@ -1152,6 +1234,8 @@ export function CrateApp({
                   playFrom(shuffled ? spreadShuffle(resolved) : resolved, 0);
                 }}
                 onExport={exportPlaylists}
+              onShare={(id, shared) => void sharePlaylist(id, shared)}
+              sharedIds={sharedIds}
                 onImport={(file) => void importPlaylists(file)}
               />
             )}

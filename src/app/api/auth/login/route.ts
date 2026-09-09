@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
  * secret used to sign that call never leaves this function.
  */
 export async function GET(request: NextRequest) {
-  const limit = rateLimit(callerId(request), 10, 60_000);
+  const limit = rateLimit(callerId(request, "auth-login"), 10, 60_000);
   if (!limit.ok) {
     return NextResponse.json(
       { error: { code: "rate_limited", message: "Too many sign-in attempts." } },

@@ -24,7 +24,7 @@ function back(reason?: string) {
  * sealed. Only then do we spend the verifier.
  */
 export async function GET(request: NextRequest) {
-  const limit = rateLimit(callerId(request), 20, 60_000);
+  const limit = rateLimit(callerId(request, "auth-callback"), 20, 60_000);
   if (!limit.ok) return back("rate_limited");
 
   const params = request.nextUrl.searchParams;

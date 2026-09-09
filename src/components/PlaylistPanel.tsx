@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Playlist } from "@/lib/types";
-import { Lock, Play, Plus, Shuffle, Trash } from "./Icons";
+import { Link, Lock, Play, Plus, Shuffle, Trash } from "./Icons";
 
 export function PlaylistPanel({
   playlists,
@@ -14,6 +14,8 @@ export function PlaylistPanel({
   onPlay,
   onExport,
   onImport,
+  onShare,
+  sharedIds,
 }: {
   playlists: Playlist[];
   activeId: string | null;
@@ -24,6 +26,10 @@ export function PlaylistPanel({
   onPlay: (id: string, shuffled: boolean) => void;
   onExport: () => void;
   onImport: (file: File) => void;
+  /** Mint or revoke a read-only link. See repo.setPlaylistShare. */
+  onShare: (id: string, shared: boolean) => void;
+  /** Ids that currently have a live share link. */
+  sharedIds: Set<string>;
 }) {
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -132,6 +138,39 @@ export function PlaylistPanel({
                         className="rounded p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-accent"
                       >
                         <Shuffle className="h-3 w-3" />
+                      </button>
+                      {/*
+                        Share is off until asked for, and the icon shows which
+                        state you are in rather than which action is available —
+                        "is this one shared?" is the question you actually have
+                        when looking down a list of them.
+                      */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const isShared = sharedIds.has(playlist.id);
+                          if (
+                            isShared &&
+                            !window.confirm(
+                              `Revoke the link to "${playlist.name}"? Anyone holding it loses access, permanently — a new link will not be the same one.`,
+                            )
+                          ) {
+                            return;
+                          }
+                          onShare(playlist.id, !isShared);
+                        }}
+                        title={
+                          sharedIds.has(playlist.id)
+                            ? "Shared by link — click to revoke"
+                            : "Create a read-only share link"
+                        }
+                        className={`rounded p-1.5 hover:bg-ink-800 ${
+                          sharedIds.has(playlist.id)
+                            ? "text-accent"
+                            : "text-neutral-500 hover:text-neutral-200"
+                        }`}
+                      >
+                        <Link className="h-3 w-3" />
                       </button>
                       <button
                         type="button"

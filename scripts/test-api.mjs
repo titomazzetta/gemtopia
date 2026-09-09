@@ -739,6 +739,249 @@ await check("delete removes the playlist", async () => {
   assert.equal(after.status, 404);
 });
 
+
+console.log("\nrate-limit isolation");
+
+await check("one route's limit does not consume another's", async () => {
+  /*
+   * Buckets are keyed by the caller id string alone, so two routes passing the
+   * same identifier shared one counter — and the smallest limit any of them
+   * declared became the effective limit for all. A minute of legitimate BPM
+   * writes (120/min) would exhaust the 20/min allowed for share links and lock
+   * the user out of a feature they had not touched.
+   *
+   * Spend well past the share route's allowance on track-meta writes, then
+   * check the share route still answers.
+   */
+  const spender = actor(`spender_${randomBytes(4).toString("hex")}`);
+
+  const created = await spender.call("/api/playlists", {
+    method: "POST",
+    body: { name: "Budget", entries: [clip(4001, "eeeeeeeeeee")] },
+  });
+  assert.equal(created.status, 201);
+
+  for (let i = 0; i < 30; i += 1) {
+    const res = await spender.call("/api/track-meta", {
+      method: "PUT",
+      body: {
+        entries: [
+          { clipKey: `500${i}:fffffffffff`, bpm: 120 + i, bpmSource: "auto", bpmConfidence: 0.8 },
+        ],
+      },
+    });
+    assert.equal(res.status, 200, `track-meta write ${i} was refused`);
+  }
+
+  const share = await spender.call(`/api/playlists/${created.body.playlist.id}/share`, {
+    method: "POST",
+    body: { shared: true },
+  });
+  assert.equal(share.status, 200, "share was rate-limited by another route's traffic");
+});
+
+console.log("\nshare links");
+
+let shareUrl = null;
+let shareToken = null;
+let sharedPlaylistId = null;
+
+await check("a new playlist is not shared", async () => {
+  const res = await alice.call("/api/playlists", {
+    method: "POST",
+    body: { name: "B2B set", entries: [clip(2001, "ccccccccccc")] },
+  });
+  assert.equal(res.status, 201);
+  sharedPlaylistId = res.body.playlist.id;
+  // The token must never appear in any playlist response body. A list call
+  // that returned tokens would leak every share link in one response.
+  assert.ok(!JSON.stringify(res.body).includes("share_token"));
+  assert.ok(!JSON.stringify(res.body).includes("shareToken"));
+});
+
+await check("a list response never carries a share token", async () => {
+  const res = await alice.call("/api/playlists");
+  assert.equal(res.status, 200);
+  const body = JSON.stringify(res.body);
+  assert.ok(!body.includes("shareToken"));
+  assert.ok(!body.includes("share_token"));
+});
+
+await check("the owner can mint a share link", async () => {
+  const res = await alice.call(`/api/playlists/${sharedPlaylistId}/share`, {
+    method: "POST",
+    body: { shared: true },
+  });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.shared, true);
+  assert.ok(typeof res.body.shareUrl === "string");
+  shareUrl = res.body.shareUrl;
+  shareToken = shareUrl.split("/s/").pop();
+  // 32 bytes, base64url.
+  assert.equal(shareToken.length, 43);
+  assert.match(shareToken, /^[A-Za-z0-9_-]{43}$/);
+});
+
+await check("the link reads without any session at all", async () => {
+  const res = await fetch(`${BASE}/api/shared/${shareToken}`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.playlist.name, "B2B set");
+  assert.equal(body.playlist.items.length, 1);
+});
+
+await check("a shared response leaks nothing about its owner", async () => {
+  const res = await fetch(`${BASE}/api/shared/${shareToken}`);
+  const body = JSON.stringify(await res.json());
+  // No user id, no username, no playlist id, no token echoed back.
+  assert.ok(!body.includes(alice.username), "username leaked");
+  assert.ok(!body.includes(sharedPlaylistId), "playlist id leaked");
+  assert.ok(!body.toLowerCase().includes("user_id"), "user_id leaked");
+  assert.ok(!body.includes(shareToken), "token echoed");
+});
+
+await check("minting again issues a different token", async () => {
+  const res = await alice.call(`/api/playlists/${sharedPlaylistId}/share`, {
+    method: "POST",
+    body: { shared: true },
+  });
+  assert.equal(res.status, 200);
+  assert.notEqual(res.body.shareUrl, shareUrl, "token was reused");
+  // And the previous one must be dead, not merely superseded.
+  const old = await fetch(`${BASE}/api/shared/${shareToken}`);
+  assert.equal(old.status, 404);
+  shareUrl = res.body.shareUrl;
+  shareToken = shareUrl.split("/s/").pop();
+});
+
+await check("a stranger cannot share someone else's playlist", async () => {
+  const res = await mallory.call(`/api/playlists/${sharedPlaylistId}/share`, {
+    method: "POST",
+    body: { shared: true },
+  });
+  // 404, not 403: the response must not confirm the id exists.
+  assert.equal(res.status, 404);
+});
+
+await check("a stranger cannot revoke someone else's link", async () => {
+  const res = await mallory.call(`/api/playlists/${sharedPlaylistId}/share`, {
+    method: "POST",
+    body: { shared: false },
+  });
+  assert.equal(res.status, 404);
+  // And the link still works, because that call must have changed nothing.
+  const still = await fetch(`${BASE}/api/shared/${shareToken}`);
+  assert.equal(still.status, 200);
+});
+
+await check("sharing requires a CSRF token like every other write", async () => {
+  const res = await alice.call(`/api/playlists/${sharedPlaylistId}/share`, {
+    method: "POST",
+    body: { shared: true },
+    csrfToken: "wrong-token",
+  });
+  assert.equal(res.status, 403);
+});
+
+await check("an unknown token is 404", async () => {
+  const fake = "a".repeat(43);
+  const res = await fetch(`${BASE}/api/shared/${fake}`);
+  assert.equal(res.status, 404);
+});
+
+for (const [label, bad] of [
+  ["too short", "abc"],
+  ["too long", "a".repeat(60)],
+  ["path traversal", "..%2f..%2fapi%2fplaylists"],
+  ["sql-ish", "%27%20OR%20%271%27%3D%271"],
+]) {
+  await check(`a ${label} token is 404, not an error`, async () => {
+    const res = await fetch(`${BASE}/api/shared/${bad}`);
+    assert.equal(res.status, 404);
+  });
+}
+
+await check("the shared route refuses writes", async () => {
+  for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+    const res = await fetch(`${BASE}/api/shared/${shareToken}`, { method });
+    assert.ok(res.status === 405 || res.status === 404, `${method} gave ${res.status}`);
+  }
+});
+
+await check("the public page renders and refuses indexing", async () => {
+  const res = await fetch(`${BASE}/s/${shareToken}`);
+  assert.equal(res.status, 200);
+  const html = await res.text();
+  assert.ok(html.includes("B2B set"));
+  // A share link is private-by-obscurity; indexing one makes it public.
+  assert.match(res.headers.get("x-robots-tag") ?? html, /noindex/i);
+});
+
+await check("revoking kills the link permanently", async () => {
+  const off = await alice.call(`/api/playlists/${sharedPlaylistId}/share`, {
+    method: "POST",
+    body: { shared: false },
+  });
+  assert.equal(off.status, 200);
+  assert.equal(off.body.shared, false);
+  assert.equal(off.body.shareUrl, null);
+
+  const api = await fetch(`${BASE}/api/shared/${shareToken}`);
+  assert.equal(api.status, 404);
+
+  const page = await fetch(`${BASE}/s/${shareToken}`);
+  assert.equal(page.status, 404);
+});
+
+console.log("\nBPM re-read");
+
+await check("a reading can be deleted, and only by its owner", async () => {
+  const key = "3001:ddddddddddd";
+  const saved = await alice.call("/api/track-meta", {
+    method: "PUT",
+    body: { entries: [{ clipKey: key, bpm: 128, bpmSource: "auto", bpmConfidence: 0.9 }] },
+  });
+  assert.equal(saved.status, 200);
+
+  // Mallory deleting Alice's key must report nothing removed and change nothing.
+  const theirs = await mallory.call("/api/track-meta", {
+    method: "DELETE",
+    body: { clipKey: key },
+  });
+  assert.equal(theirs.status, 200);
+  assert.equal(theirs.body.removed, false);
+
+  const stillThere = await alice.call("/api/track-meta");
+  assert.ok(stillThere.body.entries.some((e) => e.clipKey === key));
+
+  const mine = await alice.call("/api/track-meta", {
+    method: "DELETE",
+    body: { clipKey: key },
+  });
+  assert.equal(mine.status, 200);
+  assert.equal(mine.body.removed, true);
+
+  const gone = await alice.call("/api/track-meta");
+  assert.ok(!gone.body.entries.some((e) => e.clipKey === key));
+});
+
+await check("a malformed clip key is rejected", async () => {
+  const res = await alice.call("/api/track-meta", {
+    method: "DELETE",
+    body: { clipKey: "not-a-clip-key" },
+  });
+  assert.equal(res.status, 400);
+});
+
+await check("deleting needs CSRF", async () => {
+  const res = await alice.call("/api/track-meta", {
+    method: "DELETE",
+    body: { clipKey: "3001:ddddddddddd" },
+    csrfToken: "wrong",
+  });
+  assert.equal(res.status, 403);
+});
+
 console.log(
   failures === 0
     ? `\nAll ${ran} API tests passed.\n`

@@ -344,9 +344,34 @@ playlist to anyone but its owner.**
 - Tests assert all of the above, including that the obvious share-URL shapes
   return 404.
 
-A future opt-in share feature would have to add a function that *deliberately*
-drops the `user_id` predicate — the kind of change that stands out in a diff,
-which is the point.
+### The one exception, and why it looks like one
+
+Share links exist now, and they are the single deliberate hole in that model —
+built so that a reviewer can find the whole of it in one place.
+
+**`repo.getPlaylistByShareToken` is the only function in `repo.ts` that does
+not take a user id.** That is the design: the exception is one named function,
+not an `if` inside a function that also serves owners. Anyone asking "what can
+an anonymous request reach?" has exactly one answer to read.
+
+- Off by default. `share_token` is NULL until you ask for a link.
+- The token *is* the credential: 32 bytes of CSPRNG output, base64url, unique,
+  and not derived from the playlist id — knowing one token tells you nothing
+  about another.
+- Read only. There is no write path that accepts a token.
+- Revocation is destruction. Turning sharing off sets the token to NULL, so the
+  link you sent someone is dead rather than dormant, and re-sharing mints a
+  different one.
+- Unknown, malformed and revoked tokens all return the same 404. A link that
+  stops working reveals nothing about why.
+- The response carries the set list and nothing else — no user id, no username,
+  no other playlist, no route back to the owner's account. A test asserts each
+  of those absences by name.
+- The page is `noindex, nofollow`. A share link is private by obscurity, and an
+  indexed one would be simply public.
+
+The threat this accepts is exactly the one a share link is for: whoever holds
+the URL can read that playlist. Nothing more.
 
 Your collection index never leaves your device. Only playlists, the BPM
 catalogue, and cached analyses are stored server-side.
@@ -476,7 +501,7 @@ scripts/
 ├── test-playables.mjs         clip de-duplication and best-clip choice (18 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths and set length (55 cases)
-└── test-api.mjs               auth, CSRF, IDOR, revocation, privacy (59 cases)
+└── test-api.mjs               auth, CSRF, IDOR, sharing, privacy (80 cases)
 src/
 ├── proxy.ts                   per-request CSP + script nonce
 ├── lib/                       server-only
@@ -517,7 +542,7 @@ npm run test:headers   # 20 cases, no server needed
 npm run test:playables # 18 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 55 cases, no server needed
-npm run test:api       # 59 cases, needs a running server + Postgres
+npm run test:api       # 80 cases, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Playable } from "@/lib/types";
 import { VERDICT_META, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
+import { formatBpm } from "@/lib/mixing";
 import { Play, Plus, Trash } from "./Icons";
 
 const BASE_ROW_HEIGHT = 56;
@@ -225,9 +226,7 @@ export function TrackList({
                           : "No BPM yet — play it through, or tap T"
                       }
                     >
-                      {item.bpm !== null && item.bpm !== undefined
-                        ? `${Math.round(item.bpm)}`
-                        : "—"}
+                      {formatBpm(item.bpm)}
                     </span>
                     <span className="w-10 text-right font-mono text-[10px] tabular-nums text-neutral-600">
                       {item.duration ? formatTime(item.duration) : "--:--"}

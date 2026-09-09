@@ -6,6 +6,7 @@ import { digWithinCollection, type LocalLane } from "@/client/digLocal";
 import { ApiError, digApi, releasesApi, wantlistApi } from "@/client/api";
 import { formatTime } from "./NowPlaying";
 import { Disc, Heart, Play, Plus, Search, Shuffle, Sparkle } from "./Icons";
+import { formatBpm } from "@/lib/mixing";
 
 /**
  * Off-the-cuff digging.
@@ -108,7 +109,7 @@ function LocalRow({
 
       <div className="mt-1.5 flex items-center gap-1 text-[10px] text-neutral-600">
         {item.bpm !== null && (
-          <span className="rounded bg-ink-800 px-1 font-mono text-accent/80">{item.bpm}</span>
+          <span className="rounded bg-ink-800 px-1 font-mono text-accent/80">{formatBpm(item.bpm, { precise: true })}</span>
         )}
         {item.year && <span>{item.year}</span>}
         {item.duration && <span className="ml-auto font-mono">{formatTime(item.duration)}</span>}

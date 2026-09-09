@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   const session = await getSession();
   if (!session) return unauthorized();
 
-  const limit = rateLimit(callerId(request, session.u), 40, 60_000);
+  const limit = rateLimit(callerId(request, "discogs-collection", session.u), 40, 60_000);
   if (!limit.ok) {
     return fail("rate_limited", "Slow down a moment.", 429, {
       retryAfter: limit.resetSeconds,

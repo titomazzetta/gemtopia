@@ -46,7 +46,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const auth = await requireUser(request, { mutating: true });
   if ("response" in auth) return auth.response;
 
-  const limit = rateLimit(callerId(request, auth.username), 120, 60_000);
+  const limit = rateLimit(callerId(request, "playlist-item", auth.username), 120, 60_000);
   if (!limit.ok) {
     return fail("rate_limited", "Slow down a moment.", 429, {
       retryAfter: limit.resetSeconds,

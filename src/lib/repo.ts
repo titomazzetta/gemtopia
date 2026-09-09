@@ -1,4 +1,5 @@
 import "server-only";
+import { randomBytes } from "node:crypto";
 import { query, queryOne, tx } from "./db";
 import type { Playlist, PlaylistItemRow, TrackMeta } from "./types";
 
@@ -330,6 +331,125 @@ export async function deletePlaylist(
   return rows.length > 0;
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Share links                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a share link exposes. Deliberately not a `Playlist`.
+ *
+ * A separate type so that adding a field to `Playlist` later cannot silently
+ * widen what an anonymous reader sees. If this ever needs to carry more, that
+ * is an edit here, in a type whose name says who is reading.
+ */
+export interface SharedPlaylist {
+  name: string;
+  notes: string | null;
+  items: PlaylistItemRow[];
+  sharedAt: string;
+}
+
+/**
+ * Turn sharing on for one playlist, or off.
+ *
+ * Off sets the token to NULL, which is a permanent revocation: the old link
+ * cannot be reinstated, only a new one minted. That is the intended behaviour
+ * — "unshare" should mean the link you sent someone is dead, not dormant.
+ *
+ * Ownership is enforced the usual way, by `user_id` in the WHERE clause, so
+ * you can only ever share a playlist that is yours.
+ */
+export async function setPlaylistShare(
+  userId: string,
+  playlistId: string,
+  shared: boolean,
+): Promise<{ shareToken: string | null } | null> {
+  const token = shared ? randomBytes(32).toString("base64url") : null;
+
+  const row = await queryOne<{ share_token: string | null }>(
+    // $3 is cast explicitly: it appears both as an assigned value and inside a
+    // CASE, and with a NULL bound Postgres cannot infer a type from either
+    // position — it fails the whole statement with "could not determine data
+    // type of parameter $3" rather than treating NULL as text.
+    `UPDATE playlists
+        SET share_token = $3::text,
+            shared_at   = CASE WHEN $3::text IS NULL THEN NULL ELSE now() END,
+            updated_at  = now()
+      WHERE id = $1 AND user_id = $2
+      RETURNING share_token`,
+    [playlistId, userId, token],
+  );
+
+  if (!row) return null;
+  return { shareToken: row.share_token };
+}
+
+/**
+ * Read a playlist by its share token.
+ *
+ * **This is the only function in this file that does not take a user id**, and
+ * that is the whole point of the design: the exception is one function, with a
+ * name that says what it does, rather than an `if` inside a function that also
+ * serves owners. A reviewer looking for "what can an anonymous request reach"
+ * has exactly one answer to read.
+ *
+ * The token *is* the authorisation. It is 32 bytes of CSPRNG output, unique,
+ * and revocable by setting it to NULL. Lookup is by exact match on an indexed
+ * column, so there is no partial match, no prefix search, and no enumeration:
+ * a wrong token returns null, indistinguishable from a revoked one.
+ *
+ * What comes back is the set list and nothing else — no user id, no username,
+ * no other playlist, no handle on the owner's account. A holder of the link
+ * learns what is in this playlist and can learn nothing further from it.
+ */
+export async function getPlaylistByShareToken(
+  token: string,
+): Promise<SharedPlaylist | null> {
+  // Guard before touching the database. The column is CHECK-constrained to
+  // exactly 43 characters, so anything else cannot match a real row, and
+  // rejecting it here keeps junk out of the query path entirely.
+  if (typeof token !== "string" || token.length !== 43) return null;
+
+  const row = await queryOne<{
+    id: string;
+    name: string;
+    notes: string | null;
+    shared_at: string;
+  }>(
+    `SELECT id, name, notes, shared_at
+       FROM playlists
+      WHERE share_token = $1`,
+    [token],
+  );
+  if (!row) return null;
+
+  const items = await query<ItemRow>(
+    `SELECT playlist_id, position, clip_key, release_id, video_id,
+            title, artist, release_title, year
+       FROM playlist_items
+      WHERE playlist_id = $1
+      ORDER BY position`,
+    [row.id],
+  );
+
+  return {
+    name: row.name,
+    notes: row.notes,
+    sharedAt: new Date(row.shared_at).toISOString(),
+    items: items.map((i) => ({
+      clipKey: i.clip_key,
+      releaseId: Number(i.release_id),
+      videoId: i.video_id,
+      title: i.title,
+      artist: i.artist,
+      releaseTitle: i.release_title,
+      year: i.year,
+      position: i.position,
+    })),
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /* Track metadata (BPM / key catalogue)                                */
 /* ------------------------------------------------------------------ */
@@ -354,6 +474,32 @@ function toMeta(row: MetaRow): TrackMeta {
     rating: row.rating,
     cueNote: row.cue_note,
   };
+}
+
+/**
+ * Forget a reading entirely, so the next detection can start clean.
+ *
+ * Necessary because of the precedence rules in `upsertTrackMeta`: an automatic
+ * reading only replaces another automatic reading if it is *more confident*.
+ * That is right almost always — it stops a tempo measured during a breakdown
+ * from overwriting a good one — but it means a confidently wrong reading is
+ * unreachable. There was no way to say "that one is wrong, measure it again",
+ * only to tap over it by hand.
+ *
+ * `user_id` is in the WHERE clause, so this can only ever delete your own row;
+ * a clip key belonging to someone else deletes nothing and reports nothing.
+ */
+export async function deleteTrackMeta(
+  userId: string,
+  clipKey: string,
+): Promise<boolean> {
+  const rows = await query<{ clip_key: string }>(
+    `DELETE FROM track_meta
+      WHERE user_id = $1 AND clip_key = $2
+      RETURNING clip_key`,
+    [userId, clipKey],
+  );
+  return rows.length > 0;
 }
 
 export async function listTrackMeta(userId: string): Promise<TrackMeta[]> {

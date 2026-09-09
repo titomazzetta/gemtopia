@@ -103,6 +103,19 @@ export const playlistsApi = {
   remove: (id: string) =>
     request<{ ok: true }>(`/api/playlists/${id}`, { method: "DELETE" }),
 
+  /**
+   * Mint or revoke a read-only share link.
+   *
+   * `shared: false` destroys the token rather than parking it — the link you
+   * sent someone stops working permanently, which is what pressing "unshare"
+   * is meant to mean.
+   */
+  setShared: (id: string, shared: boolean) =>
+    request<{ shared: boolean; shareUrl: string | null }>(
+      `/api/playlists/${id}/share`,
+      { method: "POST", body: JSON.stringify({ shared }) },
+    ),
+
   /** One-time migration of playlists created before the server store. */
   importAll: (
     playlists: Array<{
@@ -128,6 +141,13 @@ export const trackMetaApi = {
     request<{ written: number }>("/api/track-meta", {
       method: "PUT",
       body: JSON.stringify({ entries }),
+    }),
+
+  /** Forget a reading so the next detection starts clean. See repo.deleteTrackMeta. */
+  forget: (clipKey: string) =>
+    request<{ removed: boolean }>("/api/track-meta", {
+      method: "DELETE",
+      body: JSON.stringify({ clipKey }),
     }),
 };
 

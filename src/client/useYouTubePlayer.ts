@@ -18,7 +18,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const API_SRC = "https://www.youtube.com/iframe_api";
 
 /* Minimal typings for the slice of the API we touch. */
-interface YTPlayer {
+export interface YTPlayer {
   loadVideoById(id: string, start?: number): void;
   cueVideoById(id: string, start?: number): void;
   playVideo(): void;
@@ -32,7 +32,7 @@ interface YTPlayer {
   destroy(): void;
 }
 
-interface YTNamespace {
+export interface YTNamespace {
   Player: new (
     element: HTMLElement | string,
     options: Record<string, unknown>,

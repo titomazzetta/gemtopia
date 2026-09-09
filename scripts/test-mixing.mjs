@@ -21,6 +21,7 @@ import {
   setLength,
   formatSetLength,
   pitchQuip,
+  formatBpm,
   MIN_PITCH_PERCENT,
   MAX_PITCH_PERCENT,
 } from "../src/lib/mixing.ts";
@@ -437,6 +438,53 @@ check("nothing in the quips would embarrass anyone", () => {
     const quip = pitchQuip(percent);
     if (quip) assert.ok(!banned.test(quip), `unwise wording at ${percent}: ${quip}`);
   }
+});
+
+/* -- displaying a tempo --------------------------------------------------- */
+
+check("a missing tempo is an em-dash, not a blank or a zero", () => {
+  assert.equal(formatBpm(null), "—");
+  assert.equal(formatBpm(undefined), "—");
+  assert.equal(formatBpm(Number.NaN), "—");
+});
+
+check("list display rounds to a whole number", () => {
+  assert.equal(formatBpm(123.7), "124");
+  assert.equal(formatBpm(128), "128");
+  assert.equal(formatBpm(174.4), "174");
+});
+
+check("precise display keeps one decimal", () => {
+  assert.equal(formatBpm(123.7, { precise: true }), "123.7");
+  assert.equal(formatBpm(174.44, { precise: true }), "174.4");
+});
+
+check("precise display drops a trailing zero", () => {
+  // "124.0" claims precision the reading does not have, and it is the thing
+  // that makes a column of tempos look untidy.
+  assert.equal(formatBpm(124, { precise: true }), "124");
+  assert.equal(formatBpm(124.0, { precise: true }), "124");
+});
+
+check("formatting never invents precision", () => {
+  for (const value of [90.05, 123.456, 174.999]) {
+    const precise = formatBpm(value, { precise: true });
+    const decimals = precise.split(".")[1]?.length ?? 0;
+    assert.ok(decimals <= 1, `${precise} has too many decimals`);
+  }
+});
+
+check("display rounding never feeds the mixing maths", () => {
+  // The whole reason display and storage are separated: a 0.3 BPM difference
+  // is invisible in a list and entirely visible in a five-minute blend.
+  const a = 123.7;
+  const b = 124.0;
+  assert.equal(formatBpm(a), formatBpm(b), "these look the same in a list");
+  assert.notEqual(
+    requiredPitchPercent(a, 130),
+    requiredPitchPercent(b, 130),
+    "...and must not be treated as the same by the maths",
+  );
 });
 
 console.log(

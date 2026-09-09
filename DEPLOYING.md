@@ -272,7 +272,7 @@ Three separate jobs, and only one of them is "storing the code".
 |---|---|
 | **Source** | The commit history lives here. |
 | **Trigger** | Vercel subscribes to the repo. Push to `main` → production redeploys, no CLI needed. Any other branch or PR → a **preview deployment** on its own URL. |
-| **Scrutiny** | Actions runs CI on every push: typecheck, lint, `npm audit`, 225 tests against a throwaway Postgres, a production build, and a grep proving no server-only secret reached the client bundle. CodeQL weekly, Dependabot for dependency PRs. |
+| **Scrutiny** | Actions runs CI on every push: typecheck, lint, `npm audit`, 246 tests against a throwaway Postgres, a production build, and a grep proving no server-only secret reached the client bundle. CodeQL weekly, Dependabot for dependency PRs. |
 
 ### ⚠ CI does not gate the deploy
 

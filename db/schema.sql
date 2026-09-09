@@ -236,3 +236,55 @@ BEGIN
       ADD CONSTRAINT users_session_version_check CHECK (session_version >= 1);
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Share links
+--
+-- The one deliberate hole in an otherwise strict ownership model, and it is
+-- built to look like one.
+--
+-- Everywhere else, every query in repo.ts takes a user id and puts it in the
+-- WHERE clause, so a playlist belonging to someone else is not merely refused
+-- — it is unreachable, and returns 404 rather than 403 so the response does
+-- not even confirm the id exists. Sharing has to break that, because the whole
+-- point is serving a playlist to someone who is not its owner.
+--
+-- So the break is made narrow and visible:
+--
+--   * It is opt-in per playlist. `share_token` is NULL until you ask, and
+--     setting it back to NULL revokes instantly and permanently — the old link
+--     cannot be reinstated, only a new one issued.
+--   * The token is the credential. 32 bytes of CSPRNG randomness, base64url,
+--     unique. Not the playlist id, not derived from it, and not guessable from
+--     any other token: knowing one tells you nothing about another.
+--   * It grants read, and only read. There is exactly one function that reads
+--     by token (repo.getPlaylistByShareToken) and it returns the tracks and
+--     the order and nothing else — no user id, no username, no other playlist,
+--     no route to the owner's account.
+--
+-- The threat this accepts: anyone holding the link can read that playlist.
+-- That is what a share link is. The mitigation is that the link is long,
+-- random, revocable, and scoped to one playlist.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE playlists
+  ADD COLUMN IF NOT EXISTS share_token TEXT;
+
+ALTER TABLE playlists
+  ADD COLUMN IF NOT EXISTS shared_at TIMESTAMPTZ;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlists_share_token_len'
+  ) THEN
+    -- A short token is a guessable token. 43 chars is 32 bytes in base64url.
+    ALTER TABLE playlists
+      ADD CONSTRAINT playlists_share_token_len
+      CHECK (share_token IS NULL OR length(share_token) = 43);
+  END IF;
+END $$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS playlists_share_token_key
+  ON playlists (share_token)
+  WHERE share_token IS NOT NULL;
