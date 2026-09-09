@@ -66,6 +66,9 @@ jobs:
       - name: Environment contract tests
         run: npm run test:env
 
+      - name: Security header tests
+        run: npm run test:headers
+
       - name: Playable de-duplication tests
         run: npm run test:playables
 

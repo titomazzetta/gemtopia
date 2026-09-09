@@ -472,6 +472,7 @@ scripts/
 ├── migrate.mjs                idempotent schema application
 ├── verify-discogs.mjs         real OAuth handshake, no deps, redacts on failure
 ├── test-env.mjs               configuration contract (36 cases)
+├── test-headers.mjs           security headers, both directions (20 cases)
 ├── test-playables.mjs         clip de-duplication and best-clip choice (18 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths vs hand-computed answers (34 cases)
@@ -512,6 +513,7 @@ src/
 ```bash
 npm run test           # everything below
 npm run test:env       # 36 cases, no server needed
+npm run test:headers   # 20 cases, no server needed
 npm run test:playables # 18 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 34 cases, no server needed
@@ -520,6 +522,19 @@ npm run typecheck
 npm run lint
 npm run audit:ci
 ```
+
+**`test-headers.mjs`** asserts the security headers in *both* directions: the
+capabilities the app needs are granted, and the ones it doesn't are denied. It
+exists because `Permissions-Policy: display-capture=(), microphone=()` shipped
+and silently disabled BPM detection on every deployment — an empty allowlist
+denies a feature to the page itself, not just to third parties. Both detection
+modes failed, and the browser reported only `NotAllowedError`, which is the
+same exception a user gets for dismissing the picker, so the message read
+"audio capture was not allowed" and pointed at Chrome's settings rather than at
+our own response header. Hardening that removes a capability the product
+depends on is invisible in review: the diff that breaks it looks exactly like
+the diff that secures it. Now a tightening pass has to change a test on its way
+through.
 
 **`test-env.mjs`** covers the configuration contract, and exists because of a
 bug that reached a user on their very first run. Every optional field rejected a

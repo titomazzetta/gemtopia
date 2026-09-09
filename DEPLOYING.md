@@ -129,6 +129,7 @@ always safe.
 ```bash
 npm run verify:discogs .env.local   # real OAuth handshake, PASS or FAIL
 npm run test:env                    # 36 cases — your configuration contract
+npm run test:headers                # 20 cases — security headers, both ways
 npm run test:tempo                  # 37 cases
 npm run test:mixing                 # 34 cases
 ```
@@ -271,7 +272,7 @@ Three separate jobs, and only one of them is "storing the code".
 |---|---|
 | **Source** | The commit history lives here. |
 | **Trigger** | Vercel subscribes to the repo. Push to `main` → production redeploys, no CLI needed. Any other branch or PR → a **preview deployment** on its own URL. |
-| **Scrutiny** | Actions runs CI on every push: typecheck, lint, `npm audit`, 166 tests against a throwaway Postgres, a production build, and a grep proving no server-only secret reached the client bundle. CodeQL weekly, Dependabot for dependency PRs. |
+| **Scrutiny** | Actions runs CI on every push: typecheck, lint, `npm audit`, 204 tests against a throwaway Postgres, a production build, and a grep proving no server-only secret reached the client bundle. CodeQL weekly, Dependabot for dependency PRs. |
 
 ### ⚠ CI does not gate the deploy
 

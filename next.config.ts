@@ -4,10 +4,17 @@ import type { NextConfig } from "next";
  * Static security headers.
  *
  * Content-Security-Policy is deliberately NOT set here — it is emitted
- * per-request from `middleware.ts` so that every response carries a fresh
- * script nonce. Everything below is request-independent.
+ * per-request from `proxy.ts` so that every response carries a fresh script
+ * nonce. Everything below is request-independent.
+ *
+ * Exported so `scripts/test-headers.mjs` can assert the policy directly. A
+ * header that silently disables a feature is not something to discover by
+ * hand: `display-capture=()` and `microphone=()` shipped here and disabled BPM
+ * detection entirely, in both its modes, with the browser reporting only
+ * "audio capture not allowed" and no indication that the page's own response
+ * headers were the cause.
  */
-const securityHeaders = [
+export const securityHeaders = [
   // Force HTTPS for two years, including subdomains. Vercel terminates TLS.
   {
     key: "Strict-Transport-Security",
@@ -19,20 +26,36 @@ const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   // Never leak our URLs (which contain no secrets, but still) cross-origin.
   { key: "Referrer-Policy", value: "no-referrer" },
-  // Drop every powerful browser feature we do not use.
+  /*
+   * Drop every powerful browser feature we do not use — and grant, to this
+   * origin only, the two we do.
+   *
+   * `()` is an empty allowlist: it denies the feature to everyone, this page
+   * included. That is right for a camera we never open. It was wrong for
+   * display-capture and microphone, which are how BPM detection works, and the
+   * result was a headline feature that could not run on any deployment while
+   * appearing, from the code, to be fully implemented.
+   *
+   * `(self)` grants the feature to this origin and nothing else. The YouTube
+   * iframe is a separate origin and is not named here, so it inherits nothing:
+   * embedded third-party frames still cannot reach the screen, the microphone,
+   * or the camera.
+   */
   {
     key: "Permissions-Policy",
     value: [
       "accelerometer=()",
       "autoplay=(self)",
       "camera=()",
-      "display-capture=()",
+      // Tab-audio capture — the primary BPM detection path (Chromium).
+      "display-capture=(self)",
       "encrypted-media=(self)",
       "fullscreen=(self)",
       "geolocation=()",
       "gyroscope=()",
       "magnetometer=()",
-      "microphone=()",
+      // Fallback BPM detection off the speakers, for Safari and Firefox.
+      "microphone=(self)",
       "payment=()",
       "usb=()",
       "interest-cohort=()",

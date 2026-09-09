@@ -72,6 +72,32 @@ function captureAvailable(): boolean {
   );
 }
 
+/**
+ * Is the feature disabled by *our own* response header?
+ *
+ * `Permissions-Policy` failures surface as NotAllowedError — indistinguishable
+ * from the user dismissing the picker — so ask the document directly. The API
+ * is `permissionsPolicy` in current specs and `featurePolicy` in older
+ * Chromium; neither exists everywhere, and an absent API is not evidence of a
+ * block, so an unknown answer is treated as "not blocked".
+ */
+function blockedByPolicy(kind: "tab" | "mic"): boolean {
+  const feature = kind === "tab" ? "display-capture" : "microphone";
+  const policy = (
+    document as Document & {
+      permissionsPolicy?: { allowsFeature(name: string): boolean };
+      featurePolicy?: { allowsFeature(name: string): boolean };
+    }
+  );
+  const api = policy.permissionsPolicy ?? policy.featurePolicy;
+  if (!api?.allowsFeature) return false;
+  try {
+    return !api.allowsFeature(feature);
+  } catch {
+    return false;
+  }
+}
+
 export function useTempoDetector(options: {
   /** Fires once per track when a reading stabilises. */
   onCommit: (estimate: TempoEstimate) => void;
@@ -314,9 +340,20 @@ export function useTempoDetector(options: {
         const denied =
           caught instanceof DOMException &&
           (caught.name === "NotAllowedError" || caught.name === "AbortError");
+
         setStatus(denied ? "denied" : "error");
         setError(
-          denied ? "Audio capture was not allowed." : message,
+          denied
+            ? blockedByPolicy(requested)
+              ? // Worth spelling out. A Permissions-Policy block and a user
+                // pressing Cancel both arrive as NotAllowedError, so "not
+                // allowed" was true and useless: it sent you to Chrome's
+                // settings when the page's own response header was refusing.
+                `This page's Permissions-Policy blocks ${
+                  requested === "tab" ? "display-capture" : "microphone"
+                }. That is a server header, not a browser setting — set it to (self) in next.config.ts.`
+              : "Audio capture was not allowed. If you cancelled the picker, press Detect again — and tick \u201cShare tab audio\u201d."
+            : message,
         );
       }
     },
