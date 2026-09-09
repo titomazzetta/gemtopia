@@ -20,6 +20,9 @@ import {
   DEFAULT_PITCH_PERCENT,
   setLength,
   formatSetLength,
+  pitchQuip,
+  MIN_PITCH_PERCENT,
+  MAX_PITCH_PERCENT,
 } from "../src/lib/mixing.ts";
 
 let failures = 0;
@@ -391,6 +394,49 @@ check("formatSetLength rolls 60 minutes into the next hour", () => {
 
 check("formatSetLength never renders a negative", () => {
   assert.equal(formatSetLength(-500), "0m");
+});
+
+/* -- pitch commentary ----------------------------------------------------- */
+
+check("the standard 1200 range gets no remark", () => {
+  // The joke only works if it is rare. Commenting on what everyone uses is
+  // noise, and it is the one value that must stay silent.
+  assert.equal(pitchQuip(DEFAULT_PITCH_PERCENT), null);
+  assert.equal(pitchQuip(8), null);
+});
+
+check("every other preset says something", () => {
+  for (const percent of [6, 10, 16, 50]) {
+    const quip = pitchQuip(percent);
+    assert.ok(typeof quip === "string" && quip.length > 0, `no quip for ${percent}`);
+  }
+});
+
+check("the whole legal range is covered, with no gaps", () => {
+  for (let percent = MIN_PITCH_PERCENT; percent <= MAX_PITCH_PERCENT; percent += 1) {
+    const quip = pitchQuip(percent);
+    assert.ok(quip === null || typeof quip === "string", `bad quip at ${percent}`);
+    if (percent !== DEFAULT_PITCH_PERCENT) {
+      assert.ok(quip && quip.length > 0, `empty quip at ${percent}`);
+    }
+  }
+});
+
+check("quips stay short enough for one line", () => {
+  for (let percent = MIN_PITCH_PERCENT; percent <= MAX_PITCH_PERCENT; percent += 1) {
+    const quip = pitchQuip(percent);
+    if (quip) assert.ok(quip.length <= 70, `too long at ${percent}: ${quip}`);
+  }
+});
+
+check("nothing in the quips would embarrass anyone", () => {
+  // These ship in a public repo and get read by strangers. Cheap to assert,
+  // and it is the sort of thing that otherwise only gets noticed live.
+  const banned = /\b(shit|fuck|damn|crap|idiot|stupid|dumb|shlong|dick)\b/i;
+  for (let percent = MIN_PITCH_PERCENT; percent <= MAX_PITCH_PERCENT; percent += 1) {
+    const quip = pitchQuip(percent);
+    if (quip) assert.ok(!banned.test(quip), `unwise wording at ${percent}: ${quip}`);
+  }
 });
 
 console.log(

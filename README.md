@@ -475,7 +475,7 @@ scripts/
 ├── test-headers.mjs           security headers, both directions (20 cases)
 ├── test-playables.mjs         clip de-duplication and best-clip choice (18 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
-├── test-mixing.mjs            beatmatch maths and set length (50 cases)
+├── test-mixing.mjs            beatmatch maths and set length (55 cases)
 └── test-api.mjs               auth, CSRF, IDOR, revocation, privacy (59 cases)
 src/
 ├── proxy.ts                   per-request CSP + script nonce
@@ -516,7 +516,7 @@ npm run test:env       # 36 cases, no server needed
 npm run test:headers   # 20 cases, no server needed
 npm run test:playables # 18 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
-npm run test:mixing    # 50 cases, no server needed
+npm run test:mixing    # 55 cases, no server needed
 npm run test:api       # 59 cases, needs a running server + Postgres
 npm run typecheck
 npm run lint

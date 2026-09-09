@@ -6,6 +6,7 @@ import {
   MIN_PITCH_PERCENT,
   TRANSITION_RANGE,
   formatSetLength,
+  pitchQuip,
   type SequenceReport,
   type SetLength,
 } from "@/lib/mixing";
@@ -49,6 +50,7 @@ export function SetPrepBar({
   }
 
   const problems = report.stretch + report.impossible;
+  const quip = pitchQuip(pitchPercent);
   const preset = DECK_PRESETS.find((d) => d.percent === pitchPercent);
 
   const segments = [
@@ -169,19 +171,48 @@ export function SetPrepBar({
             )}
           </select>
 
+        </label>
+
+        {/*
+          A remark on anything that isn't the club standard. ±8 says nothing —
+          a tool that comments on the normal case is a tool that talks too much,
+          and the joke only lands because it is rare.
+        */}
+        {quip && (
+          <span className="shrink-0 text-[10px] italic text-neutral-600">
+            {quip}
+          </span>
+        )}
+        <label className="flex shrink-0 items-center gap-1 text-[11px] text-neutral-500">
+          <span className="sr-only">Custom pitch range percent</span>
+          <span aria-hidden="true">±</span>
           <input
             type="number"
             min={MIN_PITCH_PERCENT}
             max={MAX_PITCH_PERCENT}
+            step={1}
             value={pitchPercent}
             onChange={(event) => {
               const value = Number(event.target.value);
-              if (Number.isFinite(value)) onPitchChange(value);
+              if (!Number.isFinite(value)) return;
+              /*
+               * Clamp rather than drop. Typing "1" on the way to "16" is a
+               * legal intermediate state and must not be rejected mid-keystroke,
+               * but a value outside the range would make every mixability
+               * verdict on screen meaningless, so it is pulled into bounds
+               * rather than passed through.
+               */
+              onPitchChange(
+                Math.max(
+                  MIN_PITCH_PERCENT,
+                  Math.min(MAX_PITCH_PERCENT, Math.round(value)),
+                ),
+              );
             }}
-            className="w-12 rounded border border-ink-700 bg-ink-850 px-1 py-0.5 text-center font-mono text-[11px]"
-            aria-label="Custom pitch range percent"
+            className="w-12 rounded border border-ink-700 bg-ink-850 px-1 py-0.5 text-center font-mono text-[11px] text-neutral-300"
             title="Any range you like — the presets are just the common ones"
           />
+          <span aria-hidden="true">%</span>
         </label>
 
         <button

@@ -478,3 +478,32 @@ export function formatSetLength(seconds: number): string {
   if (minutes === 0) return `${hours}h`;
   return `${hours}h ${minutes}m`;
 }
+
+/* ------------------------------------------------------------------ */
+/* Pitch-range commentary                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A remark about the pitch range you picked, or null for the standard.
+ *
+ * ±8 gets nothing. It is what almost everyone is playing on, and a tool that
+ * comments on the normal case is a tool that talks too much — the joke has to
+ * be rare to land at all. Everything else is a deliberate choice, and a
+ * deliberate choice is worth acknowledging.
+ *
+ * These are read by strangers, not just the author: a public repo, and DJs the
+ * app gets shared with. Playful, never at the user's expense, and nothing that
+ * would be awkward on a screen-share in front of an employer or a booker.
+ */
+export function pitchQuip(percent: number): string | null {
+  if (percent === DEFAULT_PITCH_PERCENT) return null;
+
+  if (percent <= 2) return "Practically locked. Bold.";
+  if (percent < 6) return "That's a narrow window. Trusting your pressings.";
+  if (percent === 6) return "CDJ tight. Every transition earns it.";
+  if (percent <= 10) return "A little extra rope. Sensible.";
+  if (percent <= 16) return "Sixteen percent is a lot of runway. Wow, how niche.";
+  if (percent <= 25) return "At this range you're renegotiating the key too.";
+  if (percent <= 50) return "That isn't pitch, that's time travel.";
+  return "Beyond here it isn't really the same record any more.";
+}
