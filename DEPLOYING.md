@@ -128,6 +128,7 @@ always safe.
 
 ```bash
 npm run verify:discogs .env.local   # real OAuth handshake, PASS or FAIL
+npm run test:env                    # 36 cases — your configuration contract
 npm run test:tempo                  # 37 cases
 npm run test:mixing                 # 34 cases
 ```
@@ -169,13 +170,17 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 Costs pennies per analysis, with a per-user daily token ceiling built in.
 
+Leaving the line blank is fine and is the supported way to run without it —
+`ANTHROPIC_API_KEY=` with nothing after it means *absent*, not *invalid*. The
+same holds for every optional key in `.env.example`.
+
 ---
 
 ## Put it on the internet
 
 ### Step 6 — Push to GitHub
 
-Eight commits of history are already here. One command:
+Twelve commits of history are already here. One command:
 
 ```bash
 gh repo create gemtopia --public --source=. --remote=origin --push
@@ -266,7 +271,7 @@ Three separate jobs, and only one of them is "storing the code".
 |---|---|
 | **Source** | The commit history lives here. |
 | **Trigger** | Vercel subscribes to the repo. Push to `main` → production redeploys, no CLI needed. Any other branch or PR → a **preview deployment** on its own URL. |
-| **Scrutiny** | Actions runs CI on every push: typecheck, lint, `npm audit`, 130 tests against a throwaway Postgres, a production build, and a grep proving no server-only secret reached the client bundle. CodeQL weekly, Dependabot for dependency PRs. |
+| **Scrutiny** | Actions runs CI on every push: typecheck, lint, `npm audit`, 166 tests against a throwaway Postgres, a production build, and a grep proving no server-only secret reached the client bundle. CodeQL weekly, Dependabot for dependency PRs. |
 
 ### ⚠ CI does not gate the deploy
 

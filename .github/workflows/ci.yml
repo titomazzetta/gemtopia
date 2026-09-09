@@ -63,6 +63,9 @@ jobs:
       - name: Audit dependencies
         run: npm run audit:ci
 
+      - name: Environment contract tests
+        run: npm run test:env
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 

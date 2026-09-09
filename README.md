@@ -471,6 +471,7 @@ db/schema.sql                  tables, constraints, ownership cascades
 scripts/
 ├── migrate.mjs                idempotent schema application
 ├── verify-discogs.mjs         real OAuth handshake, no deps, redacts on failure
+├── test-env.mjs               configuration contract (36 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths vs hand-computed answers (34 cases)
 └── test-api.mjs               auth, CSRF, IDOR, revocation, privacy (59 cases)
@@ -509,6 +510,7 @@ src/
 
 ```bash
 npm run test           # everything below
+npm run test:env       # 36 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 34 cases, no server needed
 npm run test:api       # 59 cases, needs a running server + Postgres
@@ -516,6 +518,20 @@ npm run typecheck
 npm run lint
 npm run audit:ci
 ```
+
+**`test-env.mjs`** covers the configuration contract, and exists because of a
+bug that reached a user on their very first run. Every optional field rejected a
+present-but-blank value, so a `.env.local` copied from `.env.example` — exactly
+what the docs instruct — refused to boot with *"ANTHROPIC_API_KEY: String must
+contain at least 10 character(s)"* on a key documented as optional. A `.env` file
+cannot express absence: a bare `KEY=` arrives as `""`, which `.optional()` does
+not catch, `.default()` does not fill, and `z.coerce.number()` turns into 0. The
+fix normalises blank to absent once, before parsing; the tests pin that for every
+optional field, and separately assert that a present-but-*wrong* value is still
+an error. Writing them immediately found a second bug: `z.string().url()` accepts
+`localhost:3000`, because `new URL()` reads it as scheme `localhost:` with path
+`3000` — which would have validated and then built a callback URL Discogs could
+never match.
 
 **`test-tempo.mjs`** synthesises onset envelopes at known tempi — with jitter,
 noise, off-beat hats and backbeats — and asserts the estimator recovers them. It
