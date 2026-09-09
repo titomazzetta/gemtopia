@@ -4,7 +4,10 @@ import {
   DECK_PRESETS,
   MAX_PITCH_PERCENT,
   MIN_PITCH_PERCENT,
+  TRANSITION_RANGE,
+  formatSetLength,
   type SequenceReport,
+  type SetLength,
 } from "@/lib/mixing";
 import { Metronome, Shuffle } from "./Icons";
 
@@ -22,12 +25,18 @@ export function SetPrepBar({
   onPitchChange,
   onSmoothOrder,
   busy,
+  length,
+  transitionSeconds,
+  onTransitionChange,
 }: {
   report: SequenceReport;
   pitchPercent: number;
   onPitchChange: (percent: number) => void;
   onSmoothOrder: () => void;
   busy: boolean;
+  length: SetLength;
+  transitionSeconds: number;
+  onTransitionChange: (seconds: number) => void;
 }) {
   const total = report.steps.length;
   if (total === 0) {
@@ -52,6 +61,54 @@ export function SetPrepBar({
 
   return (
     <div className="border-b border-ink-800 bg-ink-900 px-4 py-2">
+      {/*
+        Set length first, because it is the question you ask before any other:
+        have I got enough records for the slot. The mixability bar answers a
+        later question about the same list.
+      */}
+      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-ink-800/70 pb-2">
+        <span className="flex items-baseline gap-1.5">
+          <span className="font-mono text-sm font-semibold tabular-nums text-neutral-100">
+            {length.partial ? "≥ " : ""}
+            {formatSetLength(length.playedSeconds)}
+          </span>
+          <span className="text-[10px] text-neutral-600">
+            {length.trackCount} track{length.trackCount === 1 ? "" : "s"}
+          </span>
+        </span>
+
+        {/*
+          A partial total is a floor, not an estimate, and says so. Claiming
+          "1h 12m" when a fifth of the set has no runtime is a worse answer
+          than admitting the total is incomplete.
+        */}
+        {length.partial && (
+          <span
+            className="text-[10px] text-amber-300/70"
+            title={`${length.trackCount - length.timedCount} track(s) have no runtime from Discogs or YouTube`}
+          >
+            {length.trackCount - length.timedCount} without a runtime
+          </span>
+        )}
+
+        <label className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-neutral-500">
+          <span className="whitespace-nowrap">blend</span>
+          <input
+            type="range"
+            min={TRANSITION_RANGE.min}
+            max={TRANSITION_RANGE.max}
+            step={5}
+            value={transitionSeconds}
+            onChange={(event) => onTransitionChange(Number(event.target.value))}
+            aria-label="Average transition length, in seconds"
+            className="w-24"
+          />
+          <span className="w-8 text-right font-mono tabular-nums text-neutral-400">
+            {transitionSeconds}s
+          </span>
+        </label>
+      </div>
+
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <Metronome className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
 

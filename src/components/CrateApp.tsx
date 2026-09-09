@@ -44,7 +44,16 @@ import {
   Filters,
   type FilterState,
 } from "./Filters";
-import { analyseSequence, smoothOrder, DEFAULT_PITCH_PERCENT, type MixCheck } from "@/lib/mixing";
+import {
+  analyseSequence,
+  setLength,
+  smoothOrder,
+  DEFAULT_PITCH_PERCENT,
+  DEFAULT_TRANSITION_SECONDS,
+  TRANSITION_RANGE,
+  type MixCheck,
+} from "@/lib/mixing";
+import { useLocalNumber } from "@/client/useLocalPreference";
 import { DigDrawer } from "./DigDrawer";
 import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
@@ -115,6 +124,21 @@ export function CrateApp({
 
   /** Deck pitch range, in percent. Drives every mixability calculation. */
   const [pitchPercent, setPitchPercent] = useState(DEFAULT_PITCH_PERCENT);
+
+  /*
+   * Average blend length, in seconds, used only to estimate how long a set
+   * runs. Kept in this browser rather than against the account: it is a
+   * display assumption about your own mixing style, it changes nothing anyone
+   * else can see, and it is not worth a schema migration or a round trip.
+   *
+   * (Deck pitch range *is* server-side, because it changes which transitions
+   * are reported as playable. That is data about the set; this is decoration.)
+   */
+  const [transitionSeconds, changeBlend] = useLocalNumber(
+    "gemtopia:blend",
+    DEFAULT_TRANSITION_SECONDS,
+    TRANSITION_RANGE,
+  );
 
   /* ---------------- digging ---------------- */
   const [digTarget, setDigTarget] = useState<Playable | null>(null);
@@ -1175,6 +1199,12 @@ export function CrateApp({
               onPitchChange={(percent) => void changePitch(percent)}
               onSmoothOrder={applySmoothOrder}
               busy={loading}
+              length={setLength(
+                visible.map((item) => item.duration),
+                transitionSeconds,
+              )}
+              transitionSeconds={transitionSeconds}
+              onTransitionChange={changeBlend}
             />
           )}
 

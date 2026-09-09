@@ -18,6 +18,8 @@ import {
   requiredPitchPercent,
   smoothOrder,
   DEFAULT_PITCH_PERCENT,
+  setLength,
+  formatSetLength,
 } from "../src/lib/mixing.ts";
 
 let failures = 0;
@@ -291,6 +293,104 @@ console.log("\ndefaults");
 check("the default pitch range is the Technics ±8", () => {
   assert.equal(DEFAULT_PITCH_PERCENT, 8);
   assert.deepEqual(checkMix(124, 128), checkMix(124, 128, 8));
+});
+
+/* -- set length ---------------------------------------------------------- */
+
+check("no tracks is a zero-length set", () => {
+  const s = setLength([], 30);
+  assert.equal(s.playedSeconds, 0);
+  assert.equal(s.trackCount, 0);
+  assert.equal(s.partial, false);
+});
+
+check("one track has no transition to subtract", () => {
+  // The off-by-one that matters: n-1 gaps, never n.
+  const s = setLength([300], 30);
+  assert.equal(s.rawSeconds, 300);
+  assert.equal(s.playedSeconds, 300);
+});
+
+check("two tracks share one transition", () => {
+  const s = setLength([300, 300], 30);
+  assert.equal(s.playedSeconds, 570);
+});
+
+check("ten tracks subtract nine transitions", () => {
+  const s = setLength(Array(10).fill(360), 30);
+  assert.equal(s.playedSeconds, 3600 - 9 * 30);
+});
+
+check("a zero transition is a straight sum", () => {
+  assert.equal(setLength([300, 300, 300], 0).playedSeconds, 900);
+});
+
+check("a blend cannot exceed the records it joins", () => {
+  // 90s requested across two 60s tracks: the overlap is capped at 60, so the
+  // pair runs 60s, not the -60s a flat subtraction would produce.
+  const s = setLength([60, 60], 90);
+  assert.equal(s.playedSeconds, 60);
+});
+
+check("a short track only shortens its own two transitions", () => {
+  // 300, 40, 300 with a 45s blend. Both gaps touch the 40s track, so both are
+  // capped at 40 — total overlap 80, not 90.
+  const s = setLength([300, 40, 300], 45);
+  assert.equal(s.rawSeconds, 640);
+  assert.equal(s.playedSeconds, 640 - 80);
+});
+
+check("never negative, whatever the settings", () => {
+  assert.ok(setLength([10, 10, 10], 90).playedSeconds >= 0);
+});
+
+check("untimed tracks are flagged, not guessed", () => {
+  const s = setLength([300, null, 300, undefined], 0);
+  assert.equal(s.rawSeconds, 600);
+  assert.equal(s.trackCount, 4);
+  assert.equal(s.timedCount, 2);
+  assert.equal(s.partial, true);
+});
+
+check("a fully timed set is not partial", () => {
+  assert.equal(setLength([300, 300], 30).partial, false);
+});
+
+check("zero and negative runtimes do not count as timed", () => {
+  const s = setLength([300, 0, -5], 0);
+  assert.equal(s.rawSeconds, 300);
+  assert.equal(s.timedCount, 1);
+  assert.equal(s.partial, true);
+});
+
+check("untimed tracks still consume a transition slot", () => {
+  // Four tracks are three gaps whether or not we know their runtimes.
+  const s = setLength([600, null, 600, null], 30);
+  assert.equal(s.playedSeconds, 1200 - 3 * 30);
+});
+
+check("a realistic two-hour set", () => {
+  // 20 tracks at 6:30, blended for 35s: 7800 - 19x35 = 7135s.
+  const s = setLength(Array(20).fill(390), 35);
+  assert.equal(s.rawSeconds, 7800);
+  assert.equal(s.playedSeconds, 7135);
+  assert.equal(formatSetLength(s.playedSeconds), "1h 59m");
+});
+
+check("formatSetLength reads like a set, not a stopwatch", () => {
+  assert.equal(formatSetLength(0), "0m");
+  assert.equal(formatSetLength(59), "1m");
+  assert.equal(formatSetLength(60 * 48), "48m");
+  assert.equal(formatSetLength(3600), "1h");
+  assert.equal(formatSetLength(3600 + 24 * 60), "1h 24m");
+});
+
+check("formatSetLength rolls 60 minutes into the next hour", () => {
+  assert.equal(formatSetLength(3600 + 59 * 60 + 30), "2h");
+});
+
+check("formatSetLength never renders a negative", () => {
+  assert.equal(formatSetLength(-500), "0m");
 });
 
 console.log(

@@ -202,6 +202,33 @@ export function TrackList({
                         {item.year}
                       </span>
                     )}
+                    {/*
+                      BPM sits immediately left of the runtime and holds its
+                      column whether or not there is a reading, so the numbers
+                      stay in a scannable line down the list. When you are
+                      ordering a set, a tempo that jumps position row to row is
+                      unreadable — the alignment is the feature.
+
+                      An em-dash rather than a blank says "not measured yet",
+                      which is different from "no tempo", and pushes you toward
+                      the tracks worth playing through to fill in.
+                    */}
+                    <span
+                      className={`w-11 text-right font-mono text-[10px] tabular-nums ${
+                        item.bpm !== null && item.bpm !== undefined
+                          ? "text-accent/80"
+                          : "text-neutral-700"
+                      }`}
+                      title={
+                        item.bpm !== null && item.bpm !== undefined
+                          ? `${item.bpm} BPM`
+                          : "No BPM yet — play it through, or tap T"
+                      }
+                    >
+                      {item.bpm !== null && item.bpm !== undefined
+                        ? `${Math.round(item.bpm)}`
+                        : "—"}
+                    </span>
                     <span className="w-10 text-right font-mono text-[10px] tabular-nums text-neutral-600">
                       {item.duration ? formatTime(item.duration) : "--:--"}
                     </span>

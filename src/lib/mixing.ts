@@ -386,3 +386,95 @@ export const VERDICT_META: Record<
   impossible: { label: "Won't mix", short: "✕", tone: "bad" },
   unknown: { label: "No BPM", short: "–", tone: "muted" },
 };
+
+/* ------------------------------------------------------------------ */
+/* Set length                                                          */
+/* ------------------------------------------------------------------ */
+
+/** Default crossfade allowance, in seconds. A typical beatmatched blend. */
+export const DEFAULT_TRANSITION_SECONDS = 30;
+
+/** The range the UI offers. Below 20s is a cut; above 50s is a long blend. */
+export const TRANSITION_RANGE = { min: 0, max: 90 } as const;
+
+export interface SetLength {
+  /** Sum of every known track runtime, in seconds. */
+  rawSeconds: number;
+  /** Runtime minus the overlap of each transition. What the set actually runs. */
+  playedSeconds: number;
+  /** Tracks in the playlist. */
+  trackCount: number;
+  /** How many of those have a known runtime. */
+  timedCount: number;
+  /**
+   * True when some tracks have no runtime, so the total is a floor rather than
+   * an estimate. Saying "1h 12m" when a fifth of the set is unmeasured is a
+   * worse answer than saying "at least 1h 12m".
+   */
+  partial: boolean;
+}
+
+/**
+ * How long this set will actually run.
+ *
+ * Two records that mix for 30 seconds occupy 30 seconds of the night once, not
+ * twice — the overlap is shared. So the played length is the sum of runtimes
+ * minus one transition per *gap*, of which there are n−1, never n. Getting that
+ * off by one is a whole track's worth of error across a long set.
+ *
+ * `transitionSeconds` is what a DJ actually blends for: near zero when cutting
+ * between tracks, 20–50 for a normal beatmatched blend, longer for the sort of
+ * set where two records sit together for a minute. It is a per-user setting
+ * because it is a stylistic choice, not a constant.
+ *
+ * Each gap's overlap is also clamped to the shorter of the two records it
+ * joins. You cannot blend for 45 seconds out of a 40-second interlude — the
+ * record ends first. A flat `transition x gaps` subtraction ignores that and
+ * quietly over-shortens any set containing short tracks, which is exactly the
+ * set where the total matters most.
+ */
+export function setLength(
+  durations: Array<number | null | undefined>,
+  transitionSeconds: number = DEFAULT_TRANSITION_SECONDS,
+): SetLength {
+  const timed = durations.filter(
+    (d): d is number => typeof d === "number" && Number.isFinite(d) && d > 0,
+  );
+
+  const rawSeconds = timed.reduce((sum, d) => sum + d, 0);
+
+  const requested = Math.max(0, transitionSeconds);
+
+  // n−1 gaps, not n. A single track has no transition at all. Each gap takes
+  // the requested blend, or the shorter adjacent record if that is less.
+  let overlap = 0;
+  for (let i = 1; i < durations.length; i += 1) {
+    const previous = durations[i - 1];
+    const next = durations[i];
+    const bound = Math.min(
+      typeof previous === "number" && previous > 0 ? previous : Infinity,
+      typeof next === "number" && next > 0 ? next : Infinity,
+    );
+    overlap += Number.isFinite(bound) ? Math.min(requested, bound) : requested;
+  }
+
+  return {
+    rawSeconds,
+    playedSeconds: Math.max(0, rawSeconds - overlap),
+    trackCount: durations.length,
+    timedCount: timed.length,
+    partial: timed.length < durations.length,
+  };
+}
+
+/** "1h 24m", "48m", "0m" — set lengths, not track times. */
+export function formatSetLength(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.round((total % 3600) / 60);
+  // 59m30s rounding to 60m should read as the next hour, not "0h 60m".
+  if (minutes === 60) return `${hours + 1}h`;
+  if (hours === 0) return `${minutes}m`;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
+}
