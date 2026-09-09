@@ -52,19 +52,43 @@ Copy the **Consumer Key** and **Consumer Secret**.
 
 ---
 
-## ⚠ The one ordering trap
+## Why two Discogs applications
 
-A Discogs application holds **one** callback URL, and it has to match your app's
-origin character for character. Your Vercel URL doesn't exist until you've
-deployed — so you cannot register the production callback yet.
+A Discogs application has a single Callback URL field, and your Vercel URL
+doesn't exist until you've deployed — which looks like a chicken-and-egg
+problem. It mostly isn't, and it's worth knowing why before you go hunting for
+a bug that isn't there.
 
-The fix is **two Discogs applications**: one for `localhost` now, and a second for
-the real URL once Vercel has given you one. That is why local comes first below,
-and why the production steps deliberately deploy *before* wiring up credentials.
+Gemtopia sends `oauth_callback` on every request-token call, derived from
+`APP_ORIGIN` (`discogs.ts`, `requestToken`). Discogs' own note on the form says
+the same thing: *OAuth 1.0a applications should provide an `oauth_callback`
+during the request token step regardless of what's entered here.* So the
+registered field is largely advisory, and the value that actually governs the
+redirect is the one your deployment sends at sign-in time.
 
-If you only read one section of this file, read this one. A callback mismatch is
-the single most common cause of sign-in failing, and Discogs' error message will
-not tell you that's what happened.
+**Make two applications anyway** — `Gemtopia (local)` now, `Gemtopia` once you
+have the real URL — for a better reason than the callback field:
+
+> Separate credentials for local and production means a consumer secret that has
+> been sitting in a `.env.local` on a laptop, in a shell history, or in a
+> screen-share cannot be used against your live deployment. Revoking the local
+> one costs you nothing.
+
+The setting that must be right in production is **`APP_ORIGIN`**. It has to be
+your real origin, exactly — `https://`, no trailing slash. That is what builds
+the callback, and it is what the CSRF and Origin checks compare against. A wrong
+`APP_ORIGIN` is the single most common cause of sign-in failing, and neither
+Discogs nor the app will tell you in so many words that it is what went wrong.
+
+Before debugging anything else, prove your credentials are sound:
+
+```bash
+npm run verify:discogs .env.local
+```
+
+It signs a real request-token call and tells you PASS or FAIL without printing
+your key or secret. If that passes and sign-in still fails, the problem is
+`APP_ORIGIN` — not the credentials.
 
 ---
 
@@ -103,12 +127,22 @@ always safe.
 ### Step 3 — Prove it works before you trust it
 
 ```bash
-npm run test:tempo     # 37 cases
-npm run test:mixing    # 34 cases
+npm run verify:discogs .env.local   # real OAuth handshake, PASS or FAIL
+npm run test:tempo                  # 37 cases
+npm run test:mixing                 # 34 cases
 ```
 
-Neither needs a server. Optional, but if the beatmatch maths or the tempo
-estimator are unhappy on your machine, better to know now than mid-set.
+None of them needs a server, and `verify:discogs` needs no dependencies either —
+it runs before `npm install` finishes.
+
+Run `verify:discogs` first. It signs a genuine request-token call against
+Discogs and tells you whether your key and secret are sound, without printing
+them. Getting a PASS here means every later sign-in failure is an origin or
+callback problem, which is a different bug in a different place. Skipping it
+means an afternoon of not knowing which of the two you have.
+
+The other two are optional, but if the beatmatch maths or the tempo estimator
+are unhappy on your machine, better to know now than mid-set.
 
 ### Step 4 — Start it
 

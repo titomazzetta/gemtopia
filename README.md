@@ -470,6 +470,7 @@ Four properties worth calling out:
 db/schema.sql                  tables, constraints, ownership cascades
 scripts/
 ├── migrate.mjs                idempotent schema application
+├── verify-discogs.mjs         real OAuth handshake, no deps, redacts on failure
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths vs hand-computed answers (34 cases)
 └── test-api.mjs               auth, CSRF, IDOR, revocation, privacy (59 cases)

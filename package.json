@@ -15,6 +15,7 @@
     "keygen": "node -e \"console.log('SESSION_SECRET=' + require('crypto').randomBytes(32).toString('base64url'))\"",
     "audit:ci": "npm audit --audit-level=high",
     "db:migrate": "node scripts/migrate.mjs",
+    "verify:discogs": "node scripts/verify-discogs.mjs",
     "test:tempo": "node --experimental-strip-types scripts/test-tempo.mjs",
     "test:api": "node scripts/test-api.mjs",
     "test": "npm run test:tempo && npm run test:mixing && npm run test:api",
