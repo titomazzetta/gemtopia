@@ -89,7 +89,7 @@ written to be read by people who care how software is put together. The
 | **Filter on real metadata** | Style, genre, label, artist, format, country, decade, year and tempo — every option counted from *your* synced collection. |
 | **Dig from anything** | Hit `D` on whatever's playing and pivot on any field. Two lanes: what else you own, and what exists beyond it. |
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. |
-| **BPM catalogue** | Detect tempo from the audio as it plays, or tap it in. Filter by range, or by what mixes with what's playing. |
+| **BPM catalogue** | Detect tempo from the audio as it plays, or tap it in. **Measure** plays through everything on screen and measures it unattended, skipping what is already done. Filter by range, or by what mixes with what's playing. |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range. Flags the ones that won't beatmatch before you pack the bag. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |

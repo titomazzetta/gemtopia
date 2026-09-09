@@ -35,6 +35,15 @@ import type { FacetKey } from "./Filters";
 import { startSync, type SyncHandle } from "@/client/sync";
 import { buildPlayables, spreadShuffle } from "@/client/playables";
 import { TapTempo } from "@/client/tempo";
+import {
+  advanceSweep,
+  planSweep,
+  sweepCurrentKey,
+  sweepFinished,
+  sweepSummary,
+  TRACK_TIMEOUT_MS,
+  type SweepState,
+} from "@/client/bpmSweep";
 import { useTempoDetector } from "@/client/useTempoDetector";
 import { useYouTubePlayer } from "@/client/useYouTubePlayer";
 import {
@@ -61,7 +70,7 @@ import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
 import { TrackList } from "./TrackList";
-import { Compass, Disc, Refresh, Shuffle } from "./Icons";
+import { Compass, Disc, Metronome, Refresh, Shuffle } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights";
 
@@ -249,6 +258,110 @@ export function CrateApp({
     [say],
   );
 
+  /* ---------------- tempo sweep ---------------- */
+
+  /*
+   * Measuring a whole list unattended. See client/bpmSweep for why this is
+   * scoped to a list rather than "analyse my collection".
+   *
+   * The sweep is advanced by *events* — a reading landing, or a timeout firing
+   * — not by an effect watching state. An effect that compared trackMeta
+   * against the current track would re-run on every reading anywhere in the
+   * app, and would need setState in its body, which is the pattern
+   * `react-hooks/set-state-in-effect` exists to stop.
+   */
+  const [sweep, setSweep] = useState<SweepState | null>(null);
+  const sweepRef = useRef<SweepState | null>(null);
+  const sweepTimer = useRef<number | null>(null);
+
+  /*
+   * The sweep reads everything it needs through refs.
+   *
+   * The reason is ordering: the engine has to exist before `onDetectorCommit`,
+   * because a reading landing is what advances it — but the things it acts on
+   * (the visible list, the player) are set up further down the component. A ref
+   * holding a *callback* would solve that and did, briefly, until the linter
+   * pointed out it is a mutable binding pretending to be a stable one. Refs
+   * holding *data*, written in effects and read inside callbacks, are the
+   * honest version of the same idea: the engine is genuinely stable, and every
+   * value it reads is genuinely current.
+   */
+  const playableByKeyRef = useRef<Map<string, Playable>>(new Map());
+  const pauseRef = useRef<() => void>(() => {});
+
+  const clearSweepTimer = useCallback(() => {
+    if (sweepTimer.current !== null) {
+      window.clearTimeout(sweepTimer.current);
+      sweepTimer.current = null;
+    }
+  }, []);
+
+  const stopSweep = useCallback(
+    (final: SweepState | null, reason?: string) => {
+      clearSweepTimer();
+      setSweep(null);
+      sweepRef.current = null;
+      pauseRef.current();
+      if (final) {
+        say(reason ? `${reason} — ${sweepSummary(final)}` : sweepSummary(final));
+      }
+    },
+    [clearSweepTimer, say],
+  );
+
+  /**
+   * Move to the next track, or stop. Stable: reads refs, closes over nothing.
+   *
+   * A named function expression rather than an arrow, because it recurses —
+   * skipping a track that has vanished means immediately advancing again. An
+   * arrow would have to refer to `advanceSweepTo` from inside its own
+   * initialiser, which is a temporal-dead-zone reference that happens to work
+   * only because the call is deferred. `step` binds inside the expression and
+   * is correct rather than lucky.
+   */
+  const advanceSweepTo = useCallback(
+    function step(next: SweepState) {
+      clearSweepTimer();
+
+      if (sweepFinished(next)) {
+        stopSweep(next, "Done");
+        return;
+      }
+
+      setSweep(next);
+      sweepRef.current = next;
+
+      const key = sweepCurrentKey(next);
+      const track = key ? playableByKeyRef.current.get(key) : null;
+
+      // The track went away — a filter changed, or a resync dropped the clip.
+      // Skip rather than stall.
+      if (!track) {
+        step(advanceSweep(next, "failed"));
+        return;
+      }
+
+      setQueue([track]);
+      setQueueIndex(0);
+
+      sweepTimer.current = window.setTimeout(() => {
+        const running = sweepRef.current;
+        // Only fire if the sweep is still waiting on the track this timer was
+        // set for; a reading may have landed and moved it on already.
+        if (!running || sweepCurrentKey(running) !== key) return;
+        step(advanceSweep(running, "failed"));
+      }, TRACK_TIMEOUT_MS);
+    },
+    [clearSweepTimer, stopSweep],
+  );
+
+  // A sweep must not outlive the component, or its timer fires into nothing.
+  useEffect(() => {
+    return () => {
+      if (sweepTimer.current !== null) window.clearTimeout(sweepTimer.current);
+    };
+  }, []);
+
   const tapper = useRef(new TapTempo());
   const [tapCount, setTapCount] = useState(0);
 
@@ -275,6 +388,7 @@ export function CrateApp({
     (estimate: { bpm: number; confidence: number }) => {
       const item = currentRef.current;
       if (!item) return;
+
       void saveMeta({
         clipKey: item.key,
         bpm: estimate.bpm,
@@ -284,8 +398,16 @@ export function CrateApp({
         rating: null,
         cueNote: null,
       });
+
+      // A reading landing is what moves a sweep along — but only if it is a
+      // reading for the track the sweep is actually waiting on. Music played
+      // by hand mid-sweep must not count as progress.
+      const running = sweepRef.current;
+      if (running && sweepCurrentKey(running) === item.key) {
+        advanceSweepTo(advanceSweep(running, "measured"));
+      }
     },
-    [saveMeta],
+    [saveMeta, advanceSweepTo],
   );
 
   const detector = useTempoDetector({ onCommit: onDetectorCommit });
@@ -557,6 +679,57 @@ export function CrateApp({
 
   const visible = activePlaylist ? playlistItems : filtered;
 
+  /*
+   * Key -> playable for whatever is on screen, so the sweep can find the next
+   * track by key without scanning the list each time. Built from `visible`
+   * because that is exactly the set a sweep covers: a playlist when one is
+   * open, the filtered crate otherwise. That is what makes one feature serve
+   * both "measure this set" and "chip away at the collection a style at a
+   * time" — the second is the first, pointed at a filter.
+   */
+  const playableByKey = useMemo(
+    () => new Map(visible.map((item) => [item.key, item] as const)),
+    [visible],
+  );
+
+  // Feed the sweep engine, which reads these rather than closing over them.
+  useEffect(() => {
+    playableByKeyRef.current = playableByKey;
+  }, [playableByKey]);
+
+  /** Start a sweep over what is on screen, or stop the one that is running. */
+  const startSweep = useCallback(() => {
+    if (sweepRef.current) {
+      stopSweep(sweepRef.current, "Stopped");
+      return;
+    }
+
+    if (detector.status !== "listening") {
+      say("Turn on Detect first — the sweep needs to hear the audio.");
+      return;
+    }
+
+    const plan = planSweep(
+      visible,
+      (key) => trackMetaRef.current.get(key)?.bpm ?? null,
+    );
+
+    if (plan.keys.length === 0) {
+      say(
+        plan.skipped > 0
+          ? `Every track here already has a tempo (${plan.skipped}).`
+          : "Nothing here to measure.",
+      );
+      return;
+    }
+
+    say(
+      `Measuring ${plan.keys.length} track${plan.keys.length === 1 ? "" : "s"}` +
+        (plan.skipped > 0 ? ` · skipping ${plan.skipped} already done` : ""),
+    );
+    advanceSweepTo(plan);
+  }, [advanceSweepTo, detector.status, say, stopSweep, visible]);
+
   /**
    * Set-prep analysis for the open playlist. Recomputed on every reorder,
    * which is cheap: it is one subtraction and one division per adjacent pair.
@@ -602,6 +775,11 @@ export function CrateApp({
   });
 
   const lastLoaded = useRef<string | null>(null);
+
+  // The sweep pauses through a ref, because it is defined before the player.
+  useEffect(() => {
+    pauseRef.current = api.pause;
+  }, [api]);
   useEffect(() => {
     if (!api.ready || !current) return;
     if (lastLoaded.current === current.key) return;
@@ -1103,6 +1281,40 @@ export function CrateApp({
         >
           <Compass className="h-3.5 w-3.5" />
           Dig
+        </button>
+
+        {/*
+          Measure the tempo of everything on screen.
+          
+          It acts on `visible`, which is the playlist when one is open and the
+          filtered crate otherwise — so the same control is both "measure this
+          set before the gig" and "index my collection a style at a time".
+          Already-measured tracks are skipped, which is what makes the second
+          use bearable: you chip away, and nothing is ever redone.
+        */}
+        <button
+          type="button"
+          onClick={startSweep}
+          disabled={visible.length === 0}
+          className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
+            sweep
+              ? "border-accent/50 bg-accent/10 text-accent"
+              : "border-ink-700 text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+          }`}
+          title={
+            sweep
+              ? "Stop measuring"
+              : "Play through everything here and measure the tempos"
+          }
+        >
+          <Metronome className="h-3.5 w-3.5" />
+          {sweep ? (
+            <span className="font-mono tabular-nums">
+              {sweep.index + 1}/{sweep.keys.length}
+            </span>
+          ) : (
+            "Measure"
+          )}
         </button>
 
         <button
