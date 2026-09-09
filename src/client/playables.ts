@@ -61,13 +61,22 @@ function similarity(a: string, b: string): number {
   return shared / Math.min(tokensA.size, tokensB.size);
 }
 
+export interface TrackMatch {
+  track: Track | null;
+  /** Title-overlap score in [0,1] for the winning track, 0 if none matched. */
+  score: number;
+  /** The clip announces itself as a whole side, album or mix. */
+  longform: boolean;
+}
+
 function matchTrack(
   videoTitle: string,
   artist: string,
   tracks: Track[],
-): Track | null {
-  if (tracks.length === 0) return null;
-  if (LONGFORM.test(videoTitle)) return null;
+): TrackMatch {
+  const longform = LONGFORM.test(videoTitle);
+  if (tracks.length === 0) return { track: null, score: 0, longform };
+  if (longform) return { track: null, score: 0, longform };
 
   // Strip a leading "Artist - " so it does not dominate the token overlap.
   const normalizedArtist = normalize(artist);
@@ -75,7 +84,7 @@ function matchTrack(
   if (normalizedArtist && candidate.startsWith(normalizedArtist)) {
     candidate = candidate.slice(normalizedArtist.length).trim();
   }
-  if (!candidate) return null;
+  if (!candidate) return { track: null, score: 0, longform };
 
   let best: Track | null = null;
   let bestScore = 0;
@@ -88,7 +97,9 @@ function matchTrack(
     }
   }
 
-  return bestScore >= 0.6 ? best : null;
+  return bestScore >= 0.6
+    ? { track: best, score: bestScore, longform }
+    : { track: null, score: bestScore, longform };
 }
 
 /** "3:47" -> 227 seconds. */
@@ -107,6 +118,84 @@ export function parseDuration(value: string | null): number | null {
  * `bpmByClip` merges the server-held BPM catalogue in as the playables are
  * constructed, so filtering and sorting by tempo needs no second lookup.
  */
+/**
+ * How close a clip's runtime is to the tracklist's stated duration, in [0,1].
+ *
+ * This is the strongest signal available for "is this actually the track".
+ * A 6-minute upload against a 6:12 listing is almost certainly it; the same
+ * track title against a 43-minute upload is the full album with the track
+ * somewhere inside it.
+ */
+function durationFit(clipSeconds: number | null, trackSeconds: number | null): number {
+  if (!clipSeconds || !trackSeconds) return 0;
+  const ratio = Math.min(clipSeconds, trackSeconds) / Math.max(clipSeconds, trackSeconds);
+  // 0.85+ is a good fit; below 0.5 the two are not the same recording.
+  return ratio >= 0.85 ? 1 : ratio >= 0.6 ? 0.5 : 0;
+}
+
+/** Middle value, which is what we want rather than a mean skewed by a DJ rip. */
+function median(values: number[]): number | null {
+  const sorted = values.filter((v) => v > 0).sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
+}
+
+/**
+ * Rank competing clips for the same track. Higher wins.
+ *
+ * Deliberately ordered so that runtime agreement outweighs a confident title
+ * match: YouTube titles are written by uploaders and lie constantly, while a
+ * duration either lines up with the pressing or it doesn't.
+ *
+ * `reference` is the runtime this track is believed to have. Discogs' own
+ * tracklist duration when there is one — but Discogs durations are blank far
+ * more often than not, especially on early-nineties twelves, and that is
+ * exactly where the duplicates pile up. When it is blank, the uploads vote:
+ * the median of the group. Sixteen people who each uploaded the same record
+ * agree on its length to within a few seconds, and the outliers at either end
+ * are a radio edit and somebody's extended rip. The middle is the record.
+ */
+function clipScore(
+  video: { duration: number | null; title: string },
+  match: TrackMatch,
+  reference: number | null,
+): number {
+  let score = 0;
+  score += durationFit(video.duration, reference) * 4;
+  score += match.score * 2;
+  if (video.duration) score += 0.5; // a known runtime at all is worth something
+  if (match.longform) score -= 3; // a side-long rip is a poor single-track clip
+  return score;
+}
+
+/**
+ * Build the playable list — one row per *track*, not per video.
+ *
+ * Discogs attaches videos to releases, and uploaders are enthusiastic: a single
+ * release routinely carries the same track three times over, plus a full-album
+ * rip, plus someone's vinyl transfer. Emitting one row per video (which this
+ * did until now) turned a 4-track EP into fourteen near-identical lines, and
+ * made the crate look broken at a glance.
+ *
+ * Grouping rules, in order:
+ *
+ *   1. Clips that matched the same track collapse into one row.
+ *   2. Clips that matched nothing group by normalised title, so two uploads of
+ *      the same unrecognised track collapse but genuinely different ones don't.
+ *   3. Anything left with the same runtime (within 2s) and a near-identical
+ *      title collapses too — the case where two uploads of one track matched
+ *      different tracklist entries, or matched nothing at all.
+ *
+ * Within a group the highest-scoring clip wins (see `clipScore`), so
+ * deduplicating never costs you the best-sounding preview — it discards the
+ * worse copies, not an arbitrary one.
+ *
+ * `bpmByClip` merges the server-held BPM catalogue in as the playables are
+ * constructed, so filtering and sorting by tempo needs no second lookup. A BPM
+ * you already catalogued against a clip that loses its group is carried over to
+ * the winner rather than thrown away — you tapped that tempo, you keep it.
+ */
 export function buildPlayables(
   details: ReleaseDetail[],
   bpmByClip: Map<string, number> = new Map(),
@@ -118,9 +207,113 @@ export function buildPlayables(
     // per-track markings in the title win over them.
     const releaseBpm = parseBpmFromText(release.notes);
 
+    interface Candidate {
+      video: ReleaseDetail["videos"][number];
+      match: TrackMatch;
+      trackSeconds: number | null;
+      score: number;
+      normTitle: string;
+      key: string;
+    }
+
+    const groups = new Map<string, Candidate[]>();
+
     for (const video of release.videos) {
-      const track = matchTrack(video.title, release.artist, release.tracks);
-      const key = `${release.id}:${video.id}`;
+      const match = matchTrack(video.title, release.artist, release.tracks);
+      const trackSeconds = match.track ? parseDuration(match.track.duration) : null;
+      const normTitle = normalize(video.title);
+
+      // Rule 1 and 2: one group per matched track, else per normalised title.
+      const groupKey = match.track
+        ? `t:${match.track.position || normalize(match.track.title)}`
+        : `u:${normTitle || video.id}`;
+
+      const candidate: Candidate = {
+        video,
+        match,
+        trackSeconds,
+        // Scored below, once the whole group is known: a clip can only be
+        // judged against its siblings.
+        score: 0,
+        normTitle,
+        key: `${release.id}:${video.id}`,
+      };
+
+      const existing = groups.get(groupKey);
+      if (existing) existing.push(candidate);
+      else groups.set(groupKey, [candidate]);
+    }
+
+    // Rule 3: fold groups whose winners are the same recording by another name.
+    const winners: Candidate[] = [];
+    const losersOf = new Map<Candidate, Candidate[]>();
+
+    for (const group of groups.values()) {
+      // The track's believed runtime: Discogs' figure, else what the uploads
+      // agree on. See clipScore.
+      const reference =
+        group[0]?.trackSeconds ??
+        median(group.map((c) => c.video.duration ?? 0));
+
+      for (const candidate of group) {
+        candidate.score = clipScore(candidate.video, candidate.match, reference);
+      }
+
+      // Ties break on the clip nearest the reference, then on Discogs' own
+      // ordering, so the result never depends on Map iteration luck.
+      group.sort(
+        (a, b) =>
+          b.score - a.score ||
+          Math.abs((a.video.duration ?? 0) - (reference ?? 0)) -
+            Math.abs((b.video.duration ?? 0) - (reference ?? 0)),
+      );
+      const [winner, ...rest] = group;
+      if (!winner) continue;
+
+      const twin = winners.find((existing) => {
+        const bothTimed = existing.video.duration && winner.video.duration;
+        const sameLength =
+          bothTimed &&
+          Math.abs(existing.video.duration! - winner.video.duration!) <= 2;
+        return sameLength && similarity(existing.normTitle, winner.normTitle) >= 0.8;
+      });
+
+      if (twin) {
+        // Keep whichever scores better; the other becomes a donor of its BPM.
+        const [keep, drop] = twin.score >= winner.score ? [twin, winner] : [winner, twin];
+        if (keep === winner) {
+          winners.splice(winners.indexOf(twin), 1, winner);
+          losersOf.set(winner, [...(losersOf.get(twin) ?? []), twin, ...rest]);
+          losersOf.delete(twin);
+        } else {
+          losersOf.set(keep, [...(losersOf.get(keep) ?? []), drop, ...rest]);
+        }
+        continue;
+      }
+
+      winners.push(winner);
+      if (rest.length > 0) losersOf.set(winner, rest);
+    }
+
+    /*
+     * A side-long or full-album rip is a fallback, not an extra row. If any
+     * clip on this release resolved to a real track, the whole-record upload
+     * adds nothing but noise — you already have the tracks. If nothing matched,
+     * it is the only way to hear the record, so it stays.
+     *
+     * Note this drops only *longform* unmatched clips. An ordinary clip that
+     * simply failed to match the tracklist is very often a real track under a
+     * title the matcher didn't recognise, and throwing those away would hide
+     * music rather than tidy the list.
+     */
+    const hasTrackMatch = winners.some((w) => w.match.track !== null);
+    const kept = hasTrackMatch
+      ? winners.filter((w) => w.match.track !== null || !w.match.longform)
+      : winners;
+
+    for (const winner of kept) {
+      const { video, match, trackSeconds, key } = winner;
+      const track = match.track;
 
       const title = track ? track.title : video.title || release.title;
 
@@ -133,6 +326,14 @@ export function buildPlayables(
         parseBpmFromText(track?.title) ??
         parseBpmFromText(video.title) ??
         releaseBpm;
+
+      // A tempo catalogued against a discarded duplicate still describes this
+      // recording, so inherit it rather than making the user tap it again.
+      const inheritedBpm =
+        bpmByClip.get(key) ??
+        (losersOf.get(winner) ?? [])
+          .map((loser) => bpmByClip.get(loser.key))
+          .find((value) => value !== undefined);
 
       out.push({
         key,
@@ -148,10 +349,10 @@ export function buildPlayables(
         thumb: release.thumb,
         country: release.country,
         formats: release.formats,
-        duration: video.duration ?? (track ? parseDuration(track.duration) : null),
+        duration: video.duration ?? trackSeconds,
         position: track?.position ?? null,
         // A catalogued reading (tapped or detected) always beats text parsing.
-        bpm: bpmByClip.get(key) ?? parsedBpm,
+        bpm: inheritedBpm ?? parsedBpm,
         matchKind: track ? "track" : "release",
       });
     }

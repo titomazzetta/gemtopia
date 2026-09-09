@@ -18,17 +18,53 @@ import { env } from "./env";
 
 const isProd = env.NODE_ENV === "production";
 
-/** `__Host-` locks the cookie to this exact origin, path `/`, Secure-only. */
-export const SESSION_COOKIE = isProd ? "__Host-gt_session" : "gt_session";
-export const HANDSHAKE_COOKIE = isProd ? "__Host-gt_oauth" : "gt_oauth";
-export const CSRF_COOKIE = isProd ? "__Host-gt_csrf" : "gt_csrf";
+/**
+ * Whether this deployment is actually served over TLS.
+ *
+ * This drives `Secure` and the `__Host-` prefix, and it is derived from the
+ * origin rather than from NODE_ENV, because those two can disagree and the
+ * browser only cares about the former.
+ *
+ * The previous version hardcoded `secure: true` with a comment claiming
+ * "localhost counts as a secure context in modern browsers". That conflates two
+ * different things. `http://localhost` *is* a secure context for JavaScript
+ * APIs — service workers, WebCrypto, getUserMedia. Whether a browser will
+ * *store a Secure cookie* sent over plain HTTP to localhost is a separate
+ * decision, and browsers do not agree on it: Chrome and Firefox allow it,
+ * Safari does not. On Safari the cookie was silently discarded — no error, no
+ * warning — so the OAuth callback found no handshake and reported the sign-in
+ * link as expired. A cookie you cannot set is indistinguishable from a cookie
+ * that timed out, which is what made it confusing.
+ */
+const isHttps = env.APP_ORIGIN.startsWith("https://");
+
+/*
+ * Refuse to run a real deployment without TLS rather than quietly shipping
+ * session cookies that lack Secure. Localhost is exempt: that is development.
+ */
+if (isProd && !isHttps && !/^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(env.APP_ORIGIN)) {
+  throw new Error(
+    `APP_ORIGIN is ${env.APP_ORIGIN} but NODE_ENV is production. ` +
+      `Session cookies would be sent without Secure. Use https://.`,
+  );
+}
+
+/**
+ * `__Host-` locks the cookie to this exact origin, path `/`, Secure-only.
+ *
+ * It is tied to TLS, not to NODE_ENV: the prefix *requires* Secure, so naming a
+ * cookie `__Host-` on a plain-HTTP origin makes the browser reject it outright.
+ */
+export const SESSION_COOKIE = isHttps ? "__Host-gt_session" : "gt_session";
+export const HANDSHAKE_COOKIE = isHttps ? "__Host-gt_oauth" : "gt_oauth";
+export const CSRF_COOKIE = isHttps ? "__Host-gt_csrf" : "gt_csrf";
 
 const SESSION_MAX_AGE = 60 * 60 * 24 * 14; // 14 days
 const HANDSHAKE_MAX_AGE = 60 * 10; // 10 minutes to finish the OAuth dance
 
 const baseCookie = {
   httpOnly: true,
-  secure: true, // localhost counts as a secure context in modern browsers
+  secure: isHttps,
   sameSite: "lax" as const,
   path: "/",
 };
@@ -153,19 +189,40 @@ export async function setHandshake(data: {
   });
 }
 
-export async function consumeHandshake(): Promise<Handshake | null> {
+/**
+ * Why this distinguishes its failures.
+ *
+ * It used to return `null` for everything, and the callback rendered all of it
+ * as "That sign-in link timed out." But *no cookie arrived* and *a cookie
+ * arrived and was too old* are completely different faults with completely
+ * different fixes, and collapsing them cost real debugging time when a browser
+ * silently refused to store the cookie in the first place. A missing cookie is
+ * never a timeout — nothing was ever there to time out.
+ */
+export type HandshakeFailure = "absent" | "unreadable" | "stale";
+
+export async function consumeHandshake(): Promise<
+  { ok: true; data: Handshake } | { ok: false; reason: HandshakeFailure }
+> {
   const jar = await cookies();
   const raw = jar.get(HANDSHAKE_COOKIE)?.value;
 
   // Single use: burn it no matter what happens next.
   jar.set(HANDSHAKE_COOKIE, "", { ...baseCookie, maxAge: 0 });
 
+  // The browser sent nothing. Either it never stored the cookie (a Secure
+  // cookie over plain HTTP, or cookies blocked), or the user is finishing a
+  // handshake in a different browser or profile from the one that began it.
+  if (!raw) return { ok: false, reason: "absent" };
+
   const parsed = handshakeSchema.safeParse(unseal(raw));
-  if (!parsed.success) return null;
+  if (!parsed.success) return { ok: false, reason: "unreadable" };
+
   if (Math.floor(Date.now() / 1000) - parsed.data.iat > HANDSHAKE_MAX_AGE) {
-    return null;
+    return { ok: false, reason: "stale" };
   }
-  return parsed.data;
+
+  return { ok: true, data: parsed.data };
 }
 
 /* ------------------------------------------------------------------ */

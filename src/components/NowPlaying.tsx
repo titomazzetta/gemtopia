@@ -167,27 +167,47 @@ function TempoPanel({
             live
           </button>
         ) : (
-          <>
-            <button
-              type="button"
-              onClick={() => onStartDetector("tab")}
-              title="Detect BPM from this tab's audio (Chrome / Edge)"
-              className="flex items-center gap-1 rounded border border-ink-700 px-2 py-1 text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
-            >
-              <Waveform className="h-3 w-3" />
-              auto
-            </button>
-            <button
-              type="button"
-              onClick={() => onStartDetector("mic")}
-              title="Detect BPM from the microphone (any browser)"
-              className="rounded border border-ink-700 px-1.5 py-1 text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
-            >
-              <Mic className="h-3 w-3" />
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => onStartDetector("tab")}
+            title="Detect BPM from this tab's audio (Chrome / Edge)"
+            className="flex items-center gap-1.5 rounded border border-accent/40 bg-accent/10 px-2.5 py-1 text-[10px] font-medium text-accent hover:bg-accent/20"
+          >
+            <Waveform className="h-3 w-3" />
+            Detect
+          </button>
         )}
       </div>
+
+      {/*
+        Detection has to be armed by a click — `getDisplayMedia` refuses to run
+        without a user gesture, in every browser, by design. It cannot be turned
+        on at load or on the app's behalf.
+
+        But it only needs the one click. The stream stays open for the session
+        and every track played afterwards is analysed with no further
+        interaction, which is the behaviour people expect and previously could
+        not find: this used to be a 10px button labelled "auto", so nobody armed
+        it and the BPM catalogue stayed empty.
+      */}
+      {!listening && (
+        <div className="mt-1.5 rounded border border-ink-800 bg-ink-900/60 px-2 py-1.5">
+          <p className="text-[10px] leading-relaxed text-neutral-500">
+            <span className="text-neutral-300">Detect</span> reads the tempo
+            from this tab&rsquo;s audio. Chrome asks once — pick this tab and
+            tick <span className="text-neutral-400">Share tab audio</span>.
+            After that every track you play is measured automatically.
+          </p>
+          <button
+            type="button"
+            onClick={() => onStartDetector("mic")}
+            className="mt-1 flex items-center gap-1 text-[10px] text-neutral-600 hover:text-neutral-300"
+          >
+            <Mic className="h-3 w-3" />
+            Use the microphone instead — works in Safari and Firefox
+          </button>
+        </div>
+      )}
 
       {detectorError && (
         <p className="mt-1.5 text-[10px] leading-snug text-amber-300/80">

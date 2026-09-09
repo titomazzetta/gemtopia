@@ -16,10 +16,11 @@
     "audit:ci": "npm audit --audit-level=high",
     "db:migrate": "node scripts/migrate.mjs",
     "verify:discogs": "node scripts/verify-discogs.mjs",
-    "test": "npm run test:env && npm run test:tempo && npm run test:mixing && npm run test:api",
-    "test:env": "node --experimental-strip-types scripts/test-env.mjs",
-    "test:tempo": "node --experimental-strip-types scripts/test-tempo.mjs",
-    "test:mixing": "node --experimental-strip-types scripts/test-mixing.mjs",
+    "test": "npm run test:env && npm run test:playables && npm run test:tempo && npm run test:mixing && npm run test:api",
+    "test:env": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-env.mjs",
+    "test:playables": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playables.mjs",
+    "test:tempo": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-tempo.mjs",
+    "test:mixing": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-mixing.mjs",
     "test:api": "node scripts/test-api.mjs"
   },
   "dependencies": {

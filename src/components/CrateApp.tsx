@@ -46,6 +46,7 @@ import {
 } from "./Filters";
 import { analyseSequence, smoothOrder, DEFAULT_PITCH_PERCENT, type MixCheck } from "@/lib/mixing";
 import { DigDrawer } from "./DigDrawer";
+import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
@@ -335,7 +336,32 @@ export function CrateApp({
           await markMigrated(username);
         }
 
-        if (!state || state.status !== "done") runSync("collection");
+        /*
+         * Re-check for new records on every load, not just when a previous
+         * sync was interrupted.
+         *
+         * This used to be `if (!state || state.status !== "done")`, so once a
+         * sync finished the app never looked again — you could buy a record on
+         * Tuesday and it stayed invisible until you manually hit resync. For an
+         * app aimed at people who buy records constantly, that is the wrong
+         * default.
+         *
+         * It is nearly free. `getCollectionPage` already asks Discogs for
+         * `sort=added&sort_order=desc`, so the first page *is* the newest
+         * additions: one request says whether anything appeared. Details are
+         * only fetched for releases not already cached, so an unchanged
+         * collection costs a single call and finishes in about a second.
+         *
+         * The freshness window stops a burst of tab reloads from re-listing
+         * every time; anything older than that gets checked.
+         */
+        const FRESH_FOR_MS = 15 * 60 * 1000;
+        const stale =
+          !state ||
+          state.status !== "done" ||
+          Date.now() - state.updatedAt > FRESH_FOR_MS;
+
+        if (stale) runSync("collection");
       } catch (error) {
         console.error("[boot]", error);
         if (!cancelled) say("Could not open your crate. Try reloading.");
@@ -923,9 +949,6 @@ export function CrateApp({
     sync?.status === "listing" ||
     sync?.status === "detailing" ||
     sync?.status === "paused";
-  const progress =
-    sync && sync.total > 0 ? Math.round((sync.detailed / sync.total) * 100) : 0;
-
   return (
     <div className="flex h-full flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 py-2.5">
@@ -1024,24 +1047,7 @@ export function CrateApp({
         </details>
       </header>
 
-      {sync && sync.status !== "done" && (
-        <div className="shrink-0 border-b border-ink-800 bg-ink-850 px-4 py-1.5">
-          <div className="flex items-center gap-3 text-[11px] text-neutral-400">
-            <span className="truncate">{sync.message ?? "Syncing…"}</span>
-            {sync.total > 0 && (
-              <div className="ml-auto flex w-40 shrink-0 items-center gap-2">
-                <div className="h-1 flex-1 overflow-hidden rounded-full bg-ink-700">
-                  <div
-                    className="h-full rounded-full bg-accent transition-[width]"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-                <span className="font-mono tabular-nums">{progress}%</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {sync && sync.status !== "done" && <SyncBanner sync={sync} />}
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <nav className="flex shrink-0 flex-col border-b border-ink-800 bg-ink-900 lg:w-[300px] lg:border-b-0 lg:border-r">

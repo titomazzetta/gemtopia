@@ -8,7 +8,12 @@ export const dynamic = "force-dynamic";
 
 const AUTH_ERRORS: Record<string, string> = {
   denied: "You cancelled the Discogs authorisation.",
-  expired: "That sign-in link timed out. Please try again.",
+  expired:
+    "That sign-in took longer than 10 minutes. Please try again.",
+  no_cookie:
+    "Your browser didn't send back the sign-in cookie. Finish signing in " +
+    "in the same browser you started in, and check that cookies aren't blocked " +
+    "for this site.",
   mismatch: "Sign-in could not be verified. Please start again.",
   invalid: "Discogs sent back something we could not read.",
   failed: "Discogs sign-in failed. Please try again.",

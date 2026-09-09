@@ -472,6 +472,7 @@ scripts/
 ├── migrate.mjs                idempotent schema application
 ├── verify-discogs.mjs         real OAuth handshake, no deps, redacts on failure
 ├── test-env.mjs               configuration contract (36 cases)
+├── test-playables.mjs         clip de-duplication and best-clip choice (18 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths vs hand-computed answers (34 cases)
 └── test-api.mjs               auth, CSRF, IDOR, revocation, privacy (59 cases)
@@ -511,6 +512,7 @@ src/
 ```bash
 npm run test           # everything below
 npm run test:env       # 36 cases, no server needed
+npm run test:playables # 18 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 34 cases, no server needed
 npm run test:api       # 59 cases, needs a running server + Postgres

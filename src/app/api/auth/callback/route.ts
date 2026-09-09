@@ -38,19 +38,29 @@ export async function GET(request: NextRequest) {
   // Single-use: this destroys the cookie regardless of outcome.
   const handshake = await consumeHandshake();
 
-  if (!handshake) return back("expired");
+  if (!handshake.ok) {
+    // Distinct reasons, because "no cookie" and "old cookie" send the user to
+    // two different fixes. See consumeHandshake.
+    return back(
+      handshake.reason === "stale"
+        ? "expired"
+        : handshake.reason === "absent"
+          ? "no_cookie"
+          : "invalid",
+    );
+  }
   if (!returnedToken || !verifier) return back("invalid");
 
   // Bind the callback to the handshake this browser actually started.
-  if (!safeEqual(handshake.rt, returnedToken)) return back("mismatch");
+  if (!safeEqual(handshake.data.rt, returnedToken)) return back("mismatch");
 
   // Verifiers are short opaque strings; anything else is not from Discogs.
   if (!/^[A-Za-z0-9]{4,64}$/.test(verifier)) return back("invalid");
 
   try {
     const granted = await accessToken({
-      requestToken: handshake.rt,
-      requestSecret: handshake.rs,
+      requestToken: handshake.data.rt,
+      requestSecret: handshake.data.rs,
       verifier,
     });
 
