@@ -75,7 +75,7 @@ export function startSync(options: {
   (async () => {
     try {
       /* ---------- Phase 1: page the listing ---------- */
-      emit({ detailed: 0, total: 0, status: "listing", message: "Reading your crate…" });
+      emit({ detailed: 0, total: 0, status: "listing", message: "Reading your collection…" });
 
       let page = 1;
       let pages = 1;

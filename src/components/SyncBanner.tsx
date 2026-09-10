@@ -157,7 +157,7 @@ export function SyncBanner({ sync }: { sync: SyncState }) {
           <div className="flex items-baseline gap-2">
             <span className="text-[13px] font-medium text-neutral-200">
               {sync.status === "listing"
-                ? "Reading your crate…"
+                ? "Reading your collection…"
                 : sync.status === "paused"
                   ? "Paused — Discogs rate limit"
                   : "Extrapolating collection…"}
