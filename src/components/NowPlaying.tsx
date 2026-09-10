@@ -262,14 +262,38 @@ export function NowPlaying({
     [api],
   );
 
+  /*
+   * On a phone this becomes a video strip at the top of the screen, and
+   * everything below it is hidden — the transport lives in MobileBar at thumb
+   * height, and the rest in the player sheet.
+   *
+   * The video itself cannot move to a sheet, and cannot be hidden. YouTube's
+   * IFrame API terms require the player stay visible at 200x200 or larger and
+   * unobscured while it plays; a `display: none` iframe would breach that, and
+   * browsers throttle hidden iframes, so it would likely stop playing anyway.
+   * So on mobile the video stays on screen and the controls go to the bottom —
+   * the honest resolution of "controls where the thumb is" against a constraint
+   * that is not ours to negotiate.
+   *
+   * `order-first` puts it above the list on mobile; on desktop it returns to
+   * the right-hand column.
+   */
   return (
-    <aside className="flex w-full flex-col border-l border-ink-800 bg-ink-900 lg:w-[320px] lg:shrink-0">
-      {/*
-        The YouTube player. It stays visible at ≥200x200 because YouTube's API
-        terms require exactly that — see useYouTubePlayer.ts. Here it simply
-        does the job album art would do, and every control below is ours.
-      */}
-      <div className="relative aspect-square w-full bg-black">
+    <aside
+      className={`order-first w-full flex-col border-b border-ink-800 bg-ink-900 lg:order-none lg:flex lg:w-[320px] lg:shrink-0 lg:border-b-0 lg:border-l ${
+        /*
+         * On a phone the video strip collapses entirely when nothing is
+         * queued. YouTube's visibility requirement applies to a player that is
+         * playing; with an empty queue there is no player content, only 200px
+         * of black — and those 200px are worth four more records during
+         * exactly the phase where you are browsing rather than listening.
+         * Desktop keeps the panel at all times: there is room, and the empty
+         * state is doing useful work as a "nothing queued" affordance.
+         */
+        current ? "flex" : "hidden lg:flex"
+      }`}
+    >
+      <div className="relative mx-auto aspect-square w-[min(52vw,200px)] bg-black lg:mx-0 lg:w-full">
         <div className="absolute inset-0" ref={containerRef} />
         {!current && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-ink-850 text-neutral-600">
@@ -279,7 +303,7 @@ export function NowPlaying({
         )}
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 p-4">
+      <div className="hidden flex-1 flex-col gap-3 p-4 lg:flex">
         <div className="min-h-[52px]">
           {current ? (
             <>

@@ -71,6 +71,8 @@ import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
 import { TrackList } from "./TrackList";
+import { Sheet } from "./Sheet";
+import { MobileBar } from "./MobileBar";
 import { Compass, Disc, Metronome, Refresh, Shuffle } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights";
@@ -131,6 +133,13 @@ export function CrateApp({
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [picker, setPicker] = useState<Playable | null>(null);
+
+  /*
+   * Which bottom sheet is open on a phone. One at a time, by construction —
+   * the whole point of the mobile layout is that the screen shows one thing.
+   * Desktop never reads this; the rail and the aside are always visible there.
+   */
+  const [sheet, setSheet] = useState<"none" | "filters" | "player" | "source">("none");
 
   /*
    * Column sort for the crate. Null means the list's own order, which for a
@@ -690,6 +699,33 @@ export function CrateApp({
    * checks between consecutive rows only mean anything while the displayed
    * order is the stored one. So sorting applies to the crate only.
    */
+  /*
+   * How many filters are actually narrowing the crate. Drives the badge on the
+   * mobile Filters button — the one thing that stops a filter sheet becoming a
+   * place where you leave something on by accident and then wonder where half
+   * your records went. The search box is excluded: it is visible on screen, so
+   * it needs no badge to be discoverable.
+   */
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    for (const key of [
+      "artists",
+      "genres",
+      "styles",
+      "labels",
+      "countries",
+      "formats",
+      "decades",
+    ] as const) {
+      count += filters[key].length;
+    }
+    if (filters.yearFrom !== null || filters.yearTo !== null) count += 1;
+    if (filters.bpmFrom !== null || filters.bpmTo !== null) count += 1;
+    if (filters.tracksOnly) count += 1;
+    if (filters.withBpmOnly) count += 1;
+    return count;
+  }, [filters]);
+
   const visible = useMemo(
     () =>
       activePlaylist
@@ -1248,6 +1284,61 @@ export function CrateApp({
     return () => window.removeEventListener("keydown", handler);
   }, [api, advance, shuffleNow, queueForPlaylist, handleTap]);
 
+  /* ================= playlist actions ================= */
+
+  /*
+   * Shared by the desktop rail and the mobile sheet. They were inline in the
+   * rail; a second call site would have meant two copies of the same logic
+   * drifting apart, which is how a bug gets fixed on one platform only.
+   */
+  const deletePlaylist = useCallback(
+    async (id: string) => {
+      try {
+        await playlistsApi.remove(id);
+        if (activePlaylistId === id) setActivePlaylistId(null);
+        setPlaylists((previous) => previous.filter((p) => p.id !== id));
+      } catch {
+        say("Could not delete that playlist.");
+      }
+    },
+    [activePlaylistId, say],
+  );
+
+  const renamePlaylist = useCallback(
+    async (id: string, name: string) => {
+      try {
+        const updated = await playlistsApi.update(id, { name });
+        setPlaylists((previous) =>
+          previous.map((p) => (p.id === updated.id ? updated : p)),
+        );
+      } catch {
+        say("Could not rename that playlist.");
+      }
+    },
+    [say],
+  );
+
+  const playPlaylist = useCallback(
+    (id: string, shuffled: boolean) => {
+      const playlist = playlists.find((p) => p.id === id);
+      if (!playlist || playlist.entries.length === 0) {
+        say("That playlist is empty.");
+        return;
+      }
+      setActivePlaylistId(id);
+      setShuffleOn(shuffled);
+      const resolved = playlist.entries
+        .map((entry) => byKey.get(entry.clipKey) ?? null)
+        .filter((p): p is Playable => Boolean(p));
+      if (resolved.length === 0) {
+        say("Those clips are not in the local cache yet.");
+        return;
+      }
+      playFrom(shuffled ? spreadShuffle(resolved) : resolved, 0);
+    },
+    [playlists, byKey, playFrom, say],
+  );
+
   /* ================= render ================= */
 
   const syncing =
@@ -1262,7 +1353,12 @@ export function CrateApp({
           Gemtopia
         </span>
 
-        <div className="ml-2 flex rounded-md border border-ink-700 p-0.5">
+        {/*
+          Desktop only: on a phone the source lives in the "Play from" sheet,
+          which also lists playlists. Two controls for one choice, one of them
+          clipped off the right edge of a 393px screen, is worse than one.
+        */}
+        <div className="ml-2 hidden rounded-md border border-ink-700 p-0.5 lg:flex">
           {(["collection", "wantlist"] as const).map((value) => (
             <button
               key={value}
@@ -1297,7 +1393,7 @@ export function CrateApp({
             setDigTarget(current);
           }}
           disabled={!current}
-          className="ml-auto flex items-center gap-1.5 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40"
+          className="ml-auto hidden items-center gap-1.5 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40 lg:flex"
           title="Dig from what's playing (D)"
         >
           <Compass className="h-3.5 w-3.5" />
@@ -1317,7 +1413,7 @@ export function CrateApp({
           type="button"
           onClick={startSweep}
           disabled={visible.length === 0}
-          className={`flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 ${
+          className={`ml-auto hidden items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 lg:flex ${
             sweep
               ? "border-accent/50 bg-accent/10 text-accent"
               : "border-ink-700 text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
@@ -1341,7 +1437,7 @@ export function CrateApp({
         <button
           type="button"
           onClick={shuffleNow}
-          className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-ink-950 transition-transform hover:scale-105"
+          className="hidden items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-ink-950 transition-transform hover:scale-105 lg:flex"
           title="Shuffle what's on screen (S)"
         >
           <Shuffle className="h-3.5 w-3.5" />
@@ -1389,7 +1485,13 @@ export function CrateApp({
       {sync && sync.status !== "done" && <SyncBanner sync={sync} />}
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        <nav className="flex shrink-0 flex-col border-b border-ink-800 bg-ink-900 lg:w-[300px] lg:border-b-0 lg:border-r">
+        {/*
+          The rail is desktop-only now. On a phone its contents are reachable
+          through the Filters and source sheets — same components, same state,
+          rendered somewhere a thumb can get to without scrolling past them to
+          reach the list.
+        */}
+        <nav className="hidden shrink-0 flex-col border-b border-ink-800 bg-ink-900 lg:flex lg:w-[300px] lg:border-b-0 lg:border-r">
           <div className="flex shrink-0 border-b border-ink-800">
             {(["filters", "playlists", "insights"] as const).map((value) => (
               <button
@@ -1430,46 +1532,12 @@ export function CrateApp({
                 activeId={activePlaylistId}
                 onSelect={setActivePlaylistId}
                 onCreate={(name) => void createPlaylist(name)}
-                onDelete={async (id) => {
-                  try {
-                    await playlistsApi.remove(id);
-                    if (activePlaylistId === id) setActivePlaylistId(null);
-                    setPlaylists((previous) => previous.filter((p) => p.id !== id));
-                  } catch {
-                    say("Could not delete that playlist.");
-                  }
-                }}
-                onRename={async (id, name) => {
-                  try {
-                    const updated = await playlistsApi.update(id, { name });
-                    setPlaylists((previous) =>
-                      previous.map((p) => (p.id === updated.id ? updated : p)),
-                    );
-                  } catch {
-                    say("Could not rename that playlist.");
-                  }
-                }}
-                onPlay={(id, shuffled) => {
-                  const playlist = playlists.find((p) => p.id === id);
-                  if (!playlist || playlist.entries.length === 0) {
-                    say("That playlist is empty.");
-                    return;
-                  }
-                  setActivePlaylistId(id);
-                  setShuffleOn(shuffled);
-                  const items = playlist.entries.map(
-                    (entry) => byKey.get(entry.clipKey) ?? null,
-                  );
-                  const resolved = items.filter((p): p is Playable => Boolean(p));
-                  if (resolved.length === 0) {
-                    say("Those clips are not in the local cache yet.");
-                    return;
-                  }
-                  playFrom(shuffled ? spreadShuffle(resolved) : resolved, 0);
-                }}
+                onDelete={(id) => void deletePlaylist(id)}
+                onRename={(id, name) => void renamePlaylist(id, name)}
+                onPlay={playPlaylist}
                 onExport={exportPlaylists}
-              onShare={(id, shared) => void sharePlaylist(id, shared)}
-              sharedIds={sharedIds}
+                onShare={(id, shared) => void sharePlaylist(id, shared)}
+                sharedIds={sharedIds}
                 onImport={(file) => void importPlaylists(file)}
               />
             )}
@@ -1488,9 +1556,94 @@ export function CrateApp({
         </nav>
 
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {/*
+            Mobile chrome: what you are looking at, and how to narrow it.
+            Two rows, both thumb-adjacent, neither pushing the list off screen.
+            Desktop keeps its rail and ignores all of this.
+          */}
+          {!digTarget && (
+            <div className="shrink-0 border-b border-ink-800 lg:hidden">
+              <div className="flex items-center gap-2 px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => setSheet("source")}
+                  className="flex min-w-0 items-center gap-1 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-200"
+                >
+                  <span className="truncate">
+                    {activePlaylist ? activePlaylist.name : `Your ${source}`}
+                  </span>
+                  <span aria-hidden="true" className="text-[9px] text-neutral-500">
+                    ▼
+                  </span>
+                </button>
+
+                <span className="shrink-0 font-mono text-[11px] text-neutral-600">
+                  {visible.length.toLocaleString()}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={startSweep}
+                  disabled={visible.length === 0}
+                  aria-label={sweep ? "Stop measuring" : "Measure tempos"}
+                  className={`ml-auto flex shrink-0 items-center gap-1 rounded-md border px-2 py-1.5 text-xs disabled:opacity-40 ${
+                    sweep
+                      ? "border-accent/50 bg-accent/10 text-accent"
+                      : "border-ink-700 text-neutral-400"
+                  }`}
+                >
+                  <Metronome className="h-3.5 w-3.5" />
+                  {sweep && (
+                    <span className="font-mono tabular-nums">
+                      {sweep.index + 1}/{sweep.keys.length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={shuffleNow}
+                  className="flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-ink-950"
+                >
+                  <Shuffle className="h-3.5 w-3.5" />
+                  Shuffle
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 px-3 pb-2">
+                <input
+                  type="search"
+                  value={filters.query}
+                  onChange={(event) =>
+                    setFilters({ ...filters, query: event.target.value })
+                  }
+                  placeholder="Search your crate…"
+                  aria-label="Search"
+                  className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-950 px-2.5 py-1.5 text-xs placeholder:text-neutral-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSheet("filters")}
+                  className={`flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs ${
+                    activeFilterCount > 0
+                      ? "border-accent/50 bg-accent/10 text-accent"
+                      : "border-ink-700 text-neutral-400"
+                  }`}
+                >
+                  Filters
+                  {activeFilterCount > 0 && (
+                    <span className="rounded-full bg-accent px-1.5 text-[10px] font-semibold text-ink-950">
+                      {activeFilterCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+
           <div
-            className={`flex shrink-0 items-center gap-2 border-b border-ink-800 px-4 py-2 ${
-              digTarget ? "hidden" : ""
+            className={`hidden shrink-0 items-center gap-2 border-b border-ink-800 px-4 py-2 lg:flex ${
+              digTarget ? "lg:hidden" : ""
             }`}
           >
             <h2 className="text-xs font-medium text-neutral-300">
@@ -1611,6 +1764,200 @@ export function CrateApp({
           digging={Boolean(digTarget)}
         />
       </div>
+
+      {/* ---- mobile: sticky player bar ---- */}
+      <MobileBar
+        current={current}
+        playing={api.status === "playing"}
+        bpm={currentBpm}
+        tapCount={tapCount}
+        onTap={handleTap}
+        onToggle={api.toggle}
+        onPrev={() => (api.currentTime > 4 ? api.seek(0) : advance(-1))}
+        onNext={() => advance(1)}
+        onExpand={() => setSheet("player")}
+      />
+
+      {/* ---- mobile: what am I looking at ---- */}
+      <Sheet
+        open={sheet === "source"}
+        onClose={() => setSheet("none")}
+        title="Play from"
+      >
+        <div className="px-4 pb-4">
+          <div className="mb-4 grid grid-cols-2 gap-2">
+            {(["collection", "wantlist"] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  setActivePlaylistId(null);
+                  setSource(value);
+                  setSheet("none");
+                }}
+                className={`rounded-lg border px-3 py-2.5 text-xs font-medium capitalize ${
+                  !activePlaylist && source === value
+                    ? "border-accent/50 bg-accent/10 text-accent"
+                    : "border-ink-700 text-neutral-300"
+                }`}
+              >
+                Your {value}
+              </button>
+            ))}
+          </div>
+
+          <PlaylistPanel
+            playlists={playlists}
+            activeId={activePlaylistId}
+            onSelect={(id) => {
+              setActivePlaylistId(id);
+              setSheet("none");
+            }}
+            onCreate={(name) => void createPlaylist(name)}
+            onDelete={(id) => void deletePlaylist(id)}
+            onRename={(id, name) => void renamePlaylist(id, name)}
+            onPlay={(id, shuffled) => {
+              playPlaylist(id, shuffled);
+              setSheet("none");
+            }}
+            onExport={exportPlaylists}
+            onImport={(file) => void importPlaylists(file)}
+            onShare={(id, shared) => void sharePlaylist(id, shared)}
+            sharedIds={sharedIds}
+          />
+        </div>
+      </Sheet>
+
+      {/* ---- mobile: filters ---- */}
+      <Sheet
+        open={sheet === "filters"}
+        onClose={() => setSheet("none")}
+        title={`Filters${activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}`}
+        footer={
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[11px] text-neutral-500">
+              {visible.length.toLocaleString()} of {pool.length.toLocaleString()}
+            </span>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setFilters(emptyFilters)}
+                disabled={activeFilterCount === 0}
+                className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-neutral-400 disabled:opacity-40"
+              >
+                Clear all
+              </button>
+              <button
+                type="button"
+                onClick={() => setSheet("none")}
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-ink-950"
+              >
+                Show {visible.length.toLocaleString()}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        <Filters
+          facets={facets}
+          filters={filters}
+          onChange={setFilters}
+          matched={filtered.length}
+          total={pool.length}
+          currentBpm={currentBpm}
+          pitchPercent={pitchPercent}
+          onPitchChange={(percent) => void changePitch(percent)}
+        />
+      </Sheet>
+
+      {/* ---- mobile: the full player ---- */}
+      <Sheet
+        open={sheet === "player"}
+        onClose={() => setSheet("none")}
+        title={current ? current.title : "Player"}
+      >
+        <div className="px-4 pb-4">
+          {current ? (
+            <>
+              <p className="text-sm text-neutral-300">{current.artist}</p>
+              <p className="mt-0.5 text-xs text-neutral-600">
+                {current.releaseTitle}
+                {current.year ? ` · ${current.year}` : ""}
+              </p>
+
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    queueForPlaylist(currentRef.current);
+                    setSheet("none");
+                  }}
+                  className="rounded-lg border border-ink-700 px-3 py-2.5 text-xs font-medium text-neutral-200"
+                >
+                  Add to playlist
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDigTarget(current);
+                    setSheet("none");
+                  }}
+                  className="rounded-lg border border-ink-700 px-3 py-2.5 text-xs font-medium text-neutral-200"
+                >
+                  Dig from this
+                </button>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleTap}
+                  className="flex-1 rounded-lg border border-accent/40 bg-accent/10 py-2.5 text-xs font-semibold text-accent"
+                >
+                  TAP {tapCount > 0 ? tapCount : ""}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scaleBpm(0.5)}
+                  className="rounded-lg border border-ink-700 px-3 py-2.5 font-mono text-xs text-neutral-400"
+                >
+                  ÷2
+                </button>
+                <button
+                  type="button"
+                  onClick={() => scaleBpm(2)}
+                  className="rounded-lg border border-ink-700 px-3 py-2.5 font-mono text-xs text-neutral-400"
+                >
+                  ×2
+                </button>
+                <button
+                  type="button"
+                  onClick={clearBpm}
+                  className="rounded-lg border border-ink-700 px-3 py-2.5 text-xs text-neutral-500"
+                  aria-label="Clear this reading"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/*
+                Auto detection is offered here too, and says plainly that it is
+                desktop-only rather than failing silently when tapped on a
+                phone. getDisplayMedia does not exist on any mobile browser —
+                telling someone that up front is better than a picker that
+                never appears.
+              */}
+              <p className="mt-3 text-[11px] leading-relaxed text-neutral-600">
+                {detector.status === "listening"
+                  ? "Listening — tempos are being measured automatically."
+                  : "Automatic detection needs desktop Chrome. On a phone, tap the beat above."}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-neutral-600">Nothing playing.</p>
+          )}
+        </div>
+      </Sheet>
 
       {picker && (
         <div

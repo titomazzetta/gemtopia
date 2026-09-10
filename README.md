@@ -87,6 +87,7 @@ written to be read by people who care how software is put together. The
 |---|---|
 | **Shuffle the crate** | Fisher–Yates over every clip Discogs has for your collection, spread so the same release never lands twice in a row. |
 | **Filter on real metadata** | Style, genre, label, artist, format, country, decade, year and tempo — every option counted from *your* synced collection. Multi-select is **any** or **all**, so you can ask for Techno *or* Deep House, or for the shelf tagged both. |
+| **Works on a phone** | Sheets rather than stacked panels: source and playlists in one, filters in another, the player in a third. Transport and TAP sit in a sticky bottom bar at thumb height. |
 | **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
 | **Dig from anything** | Hit `D` on whatever's playing and pivot on any field. Two lanes: what else you own, and what exists beyond it. |
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. |

@@ -188,13 +188,13 @@ export function TrackList({
             <SortHeader label="Artist" sortKey="artist" sort={sort} onSort={onSort} />
             <SortHeader label="Label" sortKey="label" sort={sort} onSort={onSort} />
           </div>
-          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+          <div className="flex shrink-0 items-center gap-2">
             <SortHeader
               label="Year"
               sortKey="year"
               sort={sort}
               onSort={onSort}
-              className="w-8 justify-end"
+              className="hidden w-8 justify-end sm:flex"
             />
             <SortHeader
               label="BPM"
@@ -302,7 +302,7 @@ export function TrackList({
                         {item.styles[0]}
                       </span>
                     )}
-                    <span className="w-8 text-right font-mono text-[10px] text-neutral-600">
+                    <span className="hidden w-8 text-right font-mono text-[10px] text-neutral-600 sm:inline">
                       {item.year ?? ""}
                     </span>
                     {/*
