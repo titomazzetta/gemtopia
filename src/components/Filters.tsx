@@ -2,7 +2,13 @@
 
 import { useMemo, useState } from "react";
 import type { Playable } from "@/lib/types";
-import { DEFAULT_PITCH_PERCENT, mixableWindow } from "@/lib/mixing";
+import {
+  DECK_PRESETS,
+  DEFAULT_PITCH_PERCENT,
+  MAX_PITCH_PERCENT,
+  MIN_PITCH_PERCENT,
+  mixableWindow,
+} from "@/lib/mixing";
 import { Search } from "./Icons";
 
 /**
@@ -523,6 +529,7 @@ export function Filters({
   total,
   currentBpm,
   pitchPercent = DEFAULT_PITCH_PERCENT,
+  onPitchChange,
 }: {
   facets: Facets;
   filters: FilterState;
@@ -533,6 +540,8 @@ export function Filters({
   currentBpm: number | null;
   /** Deck pitch range. Decides how wide "mixable" actually is. */
   pitchPercent?: number;
+  /** Omitted where the range is not editable. */
+  onPitchChange?: (percent: number) => void;
 }) {
   // Not bpm ± n. A pitch fader is a percentage and both decks have one, so the
   // window is asymmetric and wider than it looks. See lib/mixing.ts.
@@ -660,19 +669,81 @@ export function Filters({
         </div>
 
         {currentBpm !== null && window && (
-          <button
-            type="button"
-            onClick={() =>
-              onChange({ ...filters, bpmFrom: window.low, bpmTo: window.high })
-            }
-            className="mt-2 w-full rounded-full border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent"
-            title={`Both decks at ±${pitchPercent}% can meet anywhere from ${window.low} to ${window.high}`}
-          >
-            Mixes with {currentBpm}
-            <span className="ml-1 font-mono text-accent/70">
-              {window.low}–{window.high}
-            </span>
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() =>
+                onChange({ ...filters, bpmFrom: window.low, bpmTo: window.high })
+              }
+              className="mt-2 w-full rounded-full border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent"
+              title={`Both decks at ±${pitchPercent}% can meet anywhere from ${window.low} to ${window.high}`}
+            >
+              Mixes with {currentBpm}
+              <span className="ml-1 font-mono text-accent/70">
+                {window.low}–{window.high}
+              </span>
+            </button>
+
+            {/*
+              The deck range, here as well as in the set-prep bar.
+              
+              It lived only in SetPrepBar, which renders only while a playlist
+              is open — so someone digging through the crate could see a
+              "mixes with" window computed from a pitch range they had no way
+              to reach, let alone change. The window is meaningless without the
+              range that produced it, so the two belong together.
+
+              It is the same server-persisted setting the set-prep bar edits,
+              not a second copy: change it here and the transition verdicts on
+              every playlist change with it.
+            */}
+            {onPitchChange && (
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <span className="text-[10px] text-neutral-600">decks</span>
+                <select
+                  value={
+                    DECK_PRESETS.some((d) => d.percent === pitchPercent)
+                      ? String(pitchPercent)
+                      : "custom"
+                  }
+                  onChange={(event) => {
+                    if (event.target.value === "custom") return;
+                    onPitchChange(Number(event.target.value));
+                  }}
+                  aria-label="Deck pitch range"
+                  className="min-w-0 flex-1 rounded border border-ink-700 bg-ink-900 px-1.5 py-0.5 text-[10px] text-neutral-300"
+                >
+                  {DECK_PRESETS.map((deck) => (
+                    <option key={deck.id} value={deck.percent}>
+                      ±{deck.percent}% — {deck.label}
+                    </option>
+                  ))}
+                  {!DECK_PRESETS.some((d) => d.percent === pitchPercent) && (
+                    <option value="custom">±{pitchPercent}% — custom</option>
+                  )}
+                </select>
+                <input
+                  type="number"
+                  min={MIN_PITCH_PERCENT}
+                  max={MAX_PITCH_PERCENT}
+                  step={1}
+                  value={pitchPercent}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (!Number.isFinite(value)) return;
+                    onPitchChange(
+                      Math.max(
+                        MIN_PITCH_PERCENT,
+                        Math.min(MAX_PITCH_PERCENT, Math.round(value)),
+                      ),
+                    );
+                  }}
+                  aria-label="Custom deck pitch range percent"
+                  className="w-10 shrink-0 rounded border border-ink-700 bg-ink-900 px-1 py-0.5 text-center font-mono text-[10px] text-neutral-300"
+                />
+              </div>
+            )}
+          </>
         )}
 
         {/*

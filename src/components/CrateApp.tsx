@@ -1420,6 +1420,7 @@ export function CrateApp({
                 total={pool.length}
                 currentBpm={currentBpm}
                 pitchPercent={pitchPercent}
+                onPitchChange={(percent) => void changePitch(percent)}
               />
             )}
 
