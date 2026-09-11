@@ -77,8 +77,8 @@ export function ShareButton({
     <button
       type="button"
       onClick={onClick}
-      title={said ?? `Share ${payload.title} on Discogs`}
-      aria-label={`Share ${payload.title} on Discogs`}
+      title={said ?? `Share ${payload.label} on Discogs`}
+      aria-label={`Share ${payload.label} on Discogs`}
       /*
        * Visible by default, hover-revealed only from `lg` up. The original row
        * actions were `opacity-0` until `group-hover`, which on a touch screen
