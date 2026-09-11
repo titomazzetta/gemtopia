@@ -1774,6 +1774,7 @@ export function CrateApp({
         currentTime={api.currentTime}
         duration={api.duration}
         onSeek={api.seek}
+        onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
         onTap={handleTap}
         onToggle={api.toggle}
         onPrev={() => (api.currentTime > 4 ? api.seek(0) : advance(-1))}

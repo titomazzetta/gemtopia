@@ -6,7 +6,8 @@ import type { Playable } from "@/lib/types";
 import { formatBpm } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { positionOf, secondsOf, SCRUB_STEPS } from "@/client/scrub";
-import { Next, Pause, Play, Prev } from "./Icons";
+import { Next, Pause, Play, Plus, Prev } from "./Icons";
+import { ShareButton } from "./ShareButton";
 
 /**
  * The sticky player bar. Phones only.
@@ -24,6 +25,12 @@ import { Next, Pause, Play, Prev } from "./Icons";
  * at full size. On desktop it is one option among several because auto
  * detection carries the load; on a phone it *is* the feature.
  *
+ * **Add and share sit in the bar too.** Both were reachable only by opening
+ * the player sheet, which is the wrong cost for the two things you do most
+ * while auditioning: "keep this" and "show someone this". They sit left of TAP
+ * so the transport keeps the middle and your thumb learns three zones —
+ * transport, actions, tempo — rather than six undifferentiated buttons.
+ *
  * **The scrubber is here rather than in the player sheet.** Seeking is not an
  * occasional action when you are auditioning records — you skip past the intro
  * to hear where the track actually goes, constantly. Behind a sheet that costs
@@ -39,6 +46,7 @@ export function MobileBar({
   currentTime,
   duration,
   onSeek,
+  onAddToPlaylist,
   onTap,
   onToggle,
   onPrev,
@@ -52,6 +60,7 @@ export function MobileBar({
   currentTime: number;
   duration: number;
   onSeek: (seconds: number) => void;
+  onAddToPlaylist: () => void;
   onTap: () => void;
   onToggle: () => void;
   onPrev: () => void;
@@ -128,23 +137,17 @@ export function MobileBar({
           type="button"
           onClick={onExpand}
           disabled={!current}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:opacity-50"
+          className="flex min-w-0 flex-1 items-center text-left disabled:opacity-50"
           aria-label="Open player"
         >
-          <span className="h-9 w-9 shrink-0 overflow-hidden rounded bg-ink-800">
-            {current?.thumb ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={current.thumb}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                referrerPolicy="no-referrer"
-                className="h-full w-full object-cover"
-              />
-            ) : null}
-          </span>
-
+          {/*
+            No sleeve here. Six controls, artwork and two lines of text do not
+            fit across 390px — at full width the title truncated to about eight
+            characters, which is worse than useless when the whole job of this
+            row is telling you what is playing. The sleeve is the only
+            decorative element in the bar and it is already on screen in the
+            video strip directly above, so it is what gets cut.
+          */}
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium text-neutral-100">
               {current?.title ?? "Nothing playing"}
@@ -155,13 +158,13 @@ export function MobileBar({
           </span>
         </button>
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={onPrev}
             disabled={!current}
             aria-label="Previous"
-            className="rounded-full p-2 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
           >
             <Prev className="h-4 w-4" />
           </button>
@@ -181,9 +184,29 @@ export function MobileBar({
             onClick={onNext}
             disabled={!current}
             aria-label="Next"
-            className="rounded-full p-2 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
           >
             <Next className="h-4 w-4" />
+          </button>
+
+          {/*
+            The two actions worth doing without leaving the list. A hairline
+            separates them from the transport — six buttons in an undivided row
+            is a thing you have to read every time; three small groups is a
+            thing you learn once.
+          */}
+          <span className="mx-0.5 h-5 w-px bg-ink-700" aria-hidden="true" />
+
+          <ShareButton track={current} className="text-neutral-400 active:bg-ink-800" />
+
+          <button
+            type="button"
+            onClick={onAddToPlaylist}
+            disabled={!current}
+            aria-label="Add to playlist"
+            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+          >
+            <Plus className="h-4 w-4" />
           </button>
 
           {/*
@@ -202,7 +225,7 @@ export function MobileBar({
             onClick={onTap}
             disabled={!current}
             aria-label="Tap tempo"
-            className={`ml-0.5 flex h-11 w-14 items-center justify-center rounded-lg border text-center font-mono text-[11px] tabular-nums transition-colors disabled:opacity-30 ${
+            className={`ml-0.5 flex h-11 w-11 items-center justify-center rounded-lg border text-center font-mono text-[11px] tabular-nums transition-colors disabled:opacity-30 ${
               bpm !== null
                 ? "border-accent/40 bg-accent/10 text-accent"
                 : "border-ink-700 text-neutral-400 active:bg-ink-800"
