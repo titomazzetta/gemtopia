@@ -4,17 +4,31 @@ import { isReleaseId, releaseUrl } from "@/lib/discogs-links";
  * Sharing a record you just found.
  *
  * The unit being shared is the **Discogs release page**, not a Gemtopia link.
- * That is deliberate: the person receiving it is usually a DJ friend who does
- * not have an account here, and a link they cannot open is worse than no link.
- * The Discogs page also carries the tracklist, the pressing details and the
- * marketplace — everything they would ask for next.
+ * The person receiving it is usually a DJ friend with no account here, and a
+ * link they cannot open is worse than no link. The Discogs page also carries
+ * the tracklist, the pressing and the marketplace — everything they ask for
+ * next anyway.
+ *
+ * What crosses to the share sheet is **the URL and nothing else**. The first
+ * version also passed a title and a `text` that repeated the link, on the
+ * reasoning that some targets discard the `url` field. Targets that honour
+ * both — which is most of them — rendered it twice:
+ *
+ *     Halo Varga — Halo Varga – My Sound (Future)
+ *     https://www.discogs.com/release/132
+ *     https://www.discogs.com/release/132
+ *
+ * A bare URL is also the better artefact. Messages, WhatsApp and Slack all
+ * unfurl a Discogs link into a preview carrying the sleeve and the title,
+ * which beats any text this could have prepended.
  */
 
 export interface SharePayload {
-  /** Shown as the sheet's heading on platforms that display one. */
-  title: string;
-  /** Body text. Some targets (SMS, WhatsApp) use this and ignore `title`. */
-  text: string;
+  /**
+   * Display text for the button's tooltip and accessible name. Deliberately
+   * *not* part of what gets shared.
+   */
+  label: string;
   url: string;
 }
 
@@ -24,33 +38,42 @@ export interface ShareableTrack {
   artist: string;
 }
 
+const normalise = (value: string) =>
+  value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * "Artist — Title", unless the title already opens with the artist.
+ *
+ * Discogs attaches videos at the release level, and their titles are whatever
+ * the person who uploaded them typed — very often "Artist – Track", already
+ * carrying the artist. Prefixing unconditionally produced "Halo Varga — Halo
+ * Varga – My Sound (Future)". Compared on alphanumerics only, because the
+ * separator in an uploaded title is an en dash about as often as a hyphen,
+ * and casing is not to be trusted either.
+ */
+export function displayLabel(artist: string, title: string): string {
+  const a = artist.trim();
+  const t = title.trim();
+  if (!a) return t;
+  if (!t) return a;
+  if (normalise(t).startsWith(normalise(a))) return t;
+  return `${a} — ${t}`;
+}
+
 /**
  * Build the payload, or `null` when the track cannot be linked.
  *
- * Returning null rather than throwing lets the button simply not render. A
- * share control that produces a broken Discogs link is worse than no control,
- * because the person only finds out after they have sent it to someone.
+ * Null rather than a throw lets the button simply not render. A share control
+ * that produces a broken Discogs link is worse than no control, because the
+ * sender only finds out after someone else has opened it.
  */
 export function buildShare(track: ShareableTrack): SharePayload | null {
   if (!isReleaseId(track.releaseId)) return null;
 
-  const artist = track.artist.trim();
-  const title = track.title.trim();
-  if (!artist && !title) return null;
+  const label = displayLabel(track.artist, track.title);
+  if (!label) return null;
 
-  const label = artist && title ? `${artist} — ${title}` : artist || title;
-
-  return {
-    title: label,
-    /*
-     * The URL is repeated in `text` on purpose. Targets vary in which fields
-     * they honour — several messaging apps drop `url` entirely and send only
-     * `text` — so a payload whose text omits the link can arrive as a bare
-     * record name with no way to find it.
-     */
-    text: `${label}\n${releaseUrl(track.releaseId)}`,
-    url: releaseUrl(track.releaseId),
-  };
+  return { label, url: releaseUrl(track.releaseId) };
 }
 
 export type ShareOutcome =
@@ -63,10 +86,15 @@ export type ShareOutcome =
   /** Neither route exists — an old browser, or a non-secure context. */
   | "unavailable";
 
+/** What actually crosses to the platform: a URL, nothing more. */
+export interface SharedData {
+  url: string;
+}
+
 /** The slice of `navigator` this needs, so tests can supply a fake. */
 export interface ShareCapableNavigator {
-  share?: (data: SharePayload) => Promise<void>;
-  canShare?: (data: SharePayload) => boolean;
+  share?: (data: SharedData) => Promise<void>;
+  canShare?: (data: SharedData) => boolean;
   clipboard?: { writeText: (text: string) => Promise<void> };
 }
 
@@ -77,28 +105,30 @@ export interface ShareCapableNavigator {
  * friend in Messages. Desktop browsers mostly lack `navigator.share`, so the
  * link goes to the clipboard and the button says so.
  *
- * Note `navigator.share` only resolves inside a user gesture and only on a
- * secure origin. Both hold here — it is wired to a click, and production is
- * HTTPS — but that is why this is never called on mount.
+ * `navigator.share` only resolves inside a user gesture and only on a secure
+ * origin. Both hold here — it is wired to a click, and production is HTTPS —
+ * which is why this is never called on mount.
  */
 export async function shareOrCopy(
   payload: SharePayload,
   nav: ShareCapableNavigator,
 ): Promise<ShareOutcome> {
+  const data: SharedData = { url: payload.url };
+
   if (typeof nav.share === "function") {
-    // `canShare` exists on some platforms that still reject the payload at
+    // `canShare` exists on platforms that still reject the payload at
     // `share()` time, so a false here is a reason to skip, not to give up.
-    const permitted = typeof nav.canShare === "function" ? nav.canShare(payload) : true;
+    const permitted = typeof nav.canShare === "function" ? nav.canShare(data) : true;
     if (permitted) {
       try {
-        await nav.share(payload);
+        await nav.share(data);
         return "shared";
       } catch (error) {
         /*
          * AbortError means the person closed the sheet. Falling through to
          * the clipboard there would silently copy something they had just
-         * decided not to send, so it is reported as its own outcome and the
-         * UI stays quiet.
+         * decided not to send, so it is its own outcome and the UI stays
+         * quiet.
          */
         if (error instanceof Error && error.name === "AbortError") return "dismissed";
         // Any other failure is worth falling back for rather than surfacing.
