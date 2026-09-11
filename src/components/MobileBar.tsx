@@ -1,7 +1,11 @@
 "use client";
 
+import { useRef, useState } from "react";
+
 import type { Playable } from "@/lib/types";
 import { formatBpm } from "@/lib/mixing";
+import { formatTime } from "./NowPlaying";
+import { positionOf, secondsOf, SCRUB_STEPS } from "@/client/scrub";
 import { Next, Pause, Play, Prev } from "./Icons";
 
 /**
@@ -19,12 +23,22 @@ import { Next, Pause, Play, Prev } from "./Icons";
  * **TAP is a first-class button, not a menu item.** It sits next to play/pause
  * at full size. On desktop it is one option among several because auto
  * detection carries the load; on a phone it *is* the feature.
+ *
+ * **The scrubber is here rather than in the player sheet.** Seeking is not an
+ * occasional action when you are auditioning records — you skip past the intro
+ * to hear where the track actually goes, constantly. Behind a sheet that costs
+ * a tap, a wait, and your place in the list. The desktop scrubber lives in the
+ * sidebar, which is `hidden` below `lg`, so until now a phone had no way to
+ * seek at all.
  */
 export function MobileBar({
   current,
   playing,
   bpm,
   tapCount,
+  currentTime,
+  duration,
+  onSeek,
   onTap,
   onToggle,
   onPrev,
@@ -35,15 +49,77 @@ export function MobileBar({
   playing: boolean;
   bpm: number | null;
   tapCount: number;
+  currentTime: number;
+  duration: number;
+  onSeek: (seconds: number) => void;
   onTap: () => void;
   onToggle: () => void;
   onPrev: () => void;
   onNext: () => void;
   onExpand: () => void;
 }) {
+  const seekable = duration > 0;
+
+  /*
+   * While a finger is down the thumb is driven locally, not by the player.
+   * `currentTime` polls on a timer, and a poll arriving mid-drag overwrites
+   * the input's value and snaps the thumb back out from under you. Holding the
+   * position here and committing on release is the difference between a
+   * scrubber that works and one that fights you.
+   *
+   * Keyboard use never sees a pointerup, so an arrow-key change seeks
+   * immediately — `dragging` is what distinguishes the two.
+   */
+  const [held, setHeld] = useState<number | null>(null);
+  const dragging = useRef(false);
+
+  const position = held ?? positionOf(currentTime, duration);
+  const shownTime = held === null ? currentTime : secondsOf(held, duration);
+
+  const commit = () => {
+    dragging.current = false;
+    if (held !== null) {
+      if (seekable) onSeek(secondsOf(held, duration));
+      setHeld(null);
+    }
+  };
+
   return (
     <div className="shrink-0 border-t border-ink-800 bg-ink-900/95 backdrop-blur lg:hidden">
-      <div className="flex items-center gap-2 px-3 py-2">
+      {/*
+        Position expressed in thousandths rather than seconds. A range whose max
+        is the track length gives one step per second — coarse enough that on a
+        six-minute rip you cannot land on the drop.
+      */}
+      <div className="px-3 pt-2">
+        <input
+          type="range"
+          min={0}
+          max={SCRUB_STEPS}
+          value={position}
+          onPointerDown={() => (dragging.current = true)}
+          onPointerUp={commit}
+          onPointerCancel={commit}
+          onKeyUp={commit}
+          onBlur={commit}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (dragging.current) setHeld(next);
+            else if (seekable) onSeek(secondsOf(next, duration));
+          }}
+          disabled={!current || !seekable}
+          aria-label="Seek"
+          aria-valuetext={`${formatTime(shownTime)} of ${formatTime(duration)}`}
+          className="touch-none disabled:opacity-40"
+        />
+        <div className="mt-0.5 flex justify-between font-mono text-[10px] tabular-nums text-neutral-600">
+          {/* Reads the held position while dragging, so you can see where you are landing. */}
+          <span className={held === null ? "" : "text-accent"}>{formatTime(shownTime)}</span>
+          <span>{seekable ? formatTime(duration) : "--:--"}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 px-3 pb-2 pt-1">
         {/*
           Tapping the track info expands the full player sheet — the standard
           gesture, and it keeps the bar itself to controls.
