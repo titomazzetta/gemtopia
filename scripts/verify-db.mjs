@@ -77,7 +77,15 @@ console.log(`pooled    : ${pooled ? "yes" : "NO  <-- serverless needs the -poole
 console.log(`database  : ${url.pathname.replace(/^\//, "") || "(none)"}`);
 console.log(`params    : ${url.search || "(none)"}`);
 console.log(`username  : ${url.username ? "set" : "MISSING"}`);
-console.log(`password  : ${url.password ? `${url.password.length} chars` : "MISSING"}`);
+/*
+ * Presence only, never a measurement. Printing the length felt safe — it is
+ * not the secret — but it is derived from it, and a secret's exact length is
+ * a real if small disclosure to anyone who later reads this terminal, a
+ * screen recording, or a pasted support log. CodeQL flagged it as
+ * clear-text logging of sensitive information and was right. The total
+ * string length above already answers "did the paste truncate?".
+ */
+console.log(`password  : ${url.password ? "set" : "MISSING"}`);
 
 if (!scheme || !url.username || !url.password) {
   console.log("\nThe string is malformed — stopping before trying to connect.");
