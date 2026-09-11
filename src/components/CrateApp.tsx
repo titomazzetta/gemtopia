@@ -1771,6 +1771,9 @@ export function CrateApp({
         playing={api.status === "playing"}
         bpm={currentBpm}
         tapCount={tapCount}
+        currentTime={api.currentTime}
+        duration={api.duration}
+        onSeek={api.seek}
         onTap={handleTap}
         onToggle={api.toggle}
         onPrev={() => (api.currentTime > 4 ? api.seek(0) : advance(-1))}
