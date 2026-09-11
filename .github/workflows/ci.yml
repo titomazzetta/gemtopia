@@ -75,6 +75,9 @@ jobs:
       - name: Crate sorting tests
         run: npm run test:sorting
 
+      - name: Share link tests
+        run: npm run test:share
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 
