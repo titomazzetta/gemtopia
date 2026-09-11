@@ -16,8 +16,16 @@ import type {
  * at all. Nothing to breach, nothing to subpoena, no GDPR erasure workflow —
  * "log out" and "clear site data" are the same operation.
  *
- * Trade-off, stated plainly: playlists do not sync between devices in v1.
- * Export/import JSON is the escape hatch.
+ * What that costs, stated plainly: the collection index is per-device. A
+ * second phone syncs it once from Discogs before the crate is browsable there.
+ *
+ * What it does *not* cost, which is the part worth being precise about:
+ * playlists and BPM readings are not here. They live in Postgres, keyed to the
+ * account, and follow you to any device — so a re-sync re-fetches metadata
+ * from Discogs and never re-measures a tempo. The `getLegacyPlaylists` /
+ * `markMigrated` pair below is the one-way move that put playlists on the
+ * server; this comment previously claimed they still did not sync, which
+ * stopped being true the day that migration shipped.
  */
 
 const DB_NAME = "gemtopia";
