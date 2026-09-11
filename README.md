@@ -75,6 +75,7 @@ written to be read by people who care how software is put together. The
 - [Where the data comes from](#where-the-data-comes-from)
 - [Privacy](#privacy)
 - [Deploy it](#deploy-it) — full walkthrough in [DEPLOYING.md](./DEPLOYING.md)
+- [How a change reaches production](#how-a-change-reaches-production) — branch rules, CI gates, supply chain
 - [Architecture](#architecture)
 - [Testing](#testing)
 - [Known limits](#known-limits)
@@ -93,6 +94,7 @@ written to be read by people who care how software is put together. The
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. |
 | **BPM catalogue** | Detect tempo from the audio as it plays, or tap it in. **Measure** plays through everything on screen and measures it unattended, skipping what is already done. Filter by range, or by what mixes with what's playing. |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range. Flags the ones that won't beatmatch before you pack the bag. |
+| **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
 
@@ -401,15 +403,23 @@ ordering in that file matters and this one glosses over it.
 
 ### The short version
 
-1. **Neon** — create a project, database `gemtopia`, copy the **pooled**
+1. **Neon** — create a project for development and copy the **pooled**
    connection string (the host containing `-pooler`).
 2. **`npm run keygen`** — your `SESSION_SECRET`.
 3. **A Discogs app** pointed at `http://localhost:3000/api/auth/callback`.
 4. **Run it locally** — `cp .env.example .env.local`, fill it in,
    `npm run db:migrate`, `npm run dev`.
 5. **Push to GitHub**, then import to Vercel.
-6. **A second Discogs app** pointed at your real Vercel URL.
-7. **Set the environment in Vercel**, redeploy.
+6. **A second Neon project** for production, in the region your functions run
+   in — Vercel defaults to `iad1`, so `us-east-1`. Sharing one database between
+   development and production means a stray migration or a test run reaches
+   real users' rows.
+7. **A second Discogs app** pointed at your real Vercel URL, and a **second**
+   `SESSION_SECRET`. Both halves matter: that secret mints sessions, so a
+   shared one lets a laptop impersonate any production user.
+8. **Set the environment in Vercel**, scoped to **Production only**, redeploy,
+   and run the migration against the production database
+   (`npm run verify:db -- --migrate`).
 
 ### The trap, since it catches everyone
 
@@ -448,6 +458,19 @@ npm run db:migrate
 npm run dev
 ```
 
+Two checks exist because neither failure announces itself:
+
+```bash
+npm run verify:discogs   # does Discogs accept your signature?
+npm run verify:db        # does that connection string resolve, connect, and
+                         # have tables?  --migrate applies the schema,
+                         # --copy returns it with sslmode=verify-full
+```
+
+`next build` never opens a database connection, so a wrong `DATABASE_URL`
+deploys green and surfaces as a confusing error at the first sign-in. Neither
+script prints a secret — the password is reported only as a length.
+
 ### The first sync takes ten minutes, and that's Discogs' fault
 
 Discogs allows **60 authenticated requests per minute**. Listing 1,500 records is
@@ -456,13 +479,58 @@ sync runs about **10–12 minutes** in the background while you use whatever has
 already loaded. Progress saves after every batch — close the tab and it resumes.
 Later syncs only fetch what you've added.
 
-### GitHub's role
+### How a change reaches production
 
-Vercel deploys on every push to `main`; GitHub Actions runs CI on the same push.
-**They are independent — a red CI run does not block a Vercel deploy** unless you
-add a branch protection rule requiring the `verify` check. Preview deployments
-build fine but cannot complete OAuth, because their URLs don't match `APP_ORIGIN`.
-Both covered in [DEPLOYING.md](./DEPLOYING.md).
+Nothing lands on `main` directly. The `protect-main` ruleset blocks direct
+pushes, force-pushes and branch deletion, and requires a pull request whose
+`verify` and `CodeQL` checks are green.
+
+```
+branch  ->  PR  ->  verify + CodeQL green  ->  merge  ->  Vercel deploys main
+```
+
+Required approvals are **0**, deliberately. GitHub will not let a maintainer
+approve their own pull request, so on a solo project a non-zero requirement
+means locking yourself out of your own repository — and a rule you have to
+route around is worse than no rule. Everything else still holds: no direct
+push, no force-push, nothing merges red.
+
+**What CI gates**, in order, so a failure names its own cause: typecheck, lint,
+`npm audit --audit-level=high`, 209 offline tests, the schema applied to a
+throwaway Postgres, a production build, an assertion that no server-only secret
+reached the client bundle, then 80 API tests against a running server. CodeQL
+runs the `security-and-quality` suite separately.
+
+The audit step earns its keep. The **first** CI run on this repository failed —
+two critical unauthenticated RCEs (CVSS 9.5) in the pinned `next` release,
+caught before the code reached anybody.
+
+**Supply chain.** Every action is pinned to a full commit SHA with the version
+in a trailing comment, and the repository *requires* SHA pinning. A tag is a
+pointer its owner can move, which is precisely how the `tj-actions/changed-files`
+compromise worked: existing tags were repointed at malicious code and every
+workflow referencing them executed it on the next run. `GITHUB_TOKEN` is
+read-only. Workflows from forked pull requests need maintainer approval before
+they run. Dependabot groups patch and minor updates into a single PR and gives
+every major its own, because a green check on a major bump means "it compiled",
+not "it is safe".
+
+**Preview deployments are off.** Vercel branch tracking is disabled rather than
+issuing Preview a set of environment variables. A preview URL changes per
+deployment, so it can never satisfy the Discogs callback — and the only way to
+make preview builds pass would have been to hand them the production database
+and session key. CI already validates pull requests; previews bought nothing
+worth that trade. Branch deployments remain available on demand via the CLI.
+
+**Environments are separated end to end**: two Neon projects, two Discogs
+applications, two `SESSION_SECRET`s, and Vercel variables scoped to Production
+only. A credential leaked from local development cannot read, write or
+impersonate anything in production. This matters more than it looks — the API
+test harness forges valid sessions using `SESSION_SECRET`, so a shared one
+would make any developer's laptop able to mint a production session for any
+user.
+
+Also covered in [DEPLOYING.md](./DEPLOYING.md).
 
 ## Architecture
 
@@ -544,8 +612,9 @@ npm run test:env       # 36 cases, no server needed
 npm run test:headers   # 20 cases, no server needed
 npm run test:playables # 18 cases, no server needed
 npm run test:sorting   # 17 cases, no server needed
+npm run test:share     # 20 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
-npm run test:mixing    # 55 cases, no server needed
+npm run test:mixing    # 61 cases, no server needed
 npm run test:api       # 80 cases, needs a running server + Postgres
 npm run typecheck
 npm run lint
