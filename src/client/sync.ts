@@ -78,8 +78,14 @@ export function startSync(options: {
       emit({ detailed: 0, total: 0, status: "listing", message: "Reading your collection…" });
 
       let page = 1;
-      let pages = 1;
       let total = 0;
+      /*
+       * No initialiser. The do-while body always assigns this from the first
+       * response before the condition reads it, so any starting value is dead
+       * — and a dead `= 1` reads as "assume one page", which is the opposite
+       * of what this does. CodeQL flagged it; it was right.
+       */
+      let pages: number;
 
       do {
         if (cancelled) return;
