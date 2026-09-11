@@ -20,6 +20,7 @@ import {
   Volume,
   Waveform,
 } from "./Icons";
+import { ShareButton } from "./ShareButton";
 
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -470,6 +471,8 @@ export function NowPlaying({
             Add to playlist
             <kbd className="ml-1 rounded bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">A</kbd>
           </button>
+
+          <ShareButton track={current} variant="wide" />
 
           <p className="text-center font-mono text-[10px] text-neutral-600">
             {queueLength > 0

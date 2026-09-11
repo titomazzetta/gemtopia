@@ -6,6 +6,7 @@ import { VERDICT_META, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { formatBpm } from "@/lib/mixing";
 import { Play, Plus, Trash } from "./Icons";
+import { ShareButton } from "./ShareButton";
 import type { SortKey, SortState } from "@/client/sorting";
 
 const BASE_ROW_HEIGHT = 56;
@@ -336,12 +337,14 @@ export function TrackList({
                   </span>
                 </button>
 
+                <ShareButton track={item} />
+
                 {onAdd && (
                   <button
                     type="button"
                     onClick={() => onAdd(item)}
                     title="Add to playlist"
-                    className="shrink-0 rounded p-1.5 text-neutral-600 opacity-0 transition-opacity hover:bg-ink-800 hover:text-accent focus-visible:opacity-100 group-hover:opacity-100"
+                    className="shrink-0 rounded p-1.5 text-neutral-600 transition-opacity hover:bg-ink-800 hover:text-accent focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
@@ -352,7 +355,7 @@ export function TrackList({
                     type="button"
                     onClick={() => onRemove(item, index)}
                     title="Remove from playlist"
-                    className="shrink-0 rounded p-1.5 text-neutral-600 opacity-0 transition-opacity hover:bg-ink-800 hover:text-red-400 focus-visible:opacity-100 group-hover:opacity-100"
+                    className="shrink-0 rounded p-1.5 text-neutral-600 transition-opacity hover:bg-ink-800 hover:text-red-400 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
                     <Trash className="h-3.5 w-3.5" />
                   </button>
