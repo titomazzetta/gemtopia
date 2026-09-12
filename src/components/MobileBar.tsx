@@ -1,8 +1,13 @@
 "use client";
 
+import { useRef, useState } from "react";
+
 import type { Playable } from "@/lib/types";
 import { formatBpm } from "@/lib/mixing";
-import { Next, Pause, Play, Prev } from "./Icons";
+import { formatTime } from "./NowPlaying";
+import { positionOf, secondsOf, SCRUB_STEPS } from "@/client/scrub";
+import { Next, Pause, Play, Plus, Prev } from "./Icons";
+import { ShareButton } from "./ShareButton";
 
 /**
  * The sticky player bar. Phones only.
@@ -19,12 +24,29 @@ import { Next, Pause, Play, Prev } from "./Icons";
  * **TAP is a first-class button, not a menu item.** It sits next to play/pause
  * at full size. On desktop it is one option among several because auto
  * detection carries the load; on a phone it *is* the feature.
+ *
+ * **Add and share sit in the bar too.** Both were reachable only by opening
+ * the player sheet, which is the wrong cost for the two things you do most
+ * while auditioning: "keep this" and "show someone this". They sit left of TAP
+ * so the transport keeps the middle and your thumb learns three zones —
+ * transport, actions, tempo — rather than six undifferentiated buttons.
+ *
+ * **The scrubber is here rather than in the player sheet.** Seeking is not an
+ * occasional action when you are auditioning records — you skip past the intro
+ * to hear where the track actually goes, constantly. Behind a sheet that costs
+ * a tap, a wait, and your place in the list. The desktop scrubber lives in the
+ * sidebar, which is `hidden` below `lg`, so until now a phone had no way to
+ * seek at all.
  */
 export function MobileBar({
   current,
   playing,
   bpm,
   tapCount,
+  currentTime,
+  duration,
+  onSeek,
+  onAddToPlaylist,
   onTap,
   onToggle,
   onPrev,
@@ -35,15 +57,78 @@ export function MobileBar({
   playing: boolean;
   bpm: number | null;
   tapCount: number;
+  currentTime: number;
+  duration: number;
+  onSeek: (seconds: number) => void;
+  onAddToPlaylist: () => void;
   onTap: () => void;
   onToggle: () => void;
   onPrev: () => void;
   onNext: () => void;
   onExpand: () => void;
 }) {
+  const seekable = duration > 0;
+
+  /*
+   * While a finger is down the thumb is driven locally, not by the player.
+   * `currentTime` polls on a timer, and a poll arriving mid-drag overwrites
+   * the input's value and snaps the thumb back out from under you. Holding the
+   * position here and committing on release is the difference between a
+   * scrubber that works and one that fights you.
+   *
+   * Keyboard use never sees a pointerup, so an arrow-key change seeks
+   * immediately — `dragging` is what distinguishes the two.
+   */
+  const [held, setHeld] = useState<number | null>(null);
+  const dragging = useRef(false);
+
+  const position = held ?? positionOf(currentTime, duration);
+  const shownTime = held === null ? currentTime : secondsOf(held, duration);
+
+  const commit = () => {
+    dragging.current = false;
+    if (held !== null) {
+      if (seekable) onSeek(secondsOf(held, duration));
+      setHeld(null);
+    }
+  };
+
   return (
     <div className="shrink-0 border-t border-ink-800 bg-ink-900/95 backdrop-blur lg:hidden">
-      <div className="flex items-center gap-2 px-3 py-2">
+      {/*
+        Position expressed in thousandths rather than seconds. A range whose max
+        is the track length gives one step per second — coarse enough that on a
+        six-minute rip you cannot land on the drop.
+      */}
+      <div className="px-3 pt-2">
+        <input
+          type="range"
+          min={0}
+          max={SCRUB_STEPS}
+          value={position}
+          onPointerDown={() => (dragging.current = true)}
+          onPointerUp={commit}
+          onPointerCancel={commit}
+          onKeyUp={commit}
+          onBlur={commit}
+          onChange={(event) => {
+            const next = Number(event.target.value);
+            if (dragging.current) setHeld(next);
+            else if (seekable) onSeek(secondsOf(next, duration));
+          }}
+          disabled={!current || !seekable}
+          aria-label="Seek"
+          aria-valuetext={`${formatTime(shownTime)} of ${formatTime(duration)}`}
+          className="touch-none disabled:opacity-40"
+        />
+        <div className="mt-0.5 flex justify-between font-mono text-[10px] tabular-nums text-neutral-600">
+          {/* Reads the held position while dragging, so you can see where you are landing. */}
+          <span className={held === null ? "" : "text-accent"}>{formatTime(shownTime)}</span>
+          <span>{seekable ? formatTime(duration) : "--:--"}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 px-3 pb-2 pt-1">
         {/*
           Tapping the track info expands the full player sheet — the standard
           gesture, and it keeps the bar itself to controls.
@@ -52,23 +137,17 @@ export function MobileBar({
           type="button"
           onClick={onExpand}
           disabled={!current}
-          className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:opacity-50"
+          className="flex min-w-0 flex-1 items-center text-left disabled:opacity-50"
           aria-label="Open player"
         >
-          <span className="h-9 w-9 shrink-0 overflow-hidden rounded bg-ink-800">
-            {current?.thumb ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={current.thumb}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                referrerPolicy="no-referrer"
-                className="h-full w-full object-cover"
-              />
-            ) : null}
-          </span>
-
+          {/*
+            No sleeve here. Six controls, artwork and two lines of text do not
+            fit across 390px — at full width the title truncated to about eight
+            characters, which is worse than useless when the whole job of this
+            row is telling you what is playing. The sleeve is the only
+            decorative element in the bar and it is already on screen in the
+            video strip directly above, so it is what gets cut.
+          */}
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium text-neutral-100">
               {current?.title ?? "Nothing playing"}
@@ -79,13 +158,13 @@ export function MobileBar({
           </span>
         </button>
 
-        <div className="flex shrink-0 items-center gap-1">
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={onPrev}
             disabled={!current}
             aria-label="Previous"
-            className="rounded-full p-2 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
           >
             <Prev className="h-4 w-4" />
           </button>
@@ -105,9 +184,29 @@ export function MobileBar({
             onClick={onNext}
             disabled={!current}
             aria-label="Next"
-            className="rounded-full p-2 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
           >
             <Next className="h-4 w-4" />
+          </button>
+
+          {/*
+            The two actions worth doing without leaving the list. A hairline
+            separates them from the transport — six buttons in an undivided row
+            is a thing you have to read every time; three small groups is a
+            thing you learn once.
+          */}
+          <span className="mx-0.5 h-5 w-px bg-ink-700" aria-hidden="true" />
+
+          <ShareButton track={current} className="text-neutral-400 active:bg-ink-800" />
+
+          <button
+            type="button"
+            onClick={onAddToPlaylist}
+            disabled={!current}
+            aria-label="Add to playlist"
+            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+          >
+            <Plus className="h-4 w-4" />
           </button>
 
           {/*
@@ -126,7 +225,7 @@ export function MobileBar({
             onClick={onTap}
             disabled={!current}
             aria-label="Tap tempo"
-            className={`ml-0.5 flex h-11 w-14 items-center justify-center rounded-lg border text-center font-mono text-[11px] tabular-nums transition-colors disabled:opacity-30 ${
+            className={`ml-0.5 flex h-11 w-11 items-center justify-center rounded-lg border text-center font-mono text-[11px] tabular-nums transition-colors disabled:opacity-30 ${
               bpm !== null
                 ? "border-accent/40 bg-accent/10 text-accent"
                 : "border-ink-700 text-neutral-400 active:bg-ink-800"

@@ -53,6 +53,26 @@ input[type="range"]::-moz-range-thumb {
   @apply h-3 w-3 rounded-full border-0 bg-accent;
 }
 
+/*
+ * A 12px thumb is fine under a mouse and hopeless under a thumb. On a coarse
+ * pointer the track thickens and the handle roughly doubles, which puts the
+ * grabbable area near the 44px platform floor without making the control look
+ * like a toy on desktop. `pointer: coarse` rather than a width breakpoint,
+ * because the question is what you are touching it with, not how wide the
+ * screen is — a tablet with a keyboard is still a finger.
+ */
+@media (pointer: coarse) {
+  input[type="range"] {
+    @apply h-1.5;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    @apply h-5 w-5;
+  }
+  input[type="range"]::-moz-range-thumb {
+    @apply h-5 w-5;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
