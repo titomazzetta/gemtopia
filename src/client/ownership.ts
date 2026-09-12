@@ -33,6 +33,26 @@ export function describeOwnership(state: OwnershipState): string | null {
   return null;
 }
 
+/**
+ * Ownership from the id sets CrateApp already keeps in memory.
+ *
+ * An empty set is treated as "unknown", not "empty". It genuinely could be
+ * either — a wantlist that has never been synced and a wantlist with nothing
+ * on it look identical from here — and the two possible mistakes are not
+ * symmetrical. Reporting unknown when the list is really empty costs a label
+ * nobody misses. Reporting empty when it was really unsynced tells someone
+ * they do not own a record they own.
+ */
+export function ownershipFrom(
+  sets: { collection: Set<number>; wantlist: Set<number> },
+  releaseId: number,
+): OwnershipState {
+  return {
+    inCollection: sets.collection.size > 0 ? sets.collection.has(releaseId) : null,
+    onWantlist: sets.wantlist.size > 0 ? sets.wantlist.has(releaseId) : null,
+  };
+}
+
 /** Whether adding to the collection would be a no-op worth warning about. */
 export function alreadyCollected(state: OwnershipState): boolean {
   return state.inCollection === true;

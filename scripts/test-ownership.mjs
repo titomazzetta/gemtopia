@@ -9,7 +9,7 @@
  * someone acts on with their wallet out.
  */
 import assert from "node:assert/strict";
-import { describeOwnership, alreadyCollected } from "../src/client/ownership.ts";
+import { describeOwnership, ownershipFrom, alreadyCollected } from "../src/client/ownership.ts";
 
 let ran = 0;
 let failed = 0;
@@ -73,6 +73,28 @@ check("alreadyCollected is true only on a positive answer", () => {
   assert.equal(alreadyCollected({ inCollection: true, onWantlist: false }), true);
   assert.equal(alreadyCollected({ inCollection: false, onWantlist: false }), false);
   assert.equal(alreadyCollected({ inCollection: null, onWantlist: true }), false);
+});
+
+check("an empty set reads as unknown, never as empty", () => {
+  // A wantlist nobody has synced and a wantlist with nothing on it are
+  // indistinguishable from here. The two mistakes are not symmetrical:
+  // "unknown" when it is really empty costs a label nobody misses; "empty"
+  // when it was really unsynced tells someone they do not own what they own.
+  const state = ownershipFrom({ collection: new Set([1]), wantlist: new Set() }, 1);
+  assert.equal(state.inCollection, true);
+  assert.equal(state.onWantlist, null);
+});
+
+check("a populated set answers both ways", () => {
+  const sets = { collection: new Set([1, 2]), wantlist: new Set([3]) };
+  assert.deepEqual(ownershipFrom(sets, 2), { inCollection: true, onWantlist: false });
+  assert.deepEqual(ownershipFrom(sets, 3), { inCollection: false, onWantlist: true });
+  assert.deepEqual(ownershipFrom(sets, 9), { inCollection: false, onWantlist: false });
+});
+
+check("a release in neither populated set is still silent", () => {
+  const sets = { collection: new Set([1]), wantlist: new Set([2]) };
+  assert.equal(describeOwnership(ownershipFrom(sets, 99)), null);
 });
 
 if (failed > 0) {
