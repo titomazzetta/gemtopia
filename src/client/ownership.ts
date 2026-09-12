@@ -1,0 +1,39 @@
+/**
+ * "Do I already own this?" — answered honestly.
+ *
+ * The check runs against the IndexedDB collection index, so it is instant,
+ * costs no Discogs request, and works in a basement record shop with no
+ * signal. That is the whole point: the moment you need this answer is the
+ * moment you are holding a record and deciding whether to buy it.
+ *
+ * The constraint that shapes the whole module: **absence is never reported.**
+ * The index is only as fresh as the last sync, and the wantlist is only in it
+ * if that source has ever been synced. So a row can say "In your collection"
+ * or "On your wantlist" or stay silent — but it must never say "you do not own
+ * this", because we cannot know that, and a confident wrong answer is how
+ * somebody buys a second copy of a record they already have.
+ */
+
+export interface OwnershipState {
+  /** true present, false absent from a synced index, null never synced. */
+  inCollection: boolean | null;
+  onWantlist: boolean | null;
+}
+
+/**
+ * What to show on a result row, or null for nothing at all.
+ *
+ * Collection beats wantlist when both are true: owning it is the fact that
+ * changes what you do next, and a record can legitimately be on both lists
+ * because Discogs never removes a want when you add the release.
+ */
+export function describeOwnership(state: OwnershipState): string | null {
+  if (state.inCollection === true) return "In your collection";
+  if (state.onWantlist === true) return "On your wantlist";
+  return null;
+}
+
+/** Whether adding to the collection would be a no-op worth warning about. */
+export function alreadyCollected(state: OwnershipState): boolean {
+  return state.inCollection === true;
+}

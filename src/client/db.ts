@@ -6,6 +6,7 @@ import type {
   Source,
   SyncState,
 } from "@/lib/types";
+import type { OwnershipState } from "./ownership";
 
 /**
  * IndexedDB cache.
@@ -123,6 +124,57 @@ export async function putSummaries(
     }
     return Promise.resolve();
   });
+}
+
+/**
+ * Which of these releases are already in a synced index.
+ *
+ * Point lookups by primary key rather than loading a source and scanning it:
+ * a search returns twenty-five results and the collection holds thousands, so
+ * reading the whole store to answer twenty-five questions would stall the
+ * result list on exactly the phones this is for.
+ *
+ * A source that has never been synced returns `null` rather than `false` for
+ * every id. The difference matters — see `describeOwnership`, which refuses to
+ * report absence it cannot vouch for.
+ */
+export async function lookupOwnership(
+  owner: string,
+  releaseIds: number[],
+): Promise<Map<number, OwnershipState>> {
+  const [collectionSynced, wantlistSynced] = await Promise.all([
+    getSyncState(owner, "collection"),
+    getSyncState(owner, "wantlist"),
+  ]);
+
+  const present = async (source: Source): Promise<Set<number>> =>
+    tx<Set<number>>(STORE_SUMMARY, "readonly", ([store]) =>
+      Promise.all(
+        releaseIds.map(
+          (id) =>
+            new Promise<number | null>((resolve) => {
+              const request = store!.get(`${owner}:${source}:${id}`);
+              request.onsuccess = () => resolve(request.result ? id : null);
+              request.onerror = () => resolve(null);
+            }),
+        ),
+      ).then((found) => new Set(found.filter((id): id is number => id !== null))),
+    );
+
+  const [inCollection, onWantlist] = await Promise.all([
+    collectionSynced ? present("collection") : Promise.resolve(null),
+    wantlistSynced ? present("wantlist") : Promise.resolve(null),
+  ]);
+
+  return new Map(
+    releaseIds.map((id) => [
+      id,
+      {
+        inCollection: inCollection ? inCollection.has(id) : null,
+        onWantlist: onWantlist ? onWantlist.has(id) : null,
+      },
+    ]),
+  );
 }
 
 export async function getSummaries(

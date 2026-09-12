@@ -81,6 +81,9 @@ jobs:
       - name: Scrubber position tests
         run: npm run test:scrub
 
+      - name: Ownership indicator tests
+        run: npm run test:ownership
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 
