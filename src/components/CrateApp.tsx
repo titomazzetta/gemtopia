@@ -1978,13 +1978,23 @@ export function CrateApp({
 
       {picker && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
+          /*
+            Bottom sheet on a phone, centred dialog from `sm` up. A modal
+            floating in the middle of a phone puts the thing you have to tap
+            where the thumb does not reach, and every music app on a handset
+            solved this the same way for the same reason.
+          */
+          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 sm:grid sm:place-items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Add to playlist"
           onClick={(e) => e.target === e.currentTarget && setPicker(null)}
         >
-          <div className="w-full max-w-sm rounded-lg border border-ink-700 bg-ink-900 p-4">
+          <div className="w-full rounded-t-2xl border-t border-ink-700 bg-ink-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-w-sm sm:rounded-lg sm:border sm:pb-4">
+            {/* Grab handle — the signal that this dismisses. Phones only. */}
+            <div className="mb-3 flex justify-center sm:hidden" aria-hidden="true">
+              <span className="h-1 w-9 rounded-full bg-ink-600" />
+            </div>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold text-neutral-100">Add to playlist</h3>
@@ -2017,6 +2027,7 @@ export function CrateApp({
             <ul className="my-3 max-h-56 space-y-1 overflow-y-auto">
               {orderByRecent(playlists, recentPlaylists).map((playlist, index) => {
                 const added = justAdded.has(playlist.id);
+                const isDefault = index === 0 && recentPlaylists.length > 0;
                 return (
                   <li key={playlist.id}>
                     <button
@@ -2026,9 +2037,22 @@ export function CrateApp({
                         setRecentPlaylists((r) => promote(r, playlist.id));
                         setJustAdded((a) => new Set(a).add(playlist.id));
                       }}
-                      className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-ink-800 ${
-                        added ? "text-accent" : "text-neutral-300"
-                      }`}
+                      /*
+                        The first row is the default target, not merely the
+                        first row. Recency is a real prediction — you are
+                        usually still filling the list you were just filling —
+                        so it gets a border and a tint and reads as "this one,
+                        unless you say otherwise". Everything below stays
+                        one tap away.
+
+                        It only gets that treatment once something has actually
+                        been added this session. Before that the order is
+                        arbitrary and dressing row one as a prediction would be
+                        inventing confidence we do not have.
+                      */
+                      className={`flex w-full items-center gap-2 rounded-md border px-2 text-left text-xs hover:bg-ink-800 ${
+                        isDefault ? "border-accent/40 bg-accent/5 py-2.5" : "border-transparent py-2"
+                      } ${added ? "text-accent" : isDefault ? "text-accent" : "text-neutral-300"}`}
                     >
                       <span className="w-4 shrink-0 text-center">
                         {added ? "✓" : "+"}
@@ -2040,8 +2064,8 @@ export function CrateApp({
                         noise; a badge on row one when the order is arbitrary
                         would be a lie.
                       */}
-                      {index === 0 && recentPlaylists.length > 0 && !added && (
-                        <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 text-[10px] text-neutral-500">
+                      {isDefault && !added && (
+                        <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">
                           last used
                         </span>
                       )}
