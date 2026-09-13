@@ -93,7 +93,7 @@ import {
 } from "@/client/adopt";
 import { DiscogsSearch } from "./DiscogsSearch";
 import type { SearchHit } from "@/lib/discogs";
-import { Compass, Disc, Metronome, Refresh, Search, Shuffle } from "./Icons";
+import { Clock, Compass, Disc, Metronome, Refresh, Search, Shuffle } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights" | "search";
 
@@ -144,6 +144,14 @@ export function CrateApp({
 
   /* ---------------- data ---------------- */
   const [details, setDetails] = useState<ReleaseDetail[]>([]);
+  /**
+   * When each release entered the collection, straight off the summary index.
+   *
+   * Kept beside `sourceIds` because it comes from the same read and has the
+   * same shape of staleness. Only the collection endpoint reports this, so it
+   * cannot be recovered from the detail cache.
+   */
+  const [addedAt, setAddedAt] = useState<Map<number, string | null>>(new Map());
   const [sourceIds, setSourceIds] = useState<Record<Source, Set<number>>>({
     collection: new Set(),
     wantlist: new Set(),
@@ -556,6 +564,11 @@ export function CrateApp({
       collection: new Set(collection.map((s) => s.id)),
       wantlist: new Set(wantlist.map((s) => s.id)),
     });
+    setAddedAt(
+      new Map(
+        [...collection, ...wantlist].map((s) => [s.id, s.addedAt] as const),
+      ),
+    );
   }, [username]);
 
   const runSync = useCallback(
@@ -679,8 +692,8 @@ export function CrateApp({
   }, [trackMeta]);
 
   const allPlayables = useMemo(
-    () => buildPlayables([...details, ...externalDetails], bpmByClip),
-    [details, externalDetails, bpmByClip],
+    () => buildPlayables([...details, ...externalDetails], bpmByClip, addedAt),
+    [details, externalDetails, bpmByClip, addedAt],
   );
 
   const byKey = useMemo(() => {
@@ -726,6 +739,10 @@ export function CrateApp({
         // Never silent: the server refuses an entry without a valid video id,
         // so anything that came back from it is playable by construction.
         silence: null,
+        // A playlist row that never synced on this device has no collection
+        // date to report, and inventing one would put it at the top of a
+        // recently-added sort it does not belong in.
+        addedAt: null,
         title: entry.title,
         artist: entry.artist,
         releaseTitle: entry.releaseTitle,
@@ -1282,6 +1299,25 @@ export function CrateApp({
    * `lg:` only and opening a hidden tab would look like the button did
    * nothing at all.
    */
+  /**
+   * The crate, newest arrivals first.
+   *
+   * Deliberately a view rather than a stored playlist. It has no contents of
+   * its own — it is the crate you are already looking at, reordered — so it
+   * cannot drift out of date, cannot be half-populated, and needs no sync of
+   * its own. Pressing it twice puts you back where you were.
+   */
+  const recentlyAddedActive =
+    !activePlaylistId && source === "collection" && sort?.key === "added";
+
+  const showRecentlyAdded = useCallback(() => {
+    setActivePlaylistId(null);
+    setSource("collection");
+    setFilters(emptyFilters);
+    setSort({ key: "added", direction: "desc" });
+    setSheet("none");
+  }, []);
+
   const openDiscogsSearch = useCallback((seed = "") => {
     setSearchSeed(seed);
     setRail("search");
@@ -1334,6 +1370,11 @@ export function CrateApp({
           ]),
         ]);
         setDetails((previous) => mergeDetail(previous, detail));
+        // Recorded here too, so a record you just added sorts to the top of
+        // Recently added immediately rather than after the next sync.
+        setAddedAt((previous) =>
+          new Map(previous).set(hit.id, new Date().toISOString()),
+        );
         say(describeAdoption(detail));
       } catch {
         say(describePartialAdoption(hit));
@@ -1708,6 +1749,23 @@ export function CrateApp({
             )}
 
             {rail === "playlists" && (
+              <div className="flex h-full flex-col">
+                <button
+                  type="button"
+                  onClick={showRecentlyAdded}
+                  className={`flex shrink-0 items-center gap-2 border-b border-ink-800 px-3 py-2.5 text-left text-xs font-medium ${
+                    recentlyAddedActive
+                      ? "bg-accent/10 text-accent"
+                      : "text-neutral-300 hover:bg-ink-850"
+                  }`}
+                >
+                  <Clock className="h-3.5 w-3.5" />
+                  Recently added
+                  <span className="ml-auto text-[10px] font-normal text-neutral-600">
+                    newest first
+                  </span>
+                </button>
+                <div className="min-h-0 flex-1">
               <PlaylistPanel
                 playlists={playlists}
                 activeId={activePlaylistId}
@@ -1721,6 +1779,8 @@ export function CrateApp({
                 sharedIds={sharedIds}
                 onImport={(file) => void importPlaylists(file)}
               />
+                </div>
+              </div>
             )}
 
             {rail === "search" && (
@@ -2073,6 +2133,27 @@ export function CrateApp({
         title="Play from"
       >
         <div className="px-4 pb-4">
+          {/*
+            Sits above the two sources because it answers the commonest
+            question of all — "what came in lately?" — and because scrolling
+            past a playlist list to reach it would defeat the point.
+          */}
+          <button
+            type="button"
+            onClick={showRecentlyAdded}
+            className={`mb-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-xs font-medium ${
+              recentlyAddedActive
+                ? "border-accent/50 bg-accent/10 text-accent"
+                : "border-ink-700 text-neutral-300"
+            }`}
+          >
+            <Clock className="h-3.5 w-3.5" />
+            Recently added
+            <span className="ml-auto text-[10px] font-normal text-neutral-500">
+              newest first
+            </span>
+          </button>
+
           <div className="mb-4 grid grid-cols-2 gap-2">
             {(["collection", "wantlist"] as const).map((value) => (
               <button

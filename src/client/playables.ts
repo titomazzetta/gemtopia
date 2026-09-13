@@ -199,6 +199,16 @@ function clipScore(
 export function buildPlayables(
   details: ReleaseDetail[],
   bpmByClip: Map<string, number> = new Map(),
+  /**
+   * When each release entered the collection, keyed by release id.
+   *
+   * Threaded in rather than read off the detail because only the *collection*
+   * endpoint knows the answer. `/releases/{id}` describes a pressing, not your
+   * copy of one, so every detail fetched that way reports `addedAt: null` —
+   * and the sync stores details from exactly that endpoint. The real dates
+   * live in the summary index, which is where this map comes from.
+   */
+  addedAtByRelease: Map<number, string | null> = new Map(),
 ): Playable[] {
   const out: Playable[] = [];
 
@@ -241,6 +251,7 @@ export function buildPlayables(
         bpm: releaseBpm,
         matchKind: "release",
         silence: release.market === null ? "not-loaded" : "no-audio",
+        addedAt: addedAtByRelease.get(release.id) ?? release.addedAt,
       });
       continue;
     }
@@ -393,6 +404,7 @@ export function buildPlayables(
         bpm: inheritedBpm ?? parsedBpm,
         matchKind: track ? "track" : "release",
         silence: null,
+        addedAt: addedAtByRelease.get(release.id) ?? release.addedAt,
       });
     }
   }

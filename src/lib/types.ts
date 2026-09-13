@@ -177,6 +177,15 @@ export interface Playable {
    * `silence === null` exactly when `videoId !== null`.
    */
   silence: SilenceReason | null;
+  /**
+   * ISO timestamp this release entered the collection, when Discogs told us.
+   *
+   * It comes from the *collection* endpoint, which is the only one that knows
+   * — `/releases/{id}` describes a pressing rather than your copy of one, so
+   * a detail fetched that way always reports null. That is why this is
+   * threaded in from the summary index rather than read off the detail.
+   */
+  addedAt: string | null;
 }
 
 /**

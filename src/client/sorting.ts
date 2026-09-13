@@ -20,7 +20,14 @@ import type { Playable } from "@/lib/types";
  * pretending it sorts is what makes a list feel broken.
  */
 
-export type SortKey = "title" | "artist" | "label" | "year" | "bpm" | "duration";
+export type SortKey =
+  | "title"
+  | "artist"
+  | "label"
+  | "year"
+  | "bpm"
+  | "duration"
+  | "added";
 export type SortDirection = "asc" | "desc";
 
 export interface SortState {
@@ -35,6 +42,7 @@ export const SORT_LABELS: Record<SortKey, string> = {
   year: "Year",
   bpm: "BPM",
   duration: "Length",
+  added: "Added",
 };
 
 /** Case- and accent-insensitive, and "The Orb" files under O, not T. */
@@ -66,6 +74,16 @@ function keyOf(item: Playable, key: SortKey): string | number | null {
       return numberKey(item.bpm);
     case "duration":
       return numberKey(item.duration);
+    case "added":
+      /*
+       * Compared as epoch milliseconds rather than as an ISO string. String
+       * comparison happens to work for well-formed UTC ISO-8601, and stops
+       * working the moment Discogs returns an offset like +01:00 — which
+       * sorts before "Z" lexically and after it chronologically.
+       */
+      return item.addedAt === null
+        ? null
+        : numberKey(Date.parse(item.addedAt));
   }
 }
 
@@ -135,9 +153,15 @@ export function nextSort(current: SortState | null, key: SortKey): SortState | n
  * built. Year reads oldest-first. Length reads shortest-first. None of these
  * are arbitrary — they are the direction you almost always want on the first
  * click, and getting them wrong means every use costs two clicks.
+ *
+ * Added is the one that reads *newest*-first, and it is the exception for a
+ * reason: nobody sorting by date added wants the record they bought in 2011.
+ * They want the one that turned up this week.
  */
 export function naturalDirection(key: SortKey): SortDirection {
   switch (key) {
+    case "added":
+      return "desc";
     case "title":
     case "artist":
     case "label":

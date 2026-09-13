@@ -195,4 +195,54 @@ if (failed > 0) {
   console.error(`\n${failed} of ${ran} sorting tests failed.`);
   process.exit(1);
 }
+/* ---- added date ------------------------------------------------------- */
+
+check("recently added reads newest first, unlike every other column", () => {
+  assert.equal(naturalDirection("added"), "desc");
+});
+
+check("added sorts chronologically, not lexically", () => {
+  // The trap: string comparison happens to work for UTC ISO-8601 and stops
+  // working the moment Discogs returns an offset. "+01:00" sorts before "Z"
+  // lexically and after it chronologically, so a record bought at 23:30 in
+  // London would file a day late.
+  const items = [
+    item({ key: "a", addedAt: "2026-01-02T00:30:00+01:00" }),
+    item({ key: "b", addedAt: "2026-01-01T23:00:00Z" }),
+  ];
+  const sorted = sortItems(items, { key: "added", direction: "asc" });
+  assert.deepEqual(
+    sorted.map((i) => i.key),
+    ["b", "a"],
+    "sorted ISO strings lexically instead of comparing instants",
+  );
+});
+
+check("a record with no added date sinks, in both directions", () => {
+  const items = [
+    item({ key: "unknown", addedAt: null }),
+    item({ key: "known", addedAt: "2026-01-01T00:00:00Z" }),
+  ];
+  for (const direction of ["asc", "desc"]) {
+    const sorted = sortItems(items, { key: "added", direction });
+    assert.equal(
+      sorted[sorted.length - 1].key,
+      "unknown",
+      `unknown floated to the top in ${direction}`,
+    );
+  }
+});
+
+check("a malformed date is treated as unknown, not as zero", () => {
+  // Date.parse returns NaN, and NaN must sink like null rather than sorting
+  // as the beginning of time and claiming to be your oldest record.
+  const items = [
+    item({ key: "bad", addedAt: "not a date" }),
+    item({ key: "good", addedAt: "2026-01-01T00:00:00Z" }),
+  ];
+  const sorted = sortItems(items, { key: "added", direction: "asc" });
+  assert.equal(sorted[0].key, "good");
+  assert.equal(sorted[1].key, "bad");
+});
+
 console.log(`All ${ran} sorting tests passed.`);
