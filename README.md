@@ -5,7 +5,7 @@
 **Dig your record collection when you're nowhere near your turntables.**
 
 [![CI](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml/badge.svg)](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml)
-[![Security](https://img.shields.io/badge/threat%20model-SECURITY.md-4ade80)](./SECURITY.md)
+[![Threat model](https://img.shields.io/badge/threat%20model-documented-4ade80)](./THREAT_MODEL.md)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 </div>
@@ -61,7 +61,7 @@ browsing a database usually doesn't.
 
 It's built on the Discogs API, meant to be used on trains and in hotel rooms, and
 written to be read by people who care how software is put together. The
-[threat model](./SECURITY.md) is the part I'd point at first.
+[threat model](./THREAT_MODEL.md) is the part I'd point at first.
 
 ---
 
@@ -441,7 +441,8 @@ the difference matters. Discogs' OAuth 1.0a has no scopes, so the token every
 Discogs app holds — including this one — carries the full authority of the
 account. There is no way to ask for a read-mostly token. What bounds this app
 is public source you can audit and a credential that is never stored anywhere
-this app controls; `SECURITY.md` §12.1 sets out the whole argument, including
+this app controls; [THREAT_MODEL.md §12.1](./THREAT_MODEL.md) sets out the whole
+argument, including
 the part that isn't solved.
 
 ---
@@ -503,7 +504,7 @@ stops working immediately. Signing back in works straight away.
 
 It costs no extra database round trip: resolving your session into a user id
 was already a query, and the version comes back in the same row. Full write-up
-in [SECURITY.md §6](./SECURITY.md).
+in [THREAT_MODEL.md §6](./THREAT_MODEL.md).
 
 ---
 
@@ -806,7 +807,7 @@ ever landed in the client bundle.
 - Jungle/DnB tempo often reads at half — use ÷2 / ×2, or tap it.
 - Clips that are private, deleted, or region-blocked on YouTube auto-skip after ~1s.
 - Discogs' video data is patchy. Some releases have none; that's upstream.
-- The rate limiter is per serverless instance — see *Residual risks* in SECURITY.md.
+- The rate limiter is per serverless instance — see *Residual risks* in THREAT_MODEL.md.
 - Musical key / Camelot harmonic mixing isn't built. The column exists, and it
   is the natural companion to the tempo checks.
 - Transition checks assume a constant tempo per record. Live drummers and

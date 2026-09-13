@@ -7,7 +7,7 @@ import "server-only";
  * this bounds abuse *per instance*, not globally. It is a cheap first line of
  * defence that costs no external dependency and no round trip. A deployment
  * expecting real hostile traffic should put Vercel WAF / Upstash Redis in
- * front of it — see SECURITY.md "Residual risks".
+ * front of it — see THREAT_MODEL.md "Residual risks".
  *
  * It exists mainly to stop one logged-in client from burning the whole
  * Discogs 60-req/min budget and getting the app's IP throttled for everyone.
