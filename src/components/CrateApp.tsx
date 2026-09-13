@@ -38,7 +38,13 @@ import {
 } from "@/client/api";
 import type { FacetKey } from "./Filters";
 import { startSync, type SyncHandle } from "@/client/sync";
-import { buildPlayables, spreadShuffle } from "@/client/playables";
+import {
+  buildPlayables,
+  countSilence,
+  playableOnly,
+  queueFrom,
+  spreadShuffle,
+} from "@/client/playables";
 import { nextSort, sortItems, type SortKey, type SortState } from "@/client/sorting";
 import { TapTempo } from "@/client/tempo";
 import {
@@ -93,8 +99,16 @@ type Rail = "filters" | "playlists" | "insights" | "search";
 
 type NewEntry = Omit<PlaylistItemRow, "position">;
 
-/** A playable becomes a stored entry. Position comes from array order. */
-function toEntry(item: Playable): NewEntry {
+/**
+ * A playable becomes a stored entry. Position comes from array order.
+ *
+ * Returns null for a record with no clip. The server would refuse it anyway —
+ * `validation.ts` requires an eleven-character video id — but a 400 at the end
+ * of a drag is a much worse way to learn that than the + button simply not
+ * being offered on that row.
+ */
+function toEntry(item: Playable): NewEntry | null {
+  if (item.videoId === null) return null;
   return {
     clipKey: item.key,
     releaseId: item.releaseId,
@@ -596,7 +610,8 @@ export function CrateApp({
                 entries: list.items
                   .map((key) => byKey.get(key))
                   .filter((p): p is Playable => Boolean(p))
-                  .map(toEntry),
+                  .map(toEntry)
+                  .filter((entry): entry is NewEntry => entry !== null),
               }))
               .filter((list) => list.entries.length > 0);
 
@@ -686,6 +701,7 @@ export function CrateApp({
   );
 
   const facets = useMemo(() => computeFacets(pool), [pool]);
+
   const filtered = useMemo(() => applyFilters(pool, filters), [pool, filters]);
 
   const activePlaylist = useMemo(
@@ -707,6 +723,9 @@ export function CrateApp({
         key: entry.clipKey,
         releaseId: entry.releaseId,
         videoId: entry.videoId,
+        // Never silent: the server refuses an entry without a valid video id,
+        // so anything that came back from it is playable by construction.
+        silence: null,
         title: entry.title,
         artist: entry.artist,
         releaseTitle: entry.releaseTitle,
@@ -766,6 +785,15 @@ export function CrateApp({
           : filtered,
     [activePlaylist, playlistItems, filtered, sort],
   );
+
+  /*
+   * Split so the header can say what "1,500 clips" now means, given that
+   * unplayable records are among them. The two silent kinds are counted
+   * separately because they lead somewhere different: no-audio is permanent
+   * and there is nothing to do about it, whereas not-loaded is one refresh
+   * away from working.
+   */
+  const silence = useMemo(() => countSilence(visible), [visible]);
 
   /*
    * Key -> playable for whatever is on screen, so the sweep can find the next
@@ -871,6 +899,11 @@ export function CrateApp({
   useEffect(() => {
     if (!api.ready || !current) return;
     if (lastLoaded.current === current.key) return;
+    // Nothing to load. Reaching here at all means a silent record got into the
+    // queue, which advance() and shuffleNow() are supposed to prevent; the
+    // guard is here as well because the failure mode otherwise is the player
+    // silently continuing to show the previous track as if it were this one.
+    if (current.videoId === null) return;
     lastLoaded.current = current.key;
     api.load(current.videoId, true);
 
@@ -880,17 +913,39 @@ export function CrateApp({
     setTapCount(0);
   }, [api, current, detector]);
 
-  const playFrom = useCallback((items: Playable[], index: number) => {
-    if (items.length === 0) return;
-    setQueue(items);
-    setQueueIndex(index);
-    lastLoaded.current = null;
-  }, []);
+  /**
+   * The only door into the queue. Silent records are filtered out here rather
+   * than at each call site, and the index is re-derived because a position in
+   * the list on screen is not a position in the queue once rows are dropped.
+   */
+  const playFrom = useCallback(
+    (items: Playable[], index: number) => {
+      if (items.length === 0) return;
+
+      const plan = queueFrom(items, index);
+      if (plan === null) {
+        const target = items[index];
+        say(
+          target?.silence === "not-loaded"
+            ? `${target.title} hasn't finished syncing — hit refresh to fetch it.`
+            : target?.silence === "no-audio"
+              ? `Discogs has no audio for ${target.title}.`
+              : "Nothing here can be played.",
+        );
+        return;
+      }
+
+      setQueue(plan.queue);
+      setQueueIndex(plan.index);
+      lastLoaded.current = null;
+    },
+    [say],
+  );
 
   const shuffleNow = useCallback(() => {
-    const scope = activePlaylist ? playlistItems : filtered;
+    const scope = playableOnly(activePlaylist ? playlistItems : filtered);
     if (scope.length === 0) {
-      say("Nothing to shuffle — loosen the filters.");
+      say("Nothing here can be played — loosen the filters.");
       return;
     }
     setShuffleOn(true);
@@ -906,10 +961,15 @@ export function CrateApp({
 
   const createPlaylist = useCallback(
     async (name: string, seed?: Playable) => {
+      if (seed && seed.videoId === null) {
+        say(`${seed.title} has no clip to play, so it can't go in a playlist.`);
+        return;
+      }
       try {
+        const seedEntry = seed ? toEntry(seed) : null;
         const playlist = await playlistsApi.create(
           name,
-          seed ? [toEntry(seed)] : [],
+          seedEntry ? [seedEntry] : [],
         );
         setPlaylists((previous) => [playlist, ...previous]);
         say(seed ? `Started "${name}" with ${seed.title}` : `Created "${name}"`);
@@ -928,9 +988,14 @@ export function CrateApp({
         say(`Already in "${playlist.name}"`);
         return;
       }
+      const entry = toEntry(item);
+      if (entry === null) {
+        say(`${item.title} has no clip to play, so it can't go in a playlist.`);
+        return;
+      }
       try {
         const updated = await playlistsApi.update(playlistId, {
-          entries: [...playlist.entries.map(reEntry), toEntry(item)],
+          entries: [...playlist.entries.map(reEntry), entry],
         });
         setPlaylists((previous) =>
           previous.map((p) => (p.id === updated.id ? updated : p)),
@@ -1704,7 +1769,15 @@ export function CrateApp({
                 </button>
 
                 <span className="shrink-0 font-mono text-[11px] text-neutral-600">
-                  {visible.length.toLocaleString()}
+                  {silence.playable.toLocaleString()}
+                  {silence.noAudio + silence.notLoaded > 0 && (
+                    <span
+                      className="text-neutral-700"
+                      title={`${(silence.noAudio + silence.notLoaded).toLocaleString()} shown but not playable`}
+                    >
+                      +{(silence.noAudio + silence.notLoaded).toLocaleString()}
+                    </span>
+                  )}
                 </span>
 
                 <button
@@ -1793,7 +1866,26 @@ export function CrateApp({
               {activePlaylist ? activePlaylist.name : `Your ${source}`}
             </h2>
             <span className="text-[11px] text-neutral-600">
-              {visible.length.toLocaleString()} clips
+              {silence.playable.toLocaleString()} clips
+              {silence.noAudio > 0 && (
+                <span title="Discogs holds no audio for these pressings">
+                  {" · "}
+                  {silence.noAudio.toLocaleString()} without a preview
+                </span>
+              )}
+              {silence.notLoaded > 0 && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => runSync(source, true)}
+                    title="These releases never finished syncing"
+                    className="underline decoration-dotted underline-offset-2 hover:text-neutral-300"
+                  >
+                    {silence.notLoaded.toLocaleString()} not synced
+                  </button>
+                </>
+              )}
             </span>
             {activePlaylist && (
               <button

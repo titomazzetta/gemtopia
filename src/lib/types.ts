@@ -124,11 +124,31 @@ export interface DigResponse {
  * a playable is a (release, video) pair, optionally resolved to a track when
  * the video title matches a tracklist entry.
  */
+/**
+ * Why a record in the crate cannot be played.
+ *
+ * These are not the same thing and must never be reported as each other.
+ * `no-audio` is a fact about the record: Discogs holds no YouTube links for
+ * this pressing, and no amount of resyncing will change that. `not-loaded` is
+ * a fact about us: the sync never managed to fetch the release, so we do not
+ * actually know whether it has audio or not.
+ *
+ * Telling someone Discogs has no audio for a record they can hear perfectly
+ * well on Discogs is the kind of confident wrong answer that makes people
+ * stop believing the rest of the app.
+ */
+export type SilenceReason = "no-audio" | "not-loaded";
+
 export interface Playable {
-  /** Stable key: `${releaseId}:${videoId}`. */
+  /** Stable key: `${releaseId}:${videoId}`, or `${releaseId}:silent`. */
   key: string;
   releaseId: number;
-  videoId: string;
+  /**
+   * Null for a record the crate can show but not play. Deliberately nullable
+   * rather than an empty string, so that every consumer which would hand this
+   * to the player has to say out loud what it does when there isn't one.
+   */
+  videoId: string | null;
   /** Best available display title. */
   title: string;
   artist: string;
@@ -152,6 +172,11 @@ export interface Playable {
    * full-album rip or a DJ mix.
    */
   matchKind: "track" | "release";
+  /**
+   * Null when this is a real, playable clip. Invariant, pinned by a test:
+   * `silence === null` exactly when `videoId !== null`.
+   */
+  silence: SilenceReason | null;
 }
 
 /**

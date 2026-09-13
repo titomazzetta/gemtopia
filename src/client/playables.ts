@@ -207,6 +207,44 @@ export function buildPlayables(
     // per-track markings in the title win over them.
     const releaseBpm = parseBpmFromText(release.notes);
 
+    /*
+     * A record with no clips used to produce no rows, which meant it did not
+     * exist. You could own it, sync it successfully, and never once see it in
+     * the app — and there was nothing on screen to tell you that was
+     * happening. One row, marked, is the honest version.
+     *
+     * Which kind of silence it is matters. `market` is the tell: a real fetch
+     * of /releases/{id} always returns num_for_sale and lowest_price, so a
+     * null market can only be a placeholder the sync wrote when it never got
+     * to the release at all. Calling that "Discogs has no audio" would be a
+     * confident wrong answer about a record you can hear on Discogs right now.
+     */
+    if (release.videos.length === 0) {
+      out.push({
+        key: `${release.id}:silent`,
+        releaseId: release.id,
+        videoId: null,
+        title: release.title,
+        artist: release.artist,
+        releaseTitle: release.title,
+        year: release.year,
+        genres: release.genres,
+        styles: release.styles,
+        labels: release.labels,
+        thumb: release.thumb,
+        country: release.country,
+        formats: release.formats,
+        duration: null,
+        position: null,
+        // Parsed from the release notes, so it is real information about the
+        // record even though nothing here can play it.
+        bpm: releaseBpm,
+        matchKind: "release",
+        silence: release.market === null ? "not-loaded" : "no-audio",
+      });
+      continue;
+    }
+
     interface Candidate {
       video: ReleaseDetail["videos"][number];
       match: TrackMatch;
@@ -354,6 +392,7 @@ export function buildPlayables(
         // A catalogued reading (tapped or detected) always beats text parsing.
         bpm: inheritedBpm ?? parsedBpm,
         matchKind: track ? "track" : "release",
+        silence: null,
       });
     }
   }
@@ -412,4 +451,79 @@ export function spreadShuffle(items: readonly Playable[]): Playable[] {
   }
 
   return result;
+}
+
+/* ------------------------------------------------------------------ */
+/* Silent records                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The records a queue may contain.
+ *
+ * A silent record is shown in the crate on purpose — you own it, and hiding
+ * it was worse — but it can never be *played*, so it must never enter a
+ * queue. Doing that filtering here rather than at each call site means the
+ * player's "what do I do with a null video id" branch stays unreachable in
+ * normal operation instead of becoming load-bearing.
+ */
+export function playableOnly(items: readonly Playable[]): Playable[] {
+  return items.filter((item) => item.videoId !== null);
+}
+
+export interface QueuePlan {
+  queue: Playable[];
+  index: number;
+}
+
+/**
+ * Build a queue from a list the user is looking at, starting at what they
+ * pressed.
+ *
+ * The index needs re-deriving rather than reusing: the visible list contains
+ * silent records and the queue does not, so position 40 on screen is not
+ * position 40 in the queue, and playing the wrong record because of an
+ * off-by-n is precisely the sort of thing nobody notices in review.
+ *
+ * Returns null when there is nothing to play — either the list is all silent,
+ * or the row pressed was itself a silent one. The caller says which, because
+ * only the caller knows how to phrase it.
+ */
+export function queueFrom(
+  items: readonly Playable[],
+  index: number,
+): QueuePlan | null {
+  const target = items[index] ?? null;
+  const queue = playableOnly(items);
+  if (queue.length === 0) return null;
+
+  if (target === null) return { queue, index: 0 };
+  if (target.videoId === null) return null;
+
+  const found = queue.findIndex((item) => item.key === target.key);
+  return { queue, index: found === -1 ? 0 : found };
+}
+
+/**
+ * How many of these the app cannot play, split by whose fault it is.
+ *
+ * Kept separate because the two numbers lead somewhere different: records
+ * Discogs has no audio for are permanent and there is nothing to do about
+ * them, whereas records the sync never loaded are a resync away from working.
+ */
+export function countSilence(items: readonly Playable[]): {
+  playable: number;
+  noAudio: number;
+  notLoaded: number;
+} {
+  let playable = 0;
+  let noAudio = 0;
+  let notLoaded = 0;
+
+  for (const item of items) {
+    if (item.silence === null) playable += 1;
+    else if (item.silence === "no-audio") noAudio += 1;
+    else notLoaded += 1;
+  }
+
+  return { playable, noAudio, notLoaded };
 }

@@ -5,7 +5,7 @@ import type { Playable } from "@/lib/types";
 import { VERDICT_META, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { formatBpm } from "@/lib/mixing";
-import { Play, Plus, Trash } from "./Icons";
+import { NoPreview, Play, Plus, Trash } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import type { SortKey, SortState } from "@/client/sorting";
 
@@ -234,6 +234,18 @@ export function TrackList({
           {slice.map((item, i) => {
             const index = start + i;
             const active = item.key === currentKey;
+            /*
+             * Shown, but visibly not playable. Hiding these was the old
+             * behaviour and it meant you could own a record, sync it, and
+             * never see it — with nothing on screen admitting that. Dimmed
+             * plus an icon plus a title attribute, so the reason survives
+             * whether you are scanning, hovering, or using a screen reader.
+             */
+            const silent = item.silence !== null;
+            const silentReason =
+              item.silence === "not-loaded"
+                ? "Not synced yet — hit refresh to fetch this release"
+                : "Discogs has no audio for this pressing";
 
             return (
               <li
@@ -249,7 +261,9 @@ export function TrackList({
                 }}
                 className={`group border-b border-ink-850 ${
                   active ? "bg-accent/10" : "hover:bg-ink-850"
-                } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""}`}
+                } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""} ${
+                  silent ? "opacity-45" : ""
+                }`}
               >
                 {showTransitions &&
                   (transitions?.get(index) ? (
@@ -278,13 +292,22 @@ export function TrackList({
                         className="h-full w-full object-cover"
                       />
                     ) : null}
-                    <span
-                      className={`absolute inset-0 hidden place-items-center bg-black/60 group-hover:grid ${
-                        active ? "grid" : ""
-                      }`}
-                    >
-                      <Play className="h-3 w-3 text-white" />
-                    </span>
+                    {silent ? (
+                      <span
+                        className="absolute inset-0 grid place-items-center bg-black/65"
+                        title={silentReason}
+                      >
+                        <NoPreview className="h-3.5 w-3.5 text-neutral-400" />
+                      </span>
+                    ) : (
+                      <span
+                        className={`absolute inset-0 hidden place-items-center bg-black/60 group-hover:grid ${
+                          active ? "grid" : ""
+                        }`}
+                      >
+                        <Play className="h-3 w-3 text-white" />
+                      </span>
+                    )}
                   </span>
 
                   <span className="min-w-0 flex-1">
@@ -303,6 +326,14 @@ export function TrackList({
                     <span className="block truncate text-[11px] text-neutral-500">
                       {item.artist}
                       <span className="text-neutral-700"> — {item.releaseTitle}</span>
+                      {silent && (
+                        <span className="ml-1.5 text-neutral-600">
+                          ·{" "}
+                          {item.silence === "not-loaded"
+                            ? "not synced"
+                            : "no preview"}
+                        </span>
+                      )}
                     </span>
                   </span>
 
@@ -348,7 +379,7 @@ export function TrackList({
 
                 <ShareButton track={item} />
 
-                {onAdd && (
+                {onAdd && !silent && (
                   <button
                     type="button"
                     onClick={() => onAdd(item)}

@@ -10,7 +10,15 @@
  * collapsing never discards the *best* clip, only the worse copies.
  */
 import assert from "node:assert/strict";
-import { buildPlayables } from "../src/client/playables.ts";
+import {
+  buildPlayables,
+  countSilence,
+  playableOnly,
+  queueFrom,
+} from "../src/client/playables.ts";
+
+/** A real /releases/{id} fetch always carries marketplace data. */
+const MARKET = { forSale: 3, lowestPrice: 12.5, have: 400, want: 900 };
 
 let ran = 0;
 let failed = 0;
@@ -300,8 +308,140 @@ check("a release with one clip is untouched", () => {
   assert.equal(items.length, 1);
 });
 
-check("a release with no clips yields nothing, not a placeholder", () => {
-  assert.equal(buildPlayables([release({ videos: [] })]).length, 0);
+/* ---- silent records ---------------------------------------------------
+ *
+ * This block replaces a test that asserted the opposite: "a release with no
+ * clips yields nothing, not a placeholder". That was deliberate and it was
+ * wrong. It meant a record you owned, had synced successfully, and could see
+ * on Discogs simply did not exist in the app, with nothing on screen
+ * admitting it. One marked row is the honest version.
+ */
+
+check("a release with no clips now yields one row, not nothing", () => {
+  const items = buildPlayables([release({ videos: [], market: MARKET })]);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].videoId, null);
+});
+
+check("a fetched release with no videos is no-audio, not not-loaded", () => {
+  const [item] = buildPlayables([release({ videos: [], market: MARKET })]);
+  assert.equal(item.silence, "no-audio");
+});
+
+check("a sync placeholder is not-loaded, and never claims Discogs has no audio", () => {
+  // market === null is the tell: a real /releases/{id} fetch always returns
+  // num_for_sale and lowest_price, so a null market can only be a row the
+  // sync wrote without ever reaching the release.
+  const [item] = buildPlayables([release({ videos: [], market: null })]);
+  assert.equal(
+    item.silence,
+    "not-loaded",
+    "told the user Discogs has no audio for a record we never actually looked at",
+  );
+});
+
+check("the silence invariant holds for every emitted row", () => {
+  const items = buildPlayables([
+    release({ id: 1, tracks: [track("A1", "One", "3:00")], videos: [video("One", 180)] }),
+    release({ id: 2, videos: [], market: MARKET }),
+    release({ id: 3, videos: [], market: null }),
+  ]);
+  assert.equal(items.length, 3);
+  for (const item of items) {
+    assert.equal(
+      item.silence === null,
+      item.videoId !== null,
+      `${item.key} disagrees with itself about whether it can be played`,
+    );
+  }
+});
+
+check("a silent row keeps the metadata the crate filters on", () => {
+  const [item] = buildPlayables([release({ videos: [], market: MARKET })]);
+  // It has to be filterable and sortable, or showing it achieves nothing.
+  assert.equal(item.styles[0], "Trance");
+  assert.equal(item.labels[0], "Distinctive");
+  assert.equal(item.year, 1994);
+  assert.equal(item.country, "UK");
+});
+
+check("a silent key cannot collide with a real clip key", () => {
+  // Real video ids are 11 characters from [A-Za-z0-9_-], so "silent" is not
+  // reachable as one.
+  const [item] = buildPlayables([release({ id: 77, videos: [], market: MARKET })]);
+  assert.equal(item.key, "77:silent");
+});
+
+/* ---- queueing ---------------------------------------------------------- */
+
+check("playableOnly drops exactly the silent rows", () => {
+  const items = buildPlayables([
+    release({ id: 1, tracks: [track("A1", "One", "3:00")], videos: [video("One", 180)] }),
+    release({ id: 2, videos: [], market: MARKET }),
+  ]);
+  const playable = playableOnly(items);
+  assert.equal(playable.length, 1);
+  assert.equal(playable[0].releaseId, 1);
+});
+
+check("queueFrom re-derives the index rather than reusing it", () => {
+  // The row pressed is at index 2 on screen but index 1 in the queue, because
+  // a silent record sits above it. Reusing the screen index plays the wrong
+  // record, which is the sort of off-by-one nobody notices in review.
+  const items = buildPlayables([
+    release({ id: 1, tracks: [track("A1", "One", "3:00")], videos: [video("One", 180)] }),
+    release({ id: 2, videos: [], market: MARKET }),
+    release({ id: 3, tracks: [track("A1", "Three", "3:00")], videos: [video("Three", 180)] }),
+  ]);
+  assert.equal(items[2].releaseId, 3);
+
+  const plan = queueFrom(items, 2);
+  assert.ok(plan);
+  assert.equal(plan.index, 1);
+  assert.equal(plan.queue[plan.index].releaseId, 3, "queued the wrong record");
+});
+
+check("queueFrom refuses when the row pressed is itself silent", () => {
+  const items = buildPlayables([
+    release({ id: 1, tracks: [track("A1", "One", "3:00")], videos: [video("One", 180)] }),
+    release({ id: 2, videos: [], market: MARKET }),
+  ]);
+  assert.equal(queueFrom(items, 1), null);
+});
+
+check("queueFrom refuses when nothing in the list can be played", () => {
+  const items = buildPlayables([
+    release({ id: 1, videos: [], market: MARKET }),
+    release({ id: 2, videos: [], market: null }),
+  ]);
+  assert.equal(queueFrom(items, 0), null);
+});
+
+check("no silent record can ever reach a queue", () => {
+  const items = buildPlayables([
+    release({ id: 1, videos: [], market: MARKET }),
+    release({ id: 2, tracks: [track("A1", "Two", "3:00")], videos: [video("Two", 180)] }),
+    release({ id: 3, videos: [], market: null }),
+  ]);
+  const plan = queueFrom(items, 1);
+  assert.ok(plan);
+  for (const item of plan.queue) {
+    assert.notEqual(item.videoId, null, "a silent record got into the queue");
+  }
+});
+
+check("countSilence splits the two kinds, because they lead somewhere different", () => {
+  const items = buildPlayables([
+    release({ id: 1, tracks: [track("A1", "One", "3:00")], videos: [video("One", 180)] }),
+    release({ id: 2, videos: [], market: MARKET }),
+    release({ id: 3, videos: [], market: null }),
+    release({ id: 4, videos: [], market: null }),
+  ]);
+  assert.deepEqual(countSilence(items), {
+    playable: 1,
+    noAudio: 1,
+    notLoaded: 2,
+  });
 });
 
 check("every emitted key is unique", () => {
