@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Playable } from "@/lib/types";
 import { VERDICT_META, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
@@ -110,6 +110,7 @@ export function TrackList({
   onAdd,
   onRemove,
   emptyMessage,
+  emptyAction,
   reorderable = false,
   onReorder,
   transitions,
@@ -122,6 +123,13 @@ export function TrackList({
   onAdd?: (item: Playable) => void;
   onRemove?: (item: Playable, index: number) => void;
   emptyMessage: string;
+  /**
+   * Offered beneath the empty message. An empty crate is the one moment the
+   * app knows exactly what you were looking for and cannot give it to you,
+   * which makes it the right place to offer the next move rather than a full
+   * stop.
+   */
+  emptyAction?: ReactNode;
   reorderable?: boolean;
   onReorder?: (from: number, to: number) => void;
   /** Mix check for the transition *into* each index. Index 0 has none. */
@@ -163,8 +171,9 @@ export function TrackList({
 
   if (items.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-neutral-600">
-        {emptyMessage}
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-neutral-600">
+        <p>{emptyMessage}</p>
+        {emptyAction}
       </div>
     );
   }

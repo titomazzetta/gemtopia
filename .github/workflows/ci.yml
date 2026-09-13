@@ -87,6 +87,9 @@ jobs:
       - name: Recently-used playlist tests
         run: npm run test:recent
 
+      - name: Adoption tests
+        run: npm run test:adopt
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 

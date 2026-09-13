@@ -20,15 +20,20 @@ import {
   isMigrated,
   markMigrated,
   nuke,
+  putDetails,
+  putSummaries,
 } from "@/client/db";
 import {
   ApiError,
   authApi,
+  collectionApi,
   insightsApi,
   playlistsApi,
   prefsApi,
+  releasesApi,
   setCsrfToken,
   trackMetaApi,
+  wantlistApi,
   type InsightsResponse,
 } from "@/client/api";
 import type { FacetKey } from "./Filters";
@@ -74,9 +79,17 @@ import { TrackList } from "./TrackList";
 import { Sheet } from "./Sheet";
 import { MobileBar } from "./MobileBar";
 import { promote, orderByRecent } from "@/client/recentPlaylists";
-import { Compass, Disc, Metronome, Refresh, Shuffle } from "./Icons";
+import {
+  describeAdoption,
+  describePartialAdoption,
+  mergeDetail,
+  summaryOf,
+} from "@/client/adopt";
+import { DiscogsSearch } from "./DiscogsSearch";
+import type { SearchHit } from "@/lib/discogs";
+import { Compass, Disc, Metronome, Refresh, Search, Shuffle } from "./Icons";
 
-type Rail = "filters" | "playlists" | "insights";
+type Rail = "filters" | "playlists" | "insights" | "search";
 
 type NewEntry = Omit<PlaylistItemRow, "position">;
 
@@ -149,7 +162,15 @@ export function CrateApp({
    * the whole point of the mobile layout is that the screen shows one thing.
    * Desktop never reads this; the rail and the aside are always visible there.
    */
-  const [sheet, setSheet] = useState<"none" | "filters" | "player" | "source">("none");
+  const [sheet, setSheet] = useState<
+    "none" | "filters" | "player" | "source" | "search"
+  >("none");
+  /**
+   * What the Discogs panel opens with. Carried across from the crate search so
+   * that "not in your crate" leads straight into the same words typed against
+   * Discogs, rather than making you type them a second time.
+   */
+  const [searchSeed, setSearchSeed] = useState("");
 
   /*
    * Column sort for the crate. Null means the list's own order, which for a
@@ -1187,6 +1208,88 @@ export function CrateApp({
     [],
   );
 
+  /* ================= adding from Discogs ================= */
+
+  /**
+   * Open the Discogs panel, carrying the crate query across.
+   *
+   * Desktop gets the rail; a phone gets a sheet, because the rail is
+   * `lg:` only and opening a hidden tab would look like the button did
+   * nothing at all.
+   */
+  const openDiscogsSearch = useCallback((seed = "") => {
+    setSearchSeed(seed);
+    setRail("search");
+    if (window.matchMedia("(max-width: 1023px)").matches) setSheet("search");
+  }, []);
+
+  /**
+   * Add a record you just found on Discogs, and have it playable immediately.
+   *
+   * Three things happen, in an order chosen so that a failure part-way through
+   * never leaves a lie on screen:
+   *
+   *   1. POST the add. Until this returns, nothing local changes — an
+   *      optimistic update here would show the record in your crate when
+   *      Discogs had rejected it.
+   *   2. Fetch that one release. This is what makes it playable without
+   *      waiting on a sync that walks the entire collection.
+   *   3. Write it where a sync would have written it — the summary index and
+   *      the detail cache — then mirror both into state.
+   *
+   * If step 2 or 3 fails the add is still true, and `describePartialAdoption`
+   * says so rather than reporting an error that sounds like nothing happened.
+   */
+  const addFromSearch = useCallback(
+    async (hit: SearchHit) => {
+      await collectionApi.add(hit.id);
+
+      // The add itself has landed. From here, nothing may claim otherwise.
+      setSourceIds((previous) => {
+        const collection = new Set(previous.collection);
+        collection.add(hit.id);
+        return { ...previous, collection };
+      });
+
+      try {
+        const { results } = await releasesApi.detail([hit.id]);
+        const found = results.find((r) => r.id === hit.id);
+        if (!found?.ok) {
+          say(describePartialAdoption(hit));
+          return;
+        }
+
+        const detail = found.release;
+        await Promise.all([
+          putDetails([detail]),
+          putSummaries(username, "collection", [
+            // Stamped here because this is the moment it happened; the
+            // release endpoint reports null for every copy of every record.
+            summaryOf(detail, new Date().toISOString()),
+          ]),
+        ]);
+        setDetails((previous) => mergeDetail(previous, detail));
+        say(describeAdoption(detail));
+      } catch {
+        say(describePartialAdoption(hit));
+      }
+    },
+    [username, say],
+  );
+
+  /**
+   * The wantlist half of the same panel. No detail fetch: a wantlist record is
+   * one you do not own yet, and pulling its tracklist would spend part of a
+   * 60-request minute on something the crate is not going to play.
+   */
+  const wantFromSearch = useCallback(
+    async (hit: SearchHit) => {
+      await wantlistApi.add(hit.id);
+      applyWantlistChange(hit.id, true);
+    },
+    [applyWantlistChange],
+  );
+
   /* ================= auth ================= */
 
   const signOut = useCallback(async () => {
@@ -1506,7 +1609,7 @@ export function CrateApp({
         */}
         <nav className="hidden shrink-0 flex-col border-b border-ink-800 bg-ink-900 lg:flex lg:w-[300px] lg:border-b-0 lg:border-r">
           <div className="flex shrink-0 border-b border-ink-800">
-            {(["filters", "playlists", "insights"] as const).map((value) => (
+            {(["filters", "playlists", "insights", "search"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -1552,6 +1655,16 @@ export function CrateApp({
                 onShare={(id, shared) => void sharePlaylist(id, shared)}
                 sharedIds={sharedIds}
                 onImport={(file) => void importPlaylists(file)}
+              />
+            )}
+
+            {rail === "search" && (
+              <DiscogsSearch
+                key={searchSeed}
+                sets={sourceIds}
+                initialQuery={searchSeed}
+                onAddToCollection={addFromSearch}
+                onAddToWantlist={wantFromSearch}
               />
             )}
 
@@ -1650,6 +1763,23 @@ export function CrateApp({
                     </span>
                   )}
                 </button>
+
+                {/*
+                  Permanent, not only offered when a search fails. The record
+                  in your hand is often one you have never typed into this app,
+                  so there is nothing to come up empty first — and a button you
+                  can only reach by failing at something else is a button
+                  nobody finds.
+                */}
+                <button
+                  type="button"
+                  onClick={() => openDiscogsSearch(filters.query.trim())}
+                  aria-label="Search Discogs and add a record"
+                  className="flex shrink-0 items-center gap-1.5 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-400"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                  Discogs
+                </button>
               </div>
             </div>
           )}
@@ -1739,7 +1869,28 @@ export function CrateApp({
                       ? "Still pulling your crate from Discogs…"
                       : pool.length === 0
                         ? `Nothing cached for your ${source} yet. Hit refresh to sync.`
-                        : "No clips match those filters."
+                        : filters.query.trim()
+                          ? `Nothing in your crate matches “${filters.query.trim()}”.`
+                          : "No clips match those filters."
+                }
+                emptyAction={
+                  /*
+                   * Only when a search came up empty, and only in the crate.
+                   * "No clips match those filters" is a filter problem and the
+                   * answer is to widen them; a name typed into the box that
+                   * finds nothing is usually a record you do not own yet, and
+                   * that is now a thing this app can fix.
+                   */
+                  !activePlaylist && !syncing && pool.length > 0 && filters.query.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => openDiscogsSearch(filters.query.trim())}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-ink-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-accent/50 hover:text-accent"
+                    >
+                      <Search className="h-3.5 w-3.5" />
+                      Look for it on Discogs
+                    </button>
+                  ) : undefined
                 }
               />
             )}
@@ -1794,6 +1945,29 @@ export function CrateApp({
         onNext={() => advance(1)}
         onExpand={() => setSheet("player")}
       />
+
+      {/* ---- mobile: find a record that is not in the crate yet ---- */}
+      <Sheet
+        open={sheet === "search"}
+        onClose={() => setSheet("none")}
+        title="Add from Discogs"
+      >
+        {/*
+          Taller than the other sheets and sized off the viewport rather than
+          its content: results arrive after the sheet is already open, and a
+          panel that jumps from one line to full height the moment you press
+          search is disorienting in the hand.
+        */}
+        <div className="flex h-[70vh] min-h-0 flex-col">
+          <DiscogsSearch
+            key={searchSeed}
+            sets={sourceIds}
+            initialQuery={searchSeed}
+            onAddToCollection={addFromSearch}
+            onAddToWantlist={wantFromSearch}
+          />
+        </div>
+      </Sheet>
 
       {/* ---- mobile: what am I looking at ---- */}
       <Sheet
