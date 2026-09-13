@@ -425,13 +425,28 @@ Honest list of what is *not* solved.
    no way to request a token that *cannot* `DELETE /users/{u}/collection/...`.
    Every app in the ecosystem holds the same over-broad credential.
 
-   What this app does with that authority is bounded by its own source. The
-   only two callers of `writeRequest` are `addToWantlist` and
-   `addToCollection`; both are `POST`, with the method a string literal at the
-   call site and the release ID a zod-validated positive integer. There is no
-   `removeFromCollection` function to call, deliberately, so no route can reach
-   a delete. That is a property you can check rather than trust — the source is
-   public; grep `writeRequest` and count the callers.
+   What this app does with that authority is bounded by its own source. There
+   are exactly three callers of `writeRequest`:
+
+   | Function | Method | Path |
+   |---|---|---|
+   | `addToWantlist` | `PUT` | `/users/{u}/wants/{id}` |
+   | `removeFromWantlist` | `DELETE` | `/users/{u}/wants/{id}` |
+   | `addToCollection` | `POST` | `/users/{u}/collection/folders/1/releases/{id}` |
+
+   So the app is **not** add-only, and an earlier version of this section said
+   it was. The wantlist is a toggle — the heart has to be able to turn off, and
+   that is a `DELETE`. What holds is narrower and more important: **the
+   collection is add-only.** There is no `removeFromCollection` function in the
+   codebase — not a guarded one, not an unreachable one; it does not exist, so
+   no route, no bug and no crafted request can reach a delete against a
+   collection. The `DELETE` that does exist can only ever address
+   `/wants/{id}`, because that string is written at its own call site.
+
+   In every case the method is a string literal at the call site, the username
+   comes from the sealed session cookie, and the release id is a zod-validated
+   positive integer. That is a property you can check rather than trust — the
+   source is public; grep `writeRequest` and count the callers.
 
    What protects the credential itself is that it is never at rest anywhere we
    control. It exists only inside an AES-256-GCM sealed cookie in the user's

@@ -422,17 +422,19 @@ own BPM and the mixability verdict for the transition into the next one. A List
 can hold none of that. Playlists live in Gemtopia's own Postgres, in
 `playlists` / `playlist_items`, private to your account.
 
-**Everything this app writes to Discogs is an add you pressed.** Grep for
-`writeRequest` and you will find exactly two callers: `addToWantlist`, behind
-the heart, and `addToCollection`, behind the add button on a search result.
-Both are `POST`, with the method a literal at the call site.
+**Your collection is add-only. Your wantlist is a toggle.** Grep for
+`writeRequest` and you will find exactly three callers: `addToWantlist`
+(`PUT`), `removeFromWantlist` (`DELETE`) and `addToCollection` (`POST`). The
+heart has to be able to turn off, so a wantlist delete exists and always will.
 
-There is deliberately no `removeFromCollection` in the codebase. Not a guarded
-one, not an unreachable one — the function does not exist, so no route, no bug
-and no crafted request can reach a `DELETE` on your collection. Removing a
-record is something Discogs does perfectly well and this app has no business
-doing at three in the morning next to a fader. Your Lists, your profile, your
-marketplace listings: untouched, always.
+There is deliberately no `removeFromCollection`. Not a guarded one, not an
+unreachable one — the function does not exist, so no route, no bug and no
+crafted request can reach a `DELETE` against your collection, and the one
+`DELETE` that does exist can only address `/wants/{id}` because that path is
+written at its own call site. Removing a record is something Discogs does
+perfectly well, and this app has no business doing it at three in the morning
+next to a fader. Your Lists, your profile, your marketplace listings:
+untouched, always.
 
 That restraint is the app's own choice rather than a permission boundary, and
 the difference matters. Discogs' OAuth 1.0a has no scopes, so the token every
@@ -606,7 +608,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 287 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 294 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 80 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -686,6 +688,7 @@ scripts/
 ├── test-recent-playlists.mjs  which playlist you probably mean (12 cases)
 ├── test-adopt.mjs             add -> playable, and what to say (15 cases)
 ├── test-search-fields.mjs     what actually leaves the browser (11 cases)
+├── test-write-surface.mjs     every write this app can send (7 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths and set length (61 cases)
 └── test-api.mjs               auth, CSRF, IDOR, sharing, privacy (80 cases)
@@ -738,6 +741,7 @@ npm run test:ownership # 17 cases, no server needed
 npm run test:recent    # 12 cases, no server needed
 npm run test:adopt     # 15 cases, no server needed
 npm run test:search    # 11 cases, no server needed
+npm run test:writes    # 7 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 61 cases, no server needed
 npm run test:api       # 80 cases, needs a running server + Postgres

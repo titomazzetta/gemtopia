@@ -74,12 +74,13 @@ export function SignIn({ error }: { error: string | null }) {
           <strong className="font-medium text-neutral-400">
             What it does on your behalf.
           </strong>{" "}
-          It reads your collection and wantlist. It writes in exactly two
-          places, and both need a press from you: the heart adds a record to
-          your wantlist, and <em>add</em> on a Discogs search result puts that
-          one record in your collection. There is no code in this app that
-          removes a record from either list, and none that posts, comments, or
-          lists anything for sale.
+          It reads your collection and wantlist, and only writes when you
+          press something. The heart puts a record on your wantlist, and
+          pressing it again takes it off. <em>Add</em> on a Discogs search
+          result puts that one record in your collection — and nothing here can
+          take it back out, on purpose: there is no remove-from-collection
+          anywhere in this app, so no button, no bug and no crafted request can
+          reach one. It never posts, comments, or lists anything for sale.
         </p>
       </section>
     </main>

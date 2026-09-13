@@ -93,6 +93,9 @@ jobs:
       - name: Search field tests
         run: npm run test:search
 
+      - name: Discogs write-surface tests
+        run: npm run test:writes
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 
