@@ -2,7 +2,7 @@
 
 # Gemtopia
 
-**Dig your record collection when you're nowhere near your turntables.**
+**A crate-digging app for vinyl DJs, built by one.**
 
 [![CI](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml/badge.svg)](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml)
 [![Threat model](https://img.shields.io/badge/threat%20model-documented-4ade80)](./THREAT_MODEL.md)
@@ -16,19 +16,19 @@
 
 **Vinyl DJs, away from the decks.**
 
-If you play records, the crate is the instrument — and you can only really use it
-standing in front of it. Everywhere else, a collection is an inventory: a list of
-things you own and can't hear. Meanwhile the useful thinking happens exactly where
-the records aren't. On a train. In a hotel the night before. Three weeks out from a
-gig, when you know roughly what you want the set to feel like and can't audition a
-single record to find it.
+I play records, and the problem I kept having is that the crate is the instrument —
+you can only really play it standing in front of it. Everywhere else your
+collection is just an inventory: a list of things you own and can't hear. Meanwhile
+the useful thinking always happens exactly where the records aren't. On a train. In
+a hotel the night before. Three weeks out from a gig, when you know roughly what
+you want the set to feel like and can't audition a single record to find it.
 
-Gemtopia is for those hours. Your collection becomes something you can **hear,
-sort, sequence and argue with from a phone** — so the set is half-built before you
-get home, and pulling the records becomes twenty minutes of picking rather than an
-evening of rediscovery.
+So I built the thing I wanted. Gemtopia turns your Discogs collection into
+something you can **hear, sort, sequence and argue with from your phone** — so the
+set is half-built before you get home, and pulling the records is twenty minutes of
+picking instead of an evening of rediscovery.
 
-Two things it's built to do:
+Two things I use it for constantly:
 
 ### Prep a set on the road
 
@@ -59,9 +59,10 @@ browsing a database usually doesn't.
 
 ---
 
-It's built on the Discogs API, meant to be used on trains and in hotel rooms, and
-written to be read by people who care how software is put together. The
-[threat model](./THREAT_MODEL.md) is the part I'd point at first.
+It runs on the Discogs API, it's meant to be used on trains and in hotel rooms,
+and I wrote it to be read as well as run. If you're here for the code rather than
+the records, the [threat model](./THREAT_MODEL.md) is the part I'd point at
+first — it says what's defended, how, and what deliberately isn't.
 
 ---
 
