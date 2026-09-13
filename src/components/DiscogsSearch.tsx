@@ -72,30 +72,38 @@ export function DiscogsSearch({
     Record<number, ReleaseDetail | "loading" | "failed">
   >({});
 
-  const toggle = useCallback(
-    (releaseId: number) => {
-      setOpenId((current) => (current === releaseId ? null : releaseId));
-      setDetail((current) => {
-        if (current[releaseId] !== undefined) return current;
+  /*
+   * Which releases have already been asked for. A ref rather than reading
+   * `detail`, because the dedupe has to happen outside the state updater: a
+   * React updater must be pure, and under StrictMode it runs twice — so
+   * firing the fetch from inside one would spend two of sixty requests a
+   * minute every time somebody opened a row.
+   */
+  const requested = useRef(new Set<number>());
 
-        void (async () => {
-          try {
-            const { results } = await releasesApi.detail([releaseId]);
-            const found = results.find((r) => r.id === releaseId);
-            setDetail((d) => ({
-              ...d,
-              [releaseId]: found?.ok ? found.release : "failed",
-            }));
-          } catch {
-            setDetail((d) => ({ ...d, [releaseId]: "failed" }));
-          }
-        })();
+  const toggle = useCallback((releaseId: number) => {
+    setOpenId((current) => (current === releaseId ? null : releaseId));
 
-        return { ...current, [releaseId]: "loading" };
-      });
-    },
-    [],
-  );
+    if (requested.current.has(releaseId)) return;
+    requested.current.add(releaseId);
+    setDetail((current) => ({ ...current, [releaseId]: "loading" }));
+
+    void (async () => {
+      try {
+        const { results } = await releasesApi.detail([releaseId]);
+        const found = results.find((r) => r.id === releaseId);
+        setDetail((d) => ({
+          ...d,
+          [releaseId]: found?.ok ? found.release : "failed",
+        }));
+      } catch {
+        // Allow a retry: a failed fetch is usually the connection, and the
+        // obvious thing to do is close the row and open it again.
+        requested.current.delete(releaseId);
+        setDetail((d) => ({ ...d, [releaseId]: "failed" }));
+      }
+    })();
+  }, []);
 
   /*
    * Searching is explicit — submit, not debounced-as-you-type. Discogs allows
@@ -281,7 +289,7 @@ export function DiscogsSearch({
                     .join(" · ")}
                 </span>
 
-                {badge && (
+                {badge && openId !== hit.id && (
                   <span className="mt-1 inline-flex items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
                     <InCollection className="h-2.5 w-2.5" />
                     {badge}

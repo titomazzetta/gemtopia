@@ -96,7 +96,8 @@ written to be read by people who care how software is put together. The
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range. Flags the ones that won't beatmatch before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
-| **Search Discogs and add** | The record arrived in the post: search by artist, title or the catalogue number off the label, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
+| **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
+| **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, dimmed and marked, instead of silently not existing. The header splits the count: what plays, what Discogs has no audio for, and what hasn't finished syncing — the last of which is a button. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
 
 ### Keyboard
@@ -174,6 +175,37 @@ pass to rank and explain those candidates — but it can only reorder what the
 graph found. Any release ID the model invents is discarded before it renders. A
 catalogue number you walk into a shop with has to exist.
 
+### The records that were never there
+
+The crate is built from the YouTube links Discogs holds against a release, so
+for most of this app's life a record with no links produced no rows — and a
+row that does not exist looks exactly like a record you do not own. You could
+buy it, sync it successfully, see it on Discogs, and never once find it here.
+There was a test asserting that behaviour, which is the uncomfortable part: it
+was deliberate, and it was wrong.
+
+They now appear, dimmed, with a struck-through play icon. **The two kinds of
+silence are never reported as each other**, because they lead somewhere
+different:
+
+- **No preview** — Discogs holds no audio for this pressing. Permanent, and
+  there is nothing to do about it.
+- **Not synced** — the sync never fetched the release, so we do not actually
+  know whether it has audio. One refresh away from being fixed, which is why
+  that count in the header is a button.
+
+`market` is what tells them apart: a real `/releases/{id}` fetch always returns
+`num_for_sale` and `lowest_price`, so a null market can only be a placeholder
+the sync wrote without ever reaching the release. Calling that "Discogs has no
+audio" would be a confident wrong answer about a record you can play on Discogs
+right now.
+
+`Playable.videoId` is `string | null` rather than an empty-string sentinel,
+specifically so the compiler finds every consumer that assumed a video exists.
+It found four. Silent records are filtered at `playFrom`, the single door into
+the queue, and `queueFrom` re-derives the index rather than reusing it — row 40
+on screen is not row 40 in the queue once rows are dropped.
+
 ### The record that just arrived
 
 Everything above works on records you already own. This is the one place the
@@ -188,10 +220,27 @@ the one in your hand. Year, catalogue number, label, country and format on one
 truncated monospace line answers that without a tap, and every row stays the
 same height so the list is scannable rather than readable.
 
+**Four fields, chosen rather than guessed.** `q` is a fuzzy match over artist
+and release title and **does not look at tracklists**, so searching a track
+name used to return nothing whenever that name was not also the release title —
+which for a 12" of untitled cuts is always. Discogs exposes `track` for exactly
+this, and `catno` and `barcode` are exact-match fields where a value typed into
+`q` would just be noise. Inferring the field from the shape of the input was the
+alternative; plenty of real record titles look like catalogue numbers, and a
+search that quietly ran a different query than you asked for is worse than a tap.
+
 Searching is explicit — submit, not debounced-as-you-type. Discogs allows 60
 authenticated requests a minute for the whole account, shared with a collection
 sync that may be running in another tab. A request per keystroke would race the
 thing that makes the app usable at all.
+
+**Opening a result costs one request, and buys the one fact the list cannot
+have.** The search response carries no video links, so until a release is
+fetched there is no honest way to say whether it has anything to play.
+Expanding a row fetches it once and shows the tracklist, copies for sale, the
+green in-collection tick, and whether any previews exist. If that fetch fails
+it says the release could not be loaded — not "no previews", which would be a
+claim about the record invented out of a failure of ours.
 
 **Adding makes it playable now.** A collection sync walks everything you own
 and takes about ten minutes on a large collection — fine as a background
@@ -557,7 +606,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 265 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 287 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 80 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -629,13 +678,14 @@ scripts/
 ├── verify-discogs.mjs         real OAuth handshake, no deps, redacts on failure
 ├── test-env.mjs               configuration contract (36 cases)
 ├── test-headers.mjs           security headers, both directions (20 cases)
-├── test-playables.mjs         clip de-duplication and best-clip choice (18 cases)
+├── test-playables.mjs         clip choice, silent records, queueing (29 cases)
 ├── test-sorting.mjs           crate ordering, and where unknowns go (17 cases)
 ├── test-share.mjs             what actually reaches the share sheet (20 cases)
 ├── test-scrub.mjs             playhead position maths (12 cases)
 ├── test-ownership.mjs         "do I own this?" without claiming absence (17 cases)
 ├── test-recent-playlists.mjs  which playlist you probably mean (12 cases)
 ├── test-adopt.mjs             add -> playable, and what to say (15 cases)
+├── test-search-fields.mjs     what actually leaves the browser (11 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths and set length (61 cases)
 └── test-api.mjs               auth, CSRF, IDOR, sharing, privacy (80 cases)
@@ -663,6 +713,7 @@ src/
 │   ├── playables.ts           video↔track matching, Fisher–Yates, spread shuffle
 │   ├── digLocal.ts            in-collection pivots, zero network
 │   ├── adopt.ts               a just-added record, folded into the crate
+│   ├── searchFields.ts        which Discogs field a search runs against
 │   ├── ownership.ts           what the app may claim about what you own
 │   ├── share.ts               exactly what crosses into the share sheet
 │   ├── tempo.ts               pure tempo estimator + tap tempo + BPM parsing
@@ -679,13 +730,14 @@ src/
 npm run test           # everything below
 npm run test:env       # 36 cases, no server needed
 npm run test:headers   # 20 cases, no server needed
-npm run test:playables # 18 cases, no server needed
+npm run test:playables # 29 cases, no server needed
 npm run test:sorting   # 17 cases, no server needed
 npm run test:share     # 20 cases, no server needed
 npm run test:scrub     # 12 cases, no server needed
 npm run test:ownership # 17 cases, no server needed
 npm run test:recent    # 12 cases, no server needed
 npm run test:adopt     # 15 cases, no server needed
+npm run test:search    # 11 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 61 cases, no server needed
 npm run test:api       # 80 cases, needs a running server + Postgres
