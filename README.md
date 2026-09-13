@@ -244,6 +244,19 @@ green in-collection tick, and whether any previews exist. If that fetch fails
 it says the release could not be loaded — not "no previews", which would be a
 claim about the record invented out of a failure of ours.
 
+**Adding to your collection asks first; the heart doesn't.** That asymmetry is
+the whole argument. The wantlist is a toggle — press the heart again and the
+record leaves — so a confirmation there would be friction with nothing behind
+it. A collection add has no undo anywhere in this app, on purpose, so a mis-tap
+on a phone can only be fixed by opening Discogs on something else. The
+confirmation isn't friction; it's the only safety net that exists.
+
+It's an inline strip rather than a dialog, because the disambiguation line sits
+three pixels above it and that line is the thing being confirmed — a modal
+covering the row would hide the evidence. And if you already own the record it
+says so, since Discogs models a collection as instances and a second copy is
+legal but rarely intended.
+
 **Adding makes it playable now.** A collection sync walks everything you own
 and takes about ten minutes on a large collection — fine as a background
 top-up, useless when you are stood at the decks with the record in your hand.
@@ -611,7 +624,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 301 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 306 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 80 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -687,7 +700,7 @@ scripts/
 ├── test-sorting.mjs           crate ordering, and where unknowns go (24 cases)
 ├── test-share.mjs             what actually reaches the share sheet (20 cases)
 ├── test-scrub.mjs             playhead position maths (12 cases)
-├── test-ownership.mjs         "do I own this?" without claiming absence (17 cases)
+├── test-ownership.mjs         "do I own this?" without claiming absence (22 cases)
 ├── test-recent-playlists.mjs  which playlist you probably mean (12 cases)
 ├── test-adopt.mjs             add -> playable, and what to say (15 cases)
 ├── test-search-fields.mjs     what actually leaves the browser (11 cases)
@@ -740,7 +753,7 @@ npm run test:playables # 29 cases, no server needed
 npm run test:sorting   # 24 cases, no server needed
 npm run test:share     # 20 cases, no server needed
 npm run test:scrub     # 12 cases, no server needed
-npm run test:ownership # 17 cases, no server needed
+npm run test:ownership # 22 cases, no server needed
 npm run test:recent    # 12 cases, no server needed
 npm run test:adopt     # 15 cases, no server needed
 npm run test:search    # 11 cases, no server needed

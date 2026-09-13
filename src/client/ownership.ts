@@ -80,3 +80,27 @@ export function badgeFor(
   if (action === "wanted") return "Added to your wantlist";
   return describeOwnership(state);
 }
+
+/**
+ * What to ask before putting a record in someone's collection.
+ *
+ * There is a confirmation at all because **this app cannot undo one.** There
+ * is no remove-from-collection anywhere in the codebase, deliberately, so a
+ * mis-tap on a phone can only be fixed by opening Discogs. A confirmation is
+ * not friction here; it is the only safety net that exists.
+ *
+ * The second copy case is real rather than defensive. Discogs models a
+ * collection as instances, so owning two pressings of the same record is
+ * ordinary — but it is almost never what someone meant when they pressed add
+ * on a search result, and silently making it happen is how a collection
+ * quietly gains duplicates nobody notices for a year.
+ *
+ * Absence is still never claimed. An unsynced index gives `null`, and the
+ * question falls back to the neutral wording rather than asserting you don't
+ * already have it.
+ */
+export function confirmAddMessage(state: OwnershipState): string {
+  return state.inCollection === true
+    ? "You already have this. Add a second copy?"
+    : "Add this to your collection?";
+}

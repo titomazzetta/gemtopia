@@ -5,7 +5,12 @@ import type { SearchHit } from "@/lib/discogs";
 import type { ReleaseDetail } from "@/lib/types";
 import { releasesApi } from "@/client/api";
 import { releaseUrl } from "@/lib/discogs-links";
-import { badgeFor, ownershipFrom, type RowAction } from "@/client/ownership";
+import {
+  badgeFor,
+  confirmAddMessage,
+  ownershipFrom,
+  type RowAction,
+} from "@/client/ownership";
 import {
   SEARCH_FIELDS,
   searchQueryFor,
@@ -67,6 +72,17 @@ export function DiscogsSearch({
    * search endpoint returns no video links at all, so before you open a row
    * we genuinely do not know.
    */
+  /*
+   * Which row is asking "are you sure?".
+   *
+   * Only collection adds ask. The heart is a toggle — press it again and the
+   * record leaves your wantlist — so confirming it would be friction with
+   * nothing behind it. A collection add has no undo anywhere in this app, on
+   * purpose, so the confirmation is the only safety net between a mis-tap and
+   * opening Discogs on a laptop to fix it.
+   */
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+
   const [openId, setOpenId] = useState<number | null>(null);
   const [detail, setDetail] = useState<
     Record<number, ReleaseDetail | "loading" | "failed">
@@ -143,6 +159,8 @@ export function DiscogsSearch({
 
       const body = (await response.json()) as { results: SearchHit[] };
       setHits(body.results);
+      // A pending confirmation belongs to a row that no longer exists.
+      setConfirmId(null);
       setStatus("idle");
       if (body.results.length === 0) {
         // Point at the next field to try rather than at a dead end. The
@@ -163,6 +181,7 @@ export function DiscogsSearch({
   }, [query, field]);
 
   const act = async (hit: SearchHit, kind: "collection" | "wantlist") => {
+    setConfirmId(null);
     setRows((r) => ({ ...r, [hit.id]: "working" }));
     try {
       if (kind === "collection") await onAddToCollection(hit);
@@ -315,16 +334,65 @@ export function DiscogsSearch({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void act(hit, "collection")}
+                  onClick={() =>
+                    setConfirmId((current) =>
+                      current === hit.id ? null : hit.id,
+                    )
+                  }
                   disabled={state === "working"}
                   aria-label="Add to collection"
+                  aria-expanded={confirmId === hit.id}
                   title="Add to collection"
-                  className="rounded-full p-2 text-neutral-500 hover:text-accent active:bg-ink-800 disabled:opacity-40"
+                  className={`rounded-full p-2 active:bg-ink-800 disabled:opacity-40 ${
+                    confirmId === hit.id
+                      ? "bg-accent/15 text-accent"
+                      : "text-neutral-500 hover:text-accent"
+                  }`}
                 >
                   <Plus className="h-4 w-4" />
                 </button>
                 </span>
               </div>
+
+              {confirmId === hit.id && (
+                /*
+                  Inline rather than a modal, deliberately: the disambiguation
+                  line is three pixels above this strip, and that line is the
+                  thing being confirmed. A dialog that covers the row would
+                  hide the evidence you need to answer the question.
+
+                  Announced rather than focused. An earlier version put
+                  autoFocus on Add, which parks keyboard focus on an action
+                  this app cannot undo — one stray Enter and the record is in
+                  your collection for good. aria-live tells a screen reader
+                  the question appeared without moving anybody's hands onto
+                  the trigger.
+                */
+                <div
+                  role="group"
+                  aria-live="polite"
+                  aria-label="Confirm adding to your collection"
+                  className="flex flex-wrap items-center gap-2 border-t border-accent/20 bg-accent/[0.07] px-4 py-2.5"
+                >
+                  <p className="min-w-0 flex-1 text-[11px] text-neutral-300">
+                    {confirmAddMessage(ownershipFrom(sets, hit.id))}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmId(null)}
+                    className="rounded-md px-3 py-1.5 text-[11px] text-neutral-400 hover:text-neutral-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void act(hit, "collection")}
+                    className="rounded-md bg-accent px-3 py-1.5 text-[11px] font-semibold text-ink-950"
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
 
               {openId === hit.id && (
                 <ReleasePanel

@@ -14,6 +14,7 @@ import {
   ownershipFrom,
   alreadyCollected,
   badgeFor,
+  confirmAddMessage,
 } from "../src/client/ownership.ts";
 
 let ran = 0;
@@ -155,6 +156,54 @@ check("badgeFor still never reports absence", () => {
       badgeFor({ inCollection: false, onWantlist: false }, action),
       null,
       `action ${action} leaked a "you do not own this" claim`,
+    );
+  }
+});
+
+/* ---- confirmAddMessage: the only safety net there is ---- */
+
+check("a record you do not own gets the plain question", () => {
+  assert.equal(
+    confirmAddMessage({ inCollection: false, onWantlist: false }),
+    "Add this to your collection?",
+  );
+});
+
+check("a record you already own says so before you add a second copy", () => {
+  // Discogs models a collection as instances, so two copies is legal — but it
+  // is almost never what someone meant, and doing it silently is how a
+  // collection gains duplicates nobody notices for a year.
+  assert.match(
+    confirmAddMessage({ inCollection: true, onWantlist: false }),
+    /already have this/i,
+  );
+});
+
+check("an unsynced index falls back rather than claiming you lack it", () => {
+  // null means "we have never synced", not "you do not own it". The neutral
+  // wording is the only honest option.
+  assert.equal(
+    confirmAddMessage({ inCollection: null, onWantlist: null }),
+    "Add this to your collection?",
+  );
+});
+
+check("the question never asserts absence", () => {
+  for (const inCollection of [false, null]) {
+    const message = confirmAddMessage({ inCollection, onWantlist: null });
+    assert.ok(
+      !/don't have|do not have|not in your/i.test(message),
+      `claimed absence for inCollection=${inCollection}`,
+    );
+  }
+});
+
+check("every outcome is phrased as a question", () => {
+  for (const inCollection of [true, false, null]) {
+    assert.match(
+      confirmAddMessage({ inCollection, onWantlist: null }),
+      /\?$/,
+      "a confirmation that does not ask anything is a label, not a confirmation",
     );
   }
 });
