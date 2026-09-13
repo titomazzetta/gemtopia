@@ -98,7 +98,7 @@ first — it says what's defended, how, and what deliberately isn't.
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
 | **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
-| **Just bought / just wanted** | Two one-press views: your collection newest-first, mirroring Discogs' own "recently added", and the same for your wantlist. Both are the crate reordered, not stored lists, so there's nothing to sync and nothing to go stale. Sortable as an **Added** column too, on any list. |
+| **Newest first, by default** | Your collection and wantlist both open in the order you added to them, newest at the top — the same way Discogs presents them. No button to press and nothing to keep in sync: the dates come off the collection and wantlist endpoints, which we already read. Sortable both ways as an **Added** column. |
 | **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, dimmed and marked, instead of silently not existing. The header splits the count: what plays, what Discogs has no audio for, and what hasn't finished syncing — the last of which is a button. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
 
@@ -611,7 +611,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 294 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 301 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 80 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -684,7 +684,7 @@ scripts/
 ├── test-env.mjs               configuration contract (36 cases)
 ├── test-headers.mjs           security headers, both directions (20 cases)
 ├── test-playables.mjs         clip choice, silent records, queueing (29 cases)
-├── test-sorting.mjs           crate ordering, and where unknowns go (17 cases)
+├── test-sorting.mjs           crate ordering, and where unknowns go (24 cases)
 ├── test-share.mjs             what actually reaches the share sheet (20 cases)
 ├── test-scrub.mjs             playhead position maths (12 cases)
 ├── test-ownership.mjs         "do I own this?" without claiming absence (17 cases)
@@ -737,7 +737,7 @@ npm run test           # everything below
 npm run test:env       # 36 cases, no server needed
 npm run test:headers   # 20 cases, no server needed
 npm run test:playables # 29 cases, no server needed
-npm run test:sorting   # 17 cases, no server needed
+npm run test:sorting   # 24 cases, no server needed
 npm run test:share     # 20 cases, no server needed
 npm run test:scrub     # 12 cases, no server needed
 npm run test:ownership # 17 cases, no server needed

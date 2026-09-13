@@ -133,10 +133,12 @@ function tieBreak(a: Playable, b: Playable): number {
  * What clicking a column header does.
  *
  * First click sorts by that column in its natural direction; clicking the same
- * column again reverses it; a third click clears the sort and returns the list
- * to whatever order it was in. That third state matters here more than in most
- * tables: the unsorted order of a crate is a *shuffle*, and losing your way
- * back to it would mean losing the thing the app is for.
+ * column again reverses it; a third click clears the sort and returns the crate
+ * to its default order — newest first, which is `DEFAULT_SORT` below.
+ *
+ * That third state used to drop you into the order IndexedDB happened to
+ * return, which is by release id: not meaningless exactly, but meaningless to
+ * a person. Clearing a sort should land somewhere you would have chosen.
  */
 export function nextSort(current: SortState | null, key: SortKey): SortState | null {
   if (current?.key !== key) return { key, direction: naturalDirection(key) };
@@ -145,6 +147,21 @@ export function nextSort(current: SortState | null, key: SortKey): SortState | n
   }
   return null;
 }
+
+/**
+ * How a crate reads before anybody sorts it: newest first.
+ *
+ * This is the Discogs default too, and it is the right one — a collection is
+ * a thing you are always adding to, so the end of it is the part you have not
+ * finished thinking about. The alternative was the order IndexedDB hands
+ * back, which is by release id and tells you nothing.
+ *
+ * It costs nothing at sync time. The dates already sit in the summary index
+ * from the collection and wantlist endpoints, and the ordering is one
+ * in-memory sort of an array the app has already built — the same work any
+ * other column does. Nothing about indexing or sync timing changes.
+ */
+export const DEFAULT_SORT: SortState = { key: "added", direction: "desc" };
 
 /**
  * Which way round a column wants to start.

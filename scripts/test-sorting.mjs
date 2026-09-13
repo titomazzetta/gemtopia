@@ -10,7 +10,12 @@
  * re-render cannot make the list twitch.
  */
 import assert from "node:assert/strict";
-import { sortItems, nextSort, naturalDirection } from "../src/client/sorting.ts";
+import {
+  sortItems,
+  nextSort,
+  naturalDirection,
+  DEFAULT_SORT,
+} from "../src/client/sorting.ts";
 
 let ran = 0;
 let failed = 0;
@@ -243,6 +248,29 @@ check("a malformed date is treated as unknown, not as zero", () => {
   const sorted = sortItems(items, { key: "added", direction: "asc" });
   assert.equal(sorted[0].key, "good");
   assert.equal(sorted[1].key, "bad");
+});
+
+check("the crate reads newest first before anybody sorts it", () => {
+  assert.deepEqual(DEFAULT_SORT, { key: "added", direction: "desc" });
+});
+
+check("the default puts this week's record above one bought years ago", () => {
+  const items = [
+    item({ key: "old", addedAt: "2019-04-01T00:00:00Z" }),
+    item({ key: "new", addedAt: "2026-09-10T00:00:00Z" }),
+  ];
+  assert.deepEqual(
+    sortItems(items, DEFAULT_SORT).map((i) => i.key),
+    ["new", "old"],
+  );
+});
+
+check("clearing a sort lands on the default, not on an arbitrary order", () => {
+  // Third click returns null, and null means DEFAULT_SORT to the caller. What
+  // it used to mean was IndexedDB key order, which is by release id and is
+  // not an order anybody chose.
+  const cleared = nextSort({ key: "year", direction: "desc" }, "year");
+  assert.equal(cleared, null);
 });
 
 console.log(`All ${ran} sorting tests passed.`);
