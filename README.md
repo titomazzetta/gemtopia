@@ -98,6 +98,7 @@ first — it says what's defended, how, and what deliberately isn't.
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
 | **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
+| **Just bought / just wanted** | Two one-press views: your collection newest-first, mirroring Discogs' own "recently added", and the same for your wantlist. Both are the crate reordered, not stored lists, so there's nothing to sync and nothing to go stale. Sortable as an **Added** column too, on any list. |
 | **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, dimmed and marked, instead of silently not existing. The header splits the count: what plays, what Discogs has no audio for, and what hasn't finished syncing — the last of which is a button. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
 

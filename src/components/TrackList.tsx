@@ -10,6 +10,27 @@ import { ShareButton } from "./ShareButton";
 import type { SortKey, SortState } from "@/client/sorting";
 
 const BASE_ROW_HEIGHT = 56;
+
+/**
+ * How long ago a record entered the collection, in twelve pixels.
+ *
+ * A date does not fit and would not help: scanning for new arrivals is a
+ * question about recency, not about the 4th of March. Blank rather than a
+ * dash when Discogs gave us no date, because the column is already quiet and
+ * a row of dashes reads as an error.
+ */
+function formatAdded(iso: string | null): string {
+  if (!iso) return "";
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return "";
+
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1d";
+  if (days < 30) return `${days}d`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
 /** Extra height for the transition strip when set-prep mode is on. */
 const TRANSITION_HEIGHT = 22;
 const OVERSCAN = 8;
@@ -206,6 +227,19 @@ export function TrackList({
               onSort={onSort}
               className="hidden w-8 justify-end sm:flex"
             />
+            {/*
+              Date added. Hidden on a narrow phone along with Year, because
+              seven columns on a 390px screen is none of them — the two
+              "newest first" buttons in the source sheet are the phone's route
+              to this same ordering.
+            */}
+            <SortHeader
+              label="Added"
+              sortKey="added"
+              sort={sort}
+              onSort={onSort}
+              className="hidden w-12 justify-end md:flex"
+            />
             <SortHeader
               label="BPM"
               sortKey="bpm"
@@ -345,6 +379,16 @@ export function TrackList({
                     )}
                     <span className="hidden w-8 text-right font-mono text-[10px] text-neutral-600 sm:inline">
                       {item.year ?? ""}
+                    </span>
+                    <span
+                      className="hidden w-12 text-right font-mono text-[10px] text-neutral-600 md:inline"
+                      title={
+                        item.addedAt
+                          ? `Added ${new Date(item.addedAt).toLocaleDateString()}`
+                          : "No date from Discogs"
+                      }
+                    >
+                      {formatAdded(item.addedAt)}
                     </span>
                     {/*
                       BPM sits immediately left of the runtime and holds its

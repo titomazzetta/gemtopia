@@ -1307,16 +1307,29 @@ export function CrateApp({
    * cannot drift out of date, cannot be half-populated, and needs no sync of
    * its own. Pressing it twice puts you back where you were.
    */
-  const recentlyAddedActive =
-    !activePlaylistId && source === "collection" && sort?.key === "added";
-
-  const showRecentlyAdded = useCallback(() => {
+  /**
+   * Newest arrivals in either list.
+   *
+   * Two entry points rather than one that follows whichever source you happen
+   * to be in, because they answer different questions. "What did I just buy?"
+   * is the collection — it is the Discogs view of the same name, and the one
+   * you want after a delivery. "What have I been meaning to buy?" is the
+   * wantlist. Making one button mean both depending on hidden state is how
+   * you press it expecting records you own and get records you don't.
+   *
+   * Both are views, not stored playlists: the crate you already have,
+   * reordered. Nothing to sync, nothing to fall out of date.
+   */
+  const recentView = useCallback((target: Source) => {
     setActivePlaylistId(null);
-    setSource("collection");
+    setSource(target);
     setFilters(emptyFilters);
     setSort({ key: "added", direction: "desc" });
     setSheet("none");
   }, []);
+
+  const recentActive = (target: Source) =>
+    !activePlaylistId && source === target && sort?.key === "added";
 
   const openDiscogsSearch = useCallback((seed = "") => {
     setSearchSeed(seed);
@@ -1750,21 +1763,29 @@ export function CrateApp({
 
             {rail === "playlists" && (
               <div className="flex h-full flex-col">
-                <button
-                  type="button"
-                  onClick={showRecentlyAdded}
-                  className={`flex shrink-0 items-center gap-2 border-b border-ink-800 px-3 py-2.5 text-left text-xs font-medium ${
-                    recentlyAddedActive
-                      ? "bg-accent/10 text-accent"
-                      : "text-neutral-300 hover:bg-ink-850"
-                  }`}
-                >
-                  <Clock className="h-3.5 w-3.5" />
-                  Recently added
-                  <span className="ml-auto text-[10px] font-normal text-neutral-600">
-                    newest first
-                  </span>
-                </button>
+                <div className="flex shrink-0 border-b border-ink-800">
+                  {(
+                    [
+                      ["collection", "Just bought"],
+                      ["wantlist", "Just wanted"],
+                    ] as const
+                  ).map(([target, label]) => (
+                    <button
+                      key={target}
+                      type="button"
+                      onClick={() => recentView(target)}
+                      title={`Your ${target}, newest first`}
+                      className={`flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium ${
+                        recentActive(target)
+                          ? "bg-accent/10 text-accent"
+                          : "text-neutral-300 hover:bg-ink-850"
+                      }`}
+                    >
+                      <Clock className="h-3.5 w-3.5 shrink-0" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
                 <div className="min-h-0 flex-1">
               <PlaylistPanel
                 playlists={playlists}
@@ -2134,25 +2155,32 @@ export function CrateApp({
       >
         <div className="px-4 pb-4">
           {/*
-            Sits above the two sources because it answers the commonest
-            question of all — "what came in lately?" — and because scrolling
-            past a playlist list to reach it would defeat the point.
+            Above the two sources, because "what came in lately?" is the
+            commonest question a crate gets asked and scrolling past a playlist
+            list to reach it would defeat the point.
           */}
-          <button
-            type="button"
-            onClick={showRecentlyAdded}
-            className={`mb-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2.5 text-xs font-medium ${
-              recentlyAddedActive
-                ? "border-accent/50 bg-accent/10 text-accent"
-                : "border-ink-700 text-neutral-300"
-            }`}
-          >
-            <Clock className="h-3.5 w-3.5" />
-            Recently added
-            <span className="ml-auto text-[10px] font-normal text-neutral-500">
-              newest first
-            </span>
-          </button>
+          <div className="mb-3 grid grid-cols-2 gap-2">
+            {(
+              [
+                ["collection", "Just bought"],
+                ["wantlist", "Just wanted"],
+              ] as const
+            ).map(([target, label]) => (
+              <button
+                key={target}
+                type="button"
+                onClick={() => recentView(target)}
+                className={`flex items-center gap-1.5 rounded-lg border px-3 py-2.5 text-xs font-medium ${
+                  recentActive(target)
+                    ? "border-accent/50 bg-accent/10 text-accent"
+                    : "border-ink-700 text-neutral-300"
+                }`}
+              >
+                <Clock className="h-3.5 w-3.5 shrink-0" />
+                {label}
+              </button>
+            ))}
+          </div>
 
           <div className="mb-4 grid grid-cols-2 gap-2">
             {(["collection", "wantlist"] as const).map((value) => (
