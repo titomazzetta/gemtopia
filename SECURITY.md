@@ -1,7 +1,8 @@
 # Security Design
 
-Gemtopia holds a third-party OAuth credential granting read access to a
-user's Discogs account, stores user data in a shared database, renders text
+Gemtopia holds a third-party OAuth credential that — because Discogs' OAuth
+1.0a has no scope mechanism — grants **full read and write** access to a user's
+Discogs account, stores user data in a shared database, renders text
 written by strangers, captures audio from the user's machine, and optionally
 forwards content to an LLM. Each of those is a distinct piece of attack
 surface, and each is addressed below.
@@ -31,7 +32,7 @@ This document states what is defended, how, and — just as importantly — what
                     ══════════╪══════════  ← boundary B: signed/keyed egress
                               │
 ┌─ Third party ───────────────────────────────────────────────────────────┐
-│  api.discogs.com     (OAuth 1.0a, HMAC-SHA1; reads + wantlist writes)   │
+│  api.discogs.com     (OAuth 1.0a, HMAC-SHA1; reads + two add calls)    │
 │  api.anthropic.com   (optional, API key, server-side only)              │
 │  youtube-nocookie.com (sandboxed iframe, no data flows out)             │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -51,7 +52,7 @@ secret, or the Anthropic key exists in client JavaScript.
 | `SESSION_SECRET` (AES key) | **Critical** — forges arbitrary sessions | Vercel env var, server memory only |
 | `ANTHROPIC_API_KEY` | **High** — billable | Vercel env var, server memory only |
 | `DATABASE_URL` | **High** — all stored user data | Vercel env var, server memory only |
-| User's Discogs access token | **High** — read access to their account | AES-256-GCM sealed cookie, browser only |
+| User's Discogs access token | **Critical** — unscoped read *and write* on their account (see §12.1) | AES-256-GCM sealed cookie, browser only |
 | Playlists, BPM catalogue, analyses | Moderate — reveals taste and listening | Postgres, scoped by `user_id` |
 | Collection index (1,500 releases) | Low | The user's own IndexedDB, never uploaded |
 | Captured tab audio | **High** while in memory | Never leaves the browser; see §6 |
@@ -345,17 +346,114 @@ push, and fails on any of them.
 
 ---
 
-## 11. Residual risks
+## 11. Build and deployment integrity
+
+Everything above describes the running application. This section is about the
+pipeline that produces it, because a threat model that stops at the app's own
+code ignores the shortest path to production: the repository.
+
+**Nothing reaches `main` except through a green pull request.** The
+`protect-main` ruleset blocks direct pushes, force-pushes and branch deletion,
+and requires a pull request whose `verify` and `CodeQL` checks pass.
+
+Required approvals are **0**, and that is a deliberate trade rather than an
+oversight. GitHub will not let a maintainer approve their own pull request, so
+on a single-maintainer repository any non-zero requirement locks the only
+maintainer out of their own `main` — and the predictable outcome is an admin
+bypass that gets used every single time, which is not a control but a habit
+with a checkbox next to it. The honest configuration is the one that survives
+contact with how the repository is actually used: mandatory PR, mandatory green
+checks, no force-push, and a review requirement added the day a second
+committer exists.
+
+**The repository is public; write access is not.** Anyone can fork and open a
+pull request, which is the point of publishing it. Nobody outside the
+collaborator list can push a branch, merge, or change a setting. Workflows
+triggered by a fork's pull request require maintainer approval before they run,
+so an untrusted PR cannot execute CI jobs on its own say-so.
+
+**Workflow tokens are read-only by default.** Both workflows declare
+`permissions: contents: read` at the top level; CodeQL adds exactly
+`security-events: write` and nothing else. The repository default for
+`GITHUB_TOKEN` is *Read repository contents and packages permissions*, so a
+workflow that forgets to declare permissions gets the restrictive set, not the
+permissive one.
+
+**Third-party actions are pinned to commit SHAs, not tags.** `actions/checkout`
+and `github/codeql-action` are referenced by full 40-character SHA with the
+human-readable version in a trailing comment. A tag is mutable; a maintainer
+(or someone who compromises one) can repoint `v7` at new code and every
+consumer silently runs it on their next build. A SHA cannot be repointed.
+`persist-credentials: false` on every checkout keeps the token out of
+`.git/config` where a later step could read it.
+
+**The build is reproducible from the lockfile.** CI runs `npm ci`, not
+`npm install` — the lockfile is authoritative, and a dependency that drifted
+fails the job rather than quietly resolving to something newer.
+
+**A build never needs a real secret.** Every credential in CI is a visible
+placeholder (see the `env:` block in `ci.yml`). If compiling this app ever
+required a production value, that requirement would itself be the vulnerability
+— and the pipeline proves the negative on every run by grepping the built
+client bundle for the placeholder secret and failing if it appears.
+
+**Scanning runs on a schedule, not just on push.** CodeQL
+(`security-and-quality`) runs on every pull request to `main` and again weekly;
+`npm audit --audit-level=high` runs in CI and again weekly, so an advisory
+disclosed against an already-pinned dependency surfaces even during a quiet
+month. Dependabot opens grouped patch/minor PRs weekly and separate PRs for
+majors, plus monthly bumps of the pinned action SHAs — pinning is only safe if
+something keeps moving the pins. Secret scanning and push protection are on:
+a credential committed by mistake is rejected at push time rather than found
+later.
+
+These controls have already caught real problems rather than decorating the
+repository: `npm audit` blocked the first CI run over two unauthenticated RCEs
+in the pinned Next.js version, and CodeQL blocked a pull request of the
+author's own over a script that logged the length of a database password.
+
+---
+
+## 12. Residual risks
 
 Honest list of what is *not* solved.
 
-1. **The rate limiter is per-instance.** Vercel runs each function in its own
+1. **Discogs OAuth has no scopes, so the token we hold can delete.** This is
+   the largest residual risk in the design, and it is not fixable from this
+   side. OAuth 1.0a as Discogs implements it issues one access token carrying
+   the full authority of the account — there is no `scope=collection:read`, and
+   no way to request a token that *cannot* `DELETE /users/{u}/collection/...`.
+   Every app in the ecosystem holds the same over-broad credential.
+
+   What this app does with that authority is bounded by its own source. The
+   only two callers of `writeRequest` are `addToWantlist` and
+   `addToCollection`; both are `POST`, with the method a string literal at the
+   call site and the release ID a zod-validated positive integer. There is no
+   `removeFromCollection` function to call, deliberately, so no route can reach
+   a delete. That is a property you can check rather than trust — the source is
+   public; grep `writeRequest` and count the callers.
+
+   What protects the credential itself is that it is never at rest anywhere we
+   control. It exists only inside an AES-256-GCM sealed cookie in the user's
+   own browser: never written to Postgres, never logged, and never present in
+   client JavaScript (`connect-src 'self'` forbids the browser from reaching
+   Discogs at all). A total database compromise yields zero tokens. The
+   break-glass control is `SESSION_SECRET` rotation, which invalidates every
+   sealed cookie in existence on the next deploy — and the backstop that does
+   not depend on this app at all is that the user can revoke the application
+   from their own Discogs settings.
+
+   *Not solved:* an attacker holding both `SESSION_SECRET` and a user's sealed
+   cookie would have a credential that this app's code declines to abuse but
+   the Discogs API would honour if sent directly.
+
+2. **The rate limiter is per-instance.** Vercel runs each function in its own
    isolate, so `lib/ratelimit.ts` bounds abuse per instance, not globally. A
    distributed attacker with many sessions can still exceed the Discogs budget.
    *Fix if this took real traffic:* Vercel WAF rate rules, or move the buckets
    to Upstash Redis. Traded away deliberately to keep the deployment simple.
 
-2. **Revocation is all-or-nothing per account.** `session_version` (§6) kills
+3. **Revocation is all-or-nothing per account.** `session_version` (§6) kills
    every session a user holds, which is the honest primitive for stateless
    sessions but means you cannot sign out one lost phone and keep the laptop.
    Per-device revocation would need per-device identity in the cookie and a
@@ -363,33 +461,33 @@ Honest list of what is *not* solved.
    avoided. A reasonable middle ground, if it ever matters: a `device_label`
    sealed into the cookie and a per-user list of revoked labels.
 
-3. **A revoked session is rejected on its next request, not instantly.**
+4. **A revoked session is rejected on its next request, not instantly.**
    There is no push channel; a tab sitting idle stays rendered until it next
    calls the API. In practice that is seconds, but it is not zero.
 
-4. **Database encryption is Neon's, not ours.** Playlists and BPM readings are
+5. **Database encryption is Neon's, not ours.** Playlists and BPM readings are
    encrypted at rest by the provider but not application-level encrypted. A
    provider-side compromise exposes them. Given the sensitivity (a DJ's track
    list), that was judged acceptable; the Discogs token, which is not
    acceptable to lose, deliberately never goes near the database.
 
-5. **`style-src 'unsafe-inline'`** — see §9.
+6. **`style-src 'unsafe-inline'`** — see §9.
 
-6. **Third-party trust.** Discogs' TLS and their handling of our consumer
+7. **Third-party trust.** Discogs' TLS and their handling of our consumer
    secret are outside our control, as is Anthropic's handling of prompts.
 
-7. **The YouTube iframe is third-party script** in the user's browser. CSP
+8. **The YouTube iframe is third-party script** in the user's browser. CSP
    confines it to `frame-src` with no access to our DOM or cookies, but it is
    not nothing.
 
-8. **XSS would still be serious** even though it cannot read the token. An
+9. **XSS would still be serious** even though it cannot read the token. An
    attacker with script execution could drive the app's own authenticated
    `fetch` calls. `HttpOnly` limits blast radius; it does not eliminate it.
 
-9. **No formal pen test.** This is one developer's threat model, not an audit.
+10. **No formal pen test.** This is one developer's threat model, not an audit.
 
 ---
 
-## 12. Reporting
+## 13. Reporting
 
 Open a private security advisory on the repository rather than a public issue.

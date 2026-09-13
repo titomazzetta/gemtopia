@@ -327,10 +327,25 @@ own BPM and the mixability verdict for the transition into the next one. A List
 can hold none of that. Playlists live in Gemtopia's own Postgres, in
 `playlists` / `playlist_items`, private to your account.
 
-**The only thing this app ever writes to Discogs is the wantlist heart.**
-`addToWantlist` and `removeFromWantlist` are the only two write calls in the
-codebase — grep for `writeRequest` and you'll find exactly those two callers.
-Your collection, your Lists, your profile, the marketplace: read-only, always.
+**Everything this app writes to Discogs is an add you pressed.** Grep for
+`writeRequest` and you will find exactly two callers: `addToWantlist`, behind
+the heart, and `addToCollection`, behind the add button on a search result.
+Both are `POST`, with the method a literal at the call site.
+
+There is deliberately no `removeFromCollection` in the codebase. Not a guarded
+one, not an unreachable one — the function does not exist, so no route, no bug
+and no crafted request can reach a `DELETE` on your collection. Removing a
+record is something Discogs does perfectly well and this app has no business
+doing at three in the morning next to a fader. Your Lists, your profile, your
+marketplace listings: untouched, always.
+
+That restraint is the app's own choice rather than a permission boundary, and
+the difference matters. Discogs' OAuth 1.0a has no scopes, so the token every
+Discogs app holds — including this one — carries the full authority of the
+account. There is no way to ask for a read-mostly token. What bounds this app
+is public source you can audit and a credential that is never stored anywhere
+this app controls; `SECURITY.md` §12.1 sets out the whole argument, including
+the part that isn't solved.
 
 ---
 

@@ -168,8 +168,8 @@ export default async function SharedPlaylistPage({
           Open your own crate
         </Link>
         <p className="mt-2.5 text-[11px] text-neutral-600">
-          Sign in with Discogs. Free, and it never posts anything on your
-          behalf.
+          Sign in with Discogs. Free, and the only thing it ever writes to
+          your account is a record you pressed add on.
         </p>
       </section>
 
