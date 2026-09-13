@@ -3,7 +3,14 @@
 import { useCallback, useRef, useState } from "react";
 import type { SearchHit } from "@/lib/discogs";
 import { badgeFor, ownershipFrom, type RowAction } from "@/client/ownership";
-import { Heart, Plus, Search } from "./Icons";
+import {
+  SEARCH_FIELDS,
+  searchQueryFor,
+  specFor,
+  tooShortMessage,
+  type SearchField,
+} from "@/client/searchFields";
+import { Heart, InCollection, Plus, Search } from "./Icons";
 
 /**
  * Look a record up on Discogs and put it in your collection.
@@ -44,6 +51,7 @@ export function DiscogsSearch({
   onAddToWantlist,
 }: Props) {
   const [query, setQuery] = useState(initialQuery);
+  const [field, setField] = useState<SearchField>("all");
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [status, setStatus] = useState<"idle" | "searching" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
@@ -58,9 +66,9 @@ export function DiscogsSearch({
   const inFlight = useRef(0);
 
   const run = useCallback(async () => {
-    const trimmed = query.trim();
-    if (trimmed.length < 2) {
-      setMessage("Type at least two characters.");
+    const search = searchQueryFor(field, query);
+    if (search === null) {
+      setMessage(tooShortMessage(field));
       return;
     }
 
@@ -69,10 +77,9 @@ export function DiscogsSearch({
     setMessage(null);
 
     try {
-      const response = await fetch(
-        `/api/discogs/search?q=${encodeURIComponent(trimmed)}`,
-        { headers: { Accept: "application/json" } },
-      );
+      const response = await fetch(`/api/discogs/search?${search}`, {
+        headers: { Accept: "application/json" },
+      });
       // A slower earlier search must not overwrite a newer one's results.
       if (ticket !== inFlight.current) return;
 
@@ -90,14 +97,22 @@ export function DiscogsSearch({
       setHits(body.results);
       setStatus("idle");
       if (body.results.length === 0) {
-        setMessage("Nothing matched. Try the catalogue number off the label.");
+        // Point at the next field to try rather than at a dead end. The
+        // commonest miss by far is a track title searched as a release title.
+        setMessage(
+          field === "all"
+            ? "Nothing matched. If that was a track name, try Track."
+            : field === "track"
+              ? "No tracklist matched. Try All, or the catalogue number."
+              : "Nothing matched that exactly. Try All.",
+        );
       }
     } catch {
       if (ticket !== inFlight.current) return;
       setStatus("error");
       setMessage("Couldn't reach Discogs.");
     }
-  }, [query]);
+  }, [query, field]);
 
   const act = async (hit: SearchHit, kind: "collection" | "wantlist") => {
     setRows((r) => ({ ...r, [hit.id]: "working" }));
@@ -112,29 +127,60 @@ export function DiscogsSearch({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <form
-        className="flex shrink-0 gap-2 border-b border-ink-800 p-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void run();
-        }}
-      >
-        <input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Artist, title, or catalogue number…"
-          aria-label="Search Discogs"
-          className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-3 py-2 text-sm text-neutral-200 placeholder:text-neutral-600"
-        />
-        <button
-          type="submit"
-          disabled={status === "searching"}
-          className="flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-2 text-sm font-medium text-ink-950 disabled:opacity-50"
+      <div className="sticky top-0 z-10 shrink-0 border-b border-ink-800 bg-ink-900">
+        <form
+          className="flex gap-2 px-3 pt-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void run();
+          }}
         >
-          <Search className="h-3.5 w-3.5" />
-          {status === "searching" ? "…" : "Search"}
-        </button>
-      </form>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={specFor(field).placeholder}
+            aria-label={`Search Discogs by ${specFor(field).label}`}
+            /*
+             * 16px on a phone, deliberately. Anything smaller and iOS Safari
+             * zooms the page on focus, which on a sheet means the sheet is
+             * suddenly the wrong size and cannot be scrolled back.
+             */
+            className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-3 py-2 text-base text-neutral-200 placeholder:text-neutral-600 sm:text-sm"
+          />
+          <button
+            type="submit"
+            disabled={status === "searching"}
+            className="flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-2 text-sm font-medium text-ink-950 disabled:opacity-50"
+          >
+            <Search className="h-3.5 w-3.5" />
+            {status === "searching" ? "…" : "Search"}
+          </button>
+        </form>
+
+        {/*
+          Which field the search runs against. Not inferred from the shape of
+          what you typed: plenty of real record titles look like catalogue
+          numbers, and a search that quietly ran a different query than you
+          asked for is worse than one extra tap.
+        */}
+        <div role="group" aria-label="Search field" className="flex gap-1.5 px-3 py-2">
+          {SEARCH_FIELDS.map((spec) => (
+            <button
+              key={spec.key}
+              type="button"
+              onClick={() => setField(spec.key)}
+              aria-pressed={field === spec.key}
+              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                field === spec.key
+                  ? "bg-accent text-ink-950"
+                  : "border border-ink-700 text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              {spec.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {message && (
         <p role="status" className="shrink-0 px-4 pb-2 text-xs text-neutral-500">
@@ -193,7 +239,8 @@ export function DiscogsSearch({
                 </span>
 
                 {badge && (
-                  <span className="mt-1 inline-block rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
+                  <span className="mt-1 inline-flex items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                    <InCollection className="h-2.5 w-2.5" />
                     {badge}
                   </span>
                 )}

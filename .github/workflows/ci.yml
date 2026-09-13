@@ -90,6 +90,9 @@ jobs:
       - name: Adoption tests
         run: npm run test:adopt
 
+      - name: Search field tests
+        run: npm run test:search
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 

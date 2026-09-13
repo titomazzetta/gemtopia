@@ -30,10 +30,17 @@ const querySchema = z
      */
     catno: z.string().trim().min(1).max(60).optional(),
     barcode: z.string().trim().min(6).max(20).optional(),
+    /*
+     * Searches tracklists, which `q` does not. Without this, looking for a
+     * track only works when its name also appears in the release title — so
+     * the common case of "I know the track, I want the EP it is on" quietly
+     * returned nothing.
+     */
+    track: z.string().trim().min(2).max(120).optional(),
     page: z.coerce.number().int().min(1).max(20).optional(),
   })
   .strict()
-  .refine((v) => v.q || v.catno || v.barcode, {
+  .refine((v) => v.q || v.catno || v.barcode || v.track, {
     message: "Give something to search for",
   });
 
@@ -68,6 +75,7 @@ export async function GET(request: NextRequest) {
         query: parsed.data.q,
         catno: parsed.data.catno,
         barcode: parsed.data.barcode,
+        track: parsed.data.track,
         page: parsed.data.page ?? 1,
         perPage: 25,
       },

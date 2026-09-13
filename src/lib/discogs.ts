@@ -677,6 +677,13 @@ export interface SearchParams {
   catno?: string;
   /** EAN/UPC. Near-exact when present — absent on most white labels and promos. */
   barcode?: string;
+  /**
+   * Track title. Discogs searches tracklists with this, which `q` does not do
+   * — a plain query only matches a track name when it happens to also appear
+   * in the release title. That gap is the difference between finding the EP a
+   * track is on and finding nothing at all.
+   */
+  track?: string;
   style?: string;
   genre?: string;
   label?: string;
@@ -704,6 +711,7 @@ export async function searchReleases(
   for (const key of [
     "catno",
     "barcode",
+    "track",
     "style",
     "genre",
     "label",
