@@ -9,7 +9,12 @@
  * someone acts on with their wallet out.
  */
 import assert from "node:assert/strict";
-import { describeOwnership, ownershipFrom, alreadyCollected } from "../src/client/ownership.ts";
+import {
+  describeOwnership,
+  ownershipFrom,
+  alreadyCollected,
+  badgeFor,
+} from "../src/client/ownership.ts";
 
 let ran = 0;
 let failed = 0;
@@ -101,4 +106,57 @@ if (failed > 0) {
   console.error(`\n${failed} of ${ran} ownership tests failed.`);
   process.exit(1);
 }
+/* ---- badgeFor: one badge, and the right one ---- */
+
+check("the add you just made supersedes the state you were already in", () => {
+  // Both are true at once the moment the add returns: the id sets gain the
+  // release, so describeOwnership starts saying "In your collection" while
+  // the row wants to confirm the press. Only one of them may render.
+  assert.equal(
+    badgeFor({ inCollection: true, onWantlist: false }, "collected"),
+    "Added to your collection",
+  );
+});
+
+check("a wantlist add supersedes an existing wantlist badge", () => {
+  assert.equal(
+    badgeFor({ inCollection: false, onWantlist: true }, "wanted"),
+    "Added to your wantlist",
+  );
+});
+
+check("an untouched row still reports what it knows", () => {
+  assert.equal(
+    badgeFor({ inCollection: true, onWantlist: false }, "idle"),
+    "In your collection",
+  );
+});
+
+check("a failed add never claims the record was added", () => {
+  for (const state of [
+    { inCollection: null, onWantlist: null },
+    { inCollection: true, onWantlist: false },
+  ]) {
+    const badge = badgeFor(state, "failed");
+    assert.ok(
+      badge === null || !/^Added/.test(badge),
+      "a failed add produced an Added badge",
+    );
+  }
+});
+
+check("a row mid-flight does not announce a result it does not have", () => {
+  assert.equal(badgeFor({ inCollection: null, onWantlist: null }, "working"), null);
+});
+
+check("badgeFor still never reports absence", () => {
+  for (const action of ["idle", "working", "failed"]) {
+    assert.equal(
+      badgeFor({ inCollection: false, onWantlist: false }, action),
+      null,
+      `action ${action} leaked a "you do not own this" claim`,
+    );
+  }
+});
+
 console.log(`All ${ran} ownership tests passed.`);

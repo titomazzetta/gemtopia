@@ -57,3 +57,26 @@ export function ownershipFrom(
 export function alreadyCollected(state: OwnershipState): boolean {
   return state.inCollection === true;
 }
+
+/**
+ * What a search row shows once you have pressed something on it.
+ *
+ * These two facts fight. The id sets gain the release the instant the add
+ * returns, so `describeOwnership` starts saying "In your collection" at the
+ * same moment the row wants to say "Added to your collection" — and both
+ * rendering is how a row ends up with two badges making one point.
+ *
+ * The action wins. "In your collection" is a state you may have been in for
+ * years; "Added to your collection" says the button you just pressed did what
+ * it said. The second answers the question you actually have.
+ */
+export type RowAction = "idle" | "working" | "collected" | "wanted" | "failed";
+
+export function badgeFor(
+  state: OwnershipState,
+  action: RowAction,
+): string | null {
+  if (action === "collected") return "Added to your collection";
+  if (action === "wanted") return "Added to your wantlist";
+  return describeOwnership(state);
+}

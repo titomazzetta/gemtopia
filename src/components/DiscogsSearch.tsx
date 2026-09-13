@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { SearchHit } from "@/lib/discogs";
-import { describeOwnership, ownershipFrom } from "@/client/ownership";
+import { badgeFor, ownershipFrom, type RowAction } from "@/client/ownership";
 import { Heart, Plus, Search } from "./Icons";
 
 /**
@@ -29,7 +29,13 @@ interface Props {
   onAddToWantlist: (hit: SearchHit) => Promise<void>;
 }
 
-type RowState = "idle" | "working" | "collected" | "wanted" | "failed";
+/*
+ * Shared with ownership.ts, which owns the rule about which of "you already
+ * had this" and "you just added this" gets to render. Keeping the union in
+ * one place means a new row state cannot be added here and silently fall
+ * through that rule.
+ */
+type RowState = RowAction;
 
 export function DiscogsSearch({
   sets,
@@ -105,9 +111,9 @@ export function DiscogsSearch({
   };
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="flex h-full min-h-0 flex-col">
       <form
-        className="flex shrink-0 gap-2 px-4 pb-3"
+        className="flex shrink-0 gap-2 border-b border-ink-800 p-3"
         onSubmit={(event) => {
           event.preventDefault();
           void run();
@@ -138,8 +144,8 @@ export function DiscogsSearch({
 
       <ul className="min-h-0 flex-1 overflow-y-auto">
         {(hits ?? []).map((hit) => {
-          const owned = describeOwnership(ownershipFrom(sets, hit.id));
           const state = rows[hit.id] ?? "idle";
+          const badge = badgeFor(ownershipFrom(sets, hit.id), state);
 
           return (
             <li
@@ -186,19 +192,9 @@ export function DiscogsSearch({
                     .join(" · ")}
                 </span>
 
-                {owned && (
+                {badge && (
                   <span className="mt-1 inline-block rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
-                    {owned}
-                  </span>
-                )}
-                {state === "collected" && (
-                  <span className="mt-1 inline-block px-1.5 text-[10px] text-accent">
-                    Added to your collection
-                  </span>
-                )}
-                {state === "wanted" && (
-                  <span className="mt-1 inline-block px-1.5 text-[10px] text-accent">
-                    Added to your wantlist
+                    {badge}
                   </span>
                 )}
                 {state === "failed" && (

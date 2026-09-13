@@ -557,7 +557,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 259 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 265 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 80 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -633,7 +633,7 @@ scripts/
 ├── test-sorting.mjs           crate ordering, and where unknowns go (17 cases)
 ├── test-share.mjs             what actually reaches the share sheet (20 cases)
 ├── test-scrub.mjs             playhead position maths (12 cases)
-├── test-ownership.mjs         "do I own this?" without claiming absence (11 cases)
+├── test-ownership.mjs         "do I own this?" without claiming absence (17 cases)
 ├── test-recent-playlists.mjs  which playlist you probably mean (12 cases)
 ├── test-adopt.mjs             add -> playable, and what to say (15 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
@@ -683,7 +683,7 @@ npm run test:playables # 18 cases, no server needed
 npm run test:sorting   # 17 cases, no server needed
 npm run test:share     # 20 cases, no server needed
 npm run test:scrub     # 12 cases, no server needed
-npm run test:ownership # 11 cases, no server needed
+npm run test:ownership # 17 cases, no server needed
 npm run test:recent    # 12 cases, no server needed
 npm run test:adopt     # 15 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
