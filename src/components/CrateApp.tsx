@@ -1724,13 +1724,15 @@ export function CrateApp({
             )}
 
             {rail === "search" && (
-              <DiscogsSearch
-                key={searchSeed}
-                sets={sourceIds}
-                initialQuery={searchSeed}
-                onAddToCollection={addFromSearch}
-                onAddToWantlist={wantFromSearch}
-              />
+              <div className="h-full overflow-y-auto">
+                <DiscogsSearch
+                  key={searchSeed}
+                  sets={sourceIds}
+                  initialQuery={searchSeed}
+                  onAddToCollection={addFromSearch}
+                  onAddToWantlist={wantFromSearch}
+                />
+              </div>
             )}
 
             {rail === "insights" && (
@@ -2045,12 +2047,15 @@ export function CrateApp({
         title="Add from Discogs"
       >
         {/*
-          Taller than the other sheets and sized off the viewport rather than
-          its content: results arrive after the sheet is already open, and a
-          panel that jumps from one line to full height the moment you press
-          search is disorienting in the hand.
+          No scroll container here: the Sheet already scrolls its children, and
+          nesting a second one is how a list ends up moving the wrong thing
+          under your thumb. The panel's own header is `sticky`, so it pins to
+          the Sheet's scroller the way Bandcamp's does.
+
+          The minimum height stops the sheet snapping from one line to full
+          height the moment results land, which in the hand reads as a jump.
         */}
-        <div className="flex h-[70vh] min-h-0 flex-col">
+        <div className="min-h-[60vh]">
           <DiscogsSearch
             key={searchSeed}
             sets={sourceIds}

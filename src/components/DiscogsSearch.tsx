@@ -2,6 +2,9 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { SearchHit } from "@/lib/discogs";
+import type { ReleaseDetail } from "@/lib/types";
+import { releasesApi } from "@/client/api";
+import { releaseUrl } from "@/lib/discogs-links";
 import { badgeFor, ownershipFrom, type RowAction } from "@/client/ownership";
 import {
   SEARCH_FIELDS,
@@ -10,7 +13,7 @@ import {
   tooShortMessage,
   type SearchField,
 } from "@/client/searchFields";
-import { Heart, InCollection, Plus, Search } from "./Icons";
+import { Heart, InCollection, NoPreview, Plus, Search } from "./Icons";
 
 /**
  * Look a record up on Discogs and put it in your collection.
@@ -56,6 +59,43 @@ export function DiscogsSearch({
   const [status, setStatus] = useState<"idle" | "searching" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<number, RowState>>({});
+
+  /*
+   * Expanding a row costs one Discogs request, which is why it happens on tap
+   * rather than for every result. It is also the only point at which this
+   * panel can honestly say whether a pressing has anything to play: the
+   * search endpoint returns no video links at all, so before you open a row
+   * we genuinely do not know.
+   */
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<
+    Record<number, ReleaseDetail | "loading" | "failed">
+  >({});
+
+  const toggle = useCallback(
+    (releaseId: number) => {
+      setOpenId((current) => (current === releaseId ? null : releaseId));
+      setDetail((current) => {
+        if (current[releaseId] !== undefined) return current;
+
+        void (async () => {
+          try {
+            const { results } = await releasesApi.detail([releaseId]);
+            const found = results.find((r) => r.id === releaseId);
+            setDetail((d) => ({
+              ...d,
+              [releaseId]: found?.ok ? found.release : "failed",
+            }));
+          } catch {
+            setDetail((d) => ({ ...d, [releaseId]: "failed" }));
+          }
+        })();
+
+        return { ...current, [releaseId]: "loading" };
+      });
+    },
+    [],
+  );
 
   /*
    * Searching is explicit — submit, not debounced-as-you-type. Discogs allows
@@ -126,7 +166,7 @@ export function DiscogsSearch({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex flex-col">
       <div className="sticky top-0 z-10 shrink-0 border-b border-ink-800 bg-ink-900">
         <form
           className="flex gap-2 px-3 pt-3"
@@ -188,16 +228,14 @@ export function DiscogsSearch({
         </p>
       )}
 
-      <ul className="min-h-0 flex-1 overflow-y-auto">
+      <ul>
         {(hits ?? []).map((hit) => {
           const state = rows[hit.id] ?? "idle";
           const badge = badgeFor(ownershipFrom(sets, hit.id), state);
 
           return (
-            <li
-              key={hit.id}
-              className="flex items-start gap-3 border-t border-ink-800 px-4 py-3"
-            >
+            <li key={hit.id} className="border-t border-ink-800">
+              <div className="flex items-start gap-3 px-4 py-3">
               <span className="h-11 w-11 shrink-0 overflow-hidden rounded bg-ink-800">
                 {hit.thumb ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -212,7 +250,12 @@ export function DiscogsSearch({
                 ) : null}
               </span>
 
-              <span className="min-w-0 flex-1">
+              <button
+                type="button"
+                onClick={() => toggle(hit.id)}
+                aria-expanded={openId === hit.id}
+                className="min-w-0 flex-1 text-left"
+              >
                 <span className="block truncate text-[13px] font-medium text-neutral-100">
                   {hit.title}
                 </span>
@@ -249,7 +292,7 @@ export function DiscogsSearch({
                     Didn&apos;t save — try again
                   </span>
                 )}
-              </span>
+              </button>
 
               <span className="flex shrink-0 items-center gap-1">
                 <button
@@ -272,11 +315,120 @@ export function DiscogsSearch({
                 >
                   <Plus className="h-4 w-4" />
                 </button>
-              </span>
+                </span>
+              </div>
+
+              {openId === hit.id && (
+                <ReleasePanel
+                  hit={hit}
+                  detail={detail[hit.id]}
+                  owned={badge}
+                />
+              )}
             </li>
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * What one release looks like when you open it.
+ *
+ * This panel exists for a fact the list above cannot know. Discogs' search
+ * endpoint returns no video links, so before this fetch there is no honest
+ * way to tell you whether a pressing has anything to play — and guessing
+ * would mean marking records "no preview" that play perfectly well.
+ *
+ * So the answer lives here, one release at a time, paid for by a tap.
+ */
+function ReleasePanel({
+  hit,
+  detail,
+  owned,
+}: {
+  hit: SearchHit;
+  detail: ReleaseDetail | "loading" | "failed" | undefined;
+  owned: string | null;
+}) {
+  return (
+    <div className="border-t border-ink-850 bg-ink-950/60 px-4 py-3">
+      {owned && (
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+          <InCollection className="h-3 w-3" />
+          {owned}
+        </p>
+      )}
+
+      {detail === undefined || detail === "loading" ? (
+        <p className="text-[11px] text-neutral-600">Loading the release…</p>
+      ) : detail === "failed" ? (
+        /*
+         * Says what is unknown rather than inventing a state. "No previews"
+         * here would be a claim about the record made from a failure of ours.
+         */
+        <p className="text-[11px] text-neutral-500">
+          Couldn&apos;t load this release — so there&apos;s no saying yet
+          whether it has anything to play.
+        </p>
+      ) : (
+        <>
+          {detail.videos.length === 0 ? (
+            <p className="mb-2 flex items-center gap-1.5 text-[11px] text-amber-400/90">
+              <NoPreview className="h-3 w-3" />
+              No previews on Discogs for this pressing — you can own it, but it
+              won&apos;t play here.
+            </p>
+          ) : (
+            <p className="mb-2 text-[11px] text-neutral-500">
+              {detail.videos.length}{" "}
+              {detail.videos.length === 1 ? "preview" : "previews"} on Discogs.
+            </p>
+          )}
+
+          {detail.tracks.length > 0 && (
+            <ol className="mb-2 space-y-0.5">
+              {detail.tracks.slice(0, 12).map((track, index) => (
+                <li
+                  key={`${track.position}:${index}`}
+                  className="flex gap-2 text-[11px] text-neutral-400"
+                >
+                  <span className="w-7 shrink-0 font-mono text-[10px] text-neutral-600">
+                    {track.position}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{track.title}</span>
+                  <span className="shrink-0 font-mono text-[10px] text-neutral-600">
+                    {track.duration}
+                  </span>
+                </li>
+              ))}
+              {detail.tracks.length > 12 && (
+                <li className="pl-9 text-[10px] text-neutral-600">
+                  + {detail.tracks.length - 12} more
+                </li>
+              )}
+            </ol>
+          )}
+
+          {detail.market && detail.market.forSale > 0 && (
+            <p className="text-[11px] text-neutral-500">
+              {detail.market.forSale} for sale
+              {detail.market.lowestPrice !== null &&
+                `, from ${detail.market.lowestPrice}`}
+            </p>
+          )}
+        </>
+      )}
+
+      <a
+        href={releaseUrl(hit.id)}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-2 inline-block text-[11px] text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-accent"
+      >
+        Open on Discogs
+      </a>
     </div>
   );
 }
