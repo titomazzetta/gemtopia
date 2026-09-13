@@ -84,6 +84,9 @@ jobs:
       - name: Ownership indicator tests
         run: npm run test:ownership
 
+      - name: Recently-used playlist tests
+        run: npm run test:recent
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 

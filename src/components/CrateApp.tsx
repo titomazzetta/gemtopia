@@ -73,6 +73,7 @@ import { PlaylistPanel } from "./PlaylistPanel";
 import { TrackList } from "./TrackList";
 import { Sheet } from "./Sheet";
 import { MobileBar } from "./MobileBar";
+import { promote, orderByRecent } from "@/client/recentPlaylists";
 import { Compass, Disc, Metronome, Refresh, Shuffle } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights";
@@ -121,6 +122,15 @@ export function CrateApp({
     wantlist: new Set(),
   });
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  /*
+   * Playlist ids, most recently added-to first. Session-scoped and in memory
+   * on purpose: "the list I was just adding to" is a fact about the last ten
+   * minutes, not a preference. Persisting it would let a playlist you touched
+   * once last month outrank the one you made this morning.
+   */
+  const [recentPlaylists, setRecentPlaylists] = useState<string[]>([]);
+  /** Ids added to during this visit of the picker, so rows can confirm. */
+  const [justAdded, setJustAdded] = useState<Set<string>>(new Set());
   const [trackMeta, setTrackMeta] = useState<Map<string, TrackMeta>>(new Map());
   const [source, setSource] = useState<Source>("collection");
   const [sync, setSync] = useState<SyncState | null>(null);
@@ -915,17 +925,20 @@ export function CrateApp({
   const queueForPlaylist = useCallback(
     (item: Playable | null) => {
       if (!item) return;
-      if (activePlaylist) {
-        void addToPlaylist(activePlaylist.id, item);
-        return;
-      }
-      if (playlists.length === 1) {
-        void addToPlaylist(playlists[0]!.id, item);
-        return;
-      }
+      /*
+       * Always ask. This used to add straight to the open playlist, and to the
+       * only playlist when there was one — a reasonable shortcut that became
+       * wrong the moment a second list existed, and silently, which is the
+       * worst way for a shortcut to break. The cost of asking is one tap; the
+       * cost of not asking is a record in the wrong set and no way to notice.
+       *
+       * The tap is cheap because the list is ordered: whatever you added to
+       * last is at the top, so the common case is tap-tap and gone.
+       */
+      setJustAdded(new Set());
       setPicker(item);
     },
-    [activePlaylist, playlists, addToPlaylist],
+    [],
   );
 
   const mutateEntries = useCallback(
@@ -1972,29 +1985,73 @@ export function CrateApp({
           onClick={(e) => e.target === e.currentTarget && setPicker(null)}
         >
           <div className="w-full max-w-sm rounded-lg border border-ink-700 bg-ink-900 p-4">
-            <h3 className="text-sm font-semibold text-neutral-100">Add to playlist</h3>
-            <p className="mt-0.5 truncate text-xs text-neutral-500">
-              {picker.artist} — {picker.title}
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-neutral-100">Add to playlist</h3>
+                <p className="mt-0.5 truncate text-xs text-neutral-500">
+                  {picker.artist} — {picker.title}
+                </p>
+              </div>
+              {/*
+                An explicit dismiss. The backdrop still closes it, but a sheet
+                that no longer closes itself needs a target you can see — on a
+                phone "tap outside the box" is a guess.
+              */}
+              <button
+                type="button"
+                onClick={() => setPicker(null)}
+                aria-label="Done"
+                className="-mr-1 -mt-1 shrink-0 rounded-full px-3 py-1 text-xs text-neutral-500 hover:bg-ink-800 hover:text-neutral-200"
+              >
+                Done
+              </button>
+            </div>
 
+            {/*
+              The sheet stays open after an add. One record often belongs in
+              more than one set — a warm-up list and a peak-time list share
+              plenty — and closing after the first tap makes the second add
+              cost the whole journey again. Rows confirm in place instead, and
+              you leave when you are done rather than when the app decides.
+            */}
             <ul className="my-3 max-h-56 space-y-1 overflow-y-auto">
-              {playlists.map((playlist) => (
-                <li key={playlist.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void addToPlaylist(playlist.id, picker);
-                      setPicker(null);
-                    }}
-                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-ink-800"
-                  >
-                    <span className="truncate">{playlist.name}</span>
-                    <span className="ml-2 shrink-0 text-neutral-600">
-                      {playlist.items.length}
-                    </span>
-                  </button>
-                </li>
-              ))}
+              {orderByRecent(playlists, recentPlaylists).map((playlist, index) => {
+                const added = justAdded.has(playlist.id);
+                return (
+                  <li key={playlist.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void addToPlaylist(playlist.id, picker);
+                        setRecentPlaylists((r) => promote(r, playlist.id));
+                        setJustAdded((a) => new Set(a).add(playlist.id));
+                      }}
+                      className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs hover:bg-ink-800 ${
+                        added ? "text-accent" : "text-neutral-300"
+                      }`}
+                    >
+                      <span className="w-4 shrink-0 text-center">
+                        {added ? "✓" : "+"}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{playlist.name}</span>
+                      {/*
+                        Only the first row is marked, and only when something
+                        actually put it there. A badge on every row would be
+                        noise; a badge on row one when the order is arbitrary
+                        would be a lie.
+                      */}
+                      {index === 0 && recentPlaylists.length > 0 && !added && (
+                        <span className="shrink-0 rounded bg-ink-800 px-1.5 py-0.5 text-[10px] text-neutral-500">
+                          last used
+                        </span>
+                      )}
+                      <span className="shrink-0 text-neutral-600">
+                        {playlist.items.length}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
 
             <form
