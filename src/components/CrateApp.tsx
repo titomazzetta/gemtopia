@@ -20,21 +20,38 @@ import {
   isMigrated,
   markMigrated,
   nuke,
+  putDetails,
+  putSummaries,
 } from "@/client/db";
 import {
   ApiError,
   authApi,
+  collectionApi,
   insightsApi,
   playlistsApi,
   prefsApi,
+  releasesApi,
   setCsrfToken,
   trackMetaApi,
+  wantlistApi,
   type InsightsResponse,
 } from "@/client/api";
 import type { FacetKey } from "./Filters";
 import { startSync, type SyncHandle } from "@/client/sync";
-import { buildPlayables, spreadShuffle } from "@/client/playables";
-import { nextSort, sortItems, type SortKey, type SortState } from "@/client/sorting";
+import {
+  buildPlayables,
+  countSilence,
+  playableOnly,
+  queueFrom,
+  spreadShuffle,
+} from "@/client/playables";
+import {
+  DEFAULT_SORT,
+  nextSort,
+  sortItems,
+  type SortKey,
+  type SortState,
+} from "@/client/sorting";
 import { TapTempo } from "@/client/tempo";
 import {
   advanceSweep,
@@ -73,14 +90,31 @@ import { PlaylistPanel } from "./PlaylistPanel";
 import { TrackList } from "./TrackList";
 import { Sheet } from "./Sheet";
 import { MobileBar } from "./MobileBar";
-import { Compass, Disc, Metronome, Refresh, Shuffle } from "./Icons";
+import { promote, orderByRecent } from "@/client/recentPlaylists";
+import {
+  describeAdoption,
+  describePartialAdoption,
+  mergeDetail,
+  summaryOf,
+} from "@/client/adopt";
+import { DiscogsSearch } from "./DiscogsSearch";
+import type { SearchHit } from "@/lib/discogs";
+import { Compass, Disc, Metronome, Refresh, Search, Shuffle } from "./Icons";
 
-type Rail = "filters" | "playlists" | "insights";
+type Rail = "filters" | "playlists" | "insights" | "search";
 
 type NewEntry = Omit<PlaylistItemRow, "position">;
 
-/** A playable becomes a stored entry. Position comes from array order. */
-function toEntry(item: Playable): NewEntry {
+/**
+ * A playable becomes a stored entry. Position comes from array order.
+ *
+ * Returns null for a record with no clip. The server would refuse it anyway —
+ * `validation.ts` requires an eleven-character video id — but a 400 at the end
+ * of a drag is a much worse way to learn that than the + button simply not
+ * being offered on that row.
+ */
+function toEntry(item: Playable): NewEntry | null {
+  if (item.videoId === null) return null;
   return {
     clipKey: item.key,
     releaseId: item.releaseId,
@@ -116,11 +150,28 @@ export function CrateApp({
 
   /* ---------------- data ---------------- */
   const [details, setDetails] = useState<ReleaseDetail[]>([]);
+  /**
+   * When each release entered the collection, straight off the summary index.
+   *
+   * Kept beside `sourceIds` because it comes from the same read and has the
+   * same shape of staleness. Only the collection endpoint reports this, so it
+   * cannot be recovered from the detail cache.
+   */
+  const [addedAt, setAddedAt] = useState<Map<number, string | null>>(new Map());
   const [sourceIds, setSourceIds] = useState<Record<Source, Set<number>>>({
     collection: new Set(),
     wantlist: new Set(),
   });
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  /*
+   * Playlist ids, most recently added-to first. Session-scoped and in memory
+   * on purpose: "the list I was just adding to" is a fact about the last ten
+   * minutes, not a preference. Persisting it would let a playlist you touched
+   * once last month outrank the one you made this morning.
+   */
+  const [recentPlaylists, setRecentPlaylists] = useState<string[]>([]);
+  /** Ids added to during this visit of the picker, so rows can confirm. */
+  const [justAdded, setJustAdded] = useState<Set<string>>(new Set());
   const [trackMeta, setTrackMeta] = useState<Map<string, TrackMeta>>(new Map());
   const [source, setSource] = useState<Source>("collection");
   const [sync, setSync] = useState<SyncState | null>(null);
@@ -139,7 +190,15 @@ export function CrateApp({
    * the whole point of the mobile layout is that the screen shows one thing.
    * Desktop never reads this; the rail and the aside are always visible there.
    */
-  const [sheet, setSheet] = useState<"none" | "filters" | "player" | "source">("none");
+  const [sheet, setSheet] = useState<
+    "none" | "filters" | "player" | "source" | "search"
+  >("none");
+  /**
+   * What the Discogs panel opens with. Carried across from the crate search so
+   * that "not in your crate" leads straight into the same words typed against
+   * Discogs, rather than making you type them a second time.
+   */
+  const [searchSeed, setSearchSeed] = useState("");
 
   /*
    * Column sort for the crate. Null means the list's own order, which for a
@@ -511,6 +570,11 @@ export function CrateApp({
       collection: new Set(collection.map((s) => s.id)),
       wantlist: new Set(wantlist.map((s) => s.id)),
     });
+    setAddedAt(
+      new Map(
+        [...collection, ...wantlist].map((s) => [s.id, s.addedAt] as const),
+      ),
+    );
   }, [username]);
 
   const runSync = useCallback(
@@ -565,7 +629,8 @@ export function CrateApp({
                 entries: list.items
                   .map((key) => byKey.get(key))
                   .filter((p): p is Playable => Boolean(p))
-                  .map(toEntry),
+                  .map(toEntry)
+                  .filter((entry): entry is NewEntry => entry !== null),
               }))
               .filter((list) => list.entries.length > 0);
 
@@ -633,8 +698,8 @@ export function CrateApp({
   }, [trackMeta]);
 
   const allPlayables = useMemo(
-    () => buildPlayables([...details, ...externalDetails], bpmByClip),
-    [details, externalDetails, bpmByClip],
+    () => buildPlayables([...details, ...externalDetails], bpmByClip, addedAt),
+    [details, externalDetails, bpmByClip, addedAt],
   );
 
   const byKey = useMemo(() => {
@@ -655,6 +720,7 @@ export function CrateApp({
   );
 
   const facets = useMemo(() => computeFacets(pool), [pool]);
+
   const filtered = useMemo(() => applyFilters(pool, filters), [pool, filters]);
 
   const activePlaylist = useMemo(
@@ -676,6 +742,13 @@ export function CrateApp({
         key: entry.clipKey,
         releaseId: entry.releaseId,
         videoId: entry.videoId,
+        // Never silent: the server refuses an entry without a valid video id,
+        // so anything that came back from it is playable by construction.
+        silence: null,
+        // A playlist row that never synced on this device has no collection
+        // date to report, and inventing one would put it at the top of a
+        // recently-added sort it does not belong in.
+        addedAt: null,
         title: entry.title,
         artist: entry.artist,
         releaseTitle: entry.releaseTitle,
@@ -729,12 +802,20 @@ export function CrateApp({
   const visible = useMemo(
     () =>
       activePlaylist
-        ? playlistItems
-        : sort
-          ? sortItems(filtered, sort)
-          : filtered,
+        ? // A playlist has a real order that means something. Never re-sort it.
+          playlistItems
+        : sortItems(filtered, sort ?? DEFAULT_SORT),
     [activePlaylist, playlistItems, filtered, sort],
   );
+
+  /*
+   * Split so the header can say what "1,500 clips" now means, given that
+   * unplayable records are among them. The two silent kinds are counted
+   * separately because they lead somewhere different: no-audio is permanent
+   * and there is nothing to do about it, whereas not-loaded is one refresh
+   * away from working.
+   */
+  const silence = useMemo(() => countSilence(visible), [visible]);
 
   /*
    * Key -> playable for whatever is on screen, so the sweep can find the next
@@ -840,6 +921,11 @@ export function CrateApp({
   useEffect(() => {
     if (!api.ready || !current) return;
     if (lastLoaded.current === current.key) return;
+    // Nothing to load. Reaching here at all means a silent record got into the
+    // queue, which advance() and shuffleNow() are supposed to prevent; the
+    // guard is here as well because the failure mode otherwise is the player
+    // silently continuing to show the previous track as if it were this one.
+    if (current.videoId === null) return;
     lastLoaded.current = current.key;
     api.load(current.videoId, true);
 
@@ -849,17 +935,39 @@ export function CrateApp({
     setTapCount(0);
   }, [api, current, detector]);
 
-  const playFrom = useCallback((items: Playable[], index: number) => {
-    if (items.length === 0) return;
-    setQueue(items);
-    setQueueIndex(index);
-    lastLoaded.current = null;
-  }, []);
+  /**
+   * The only door into the queue. Silent records are filtered out here rather
+   * than at each call site, and the index is re-derived because a position in
+   * the list on screen is not a position in the queue once rows are dropped.
+   */
+  const playFrom = useCallback(
+    (items: Playable[], index: number) => {
+      if (items.length === 0) return;
+
+      const plan = queueFrom(items, index);
+      if (plan === null) {
+        const target = items[index];
+        say(
+          target?.silence === "not-loaded"
+            ? `${target.title} hasn't finished syncing — hit refresh to fetch it.`
+            : target?.silence === "no-audio"
+              ? `Discogs has no audio for ${target.title}.`
+              : "Nothing here can be played.",
+        );
+        return;
+      }
+
+      setQueue(plan.queue);
+      setQueueIndex(plan.index);
+      lastLoaded.current = null;
+    },
+    [say],
+  );
 
   const shuffleNow = useCallback(() => {
-    const scope = activePlaylist ? playlistItems : filtered;
+    const scope = playableOnly(activePlaylist ? playlistItems : filtered);
     if (scope.length === 0) {
-      say("Nothing to shuffle — loosen the filters.");
+      say("Nothing here can be played — loosen the filters.");
       return;
     }
     setShuffleOn(true);
@@ -875,10 +983,15 @@ export function CrateApp({
 
   const createPlaylist = useCallback(
     async (name: string, seed?: Playable) => {
+      if (seed && seed.videoId === null) {
+        say(`${seed.title} has no clip to play, so it can't go in a playlist.`);
+        return;
+      }
       try {
+        const seedEntry = seed ? toEntry(seed) : null;
         const playlist = await playlistsApi.create(
           name,
-          seed ? [toEntry(seed)] : [],
+          seedEntry ? [seedEntry] : [],
         );
         setPlaylists((previous) => [playlist, ...previous]);
         say(seed ? `Started "${name}" with ${seed.title}` : `Created "${name}"`);
@@ -897,9 +1010,14 @@ export function CrateApp({
         say(`Already in "${playlist.name}"`);
         return;
       }
+      const entry = toEntry(item);
+      if (entry === null) {
+        say(`${item.title} has no clip to play, so it can't go in a playlist.`);
+        return;
+      }
       try {
         const updated = await playlistsApi.update(playlistId, {
-          entries: [...playlist.entries.map(reEntry), toEntry(item)],
+          entries: [...playlist.entries.map(reEntry), entry],
         });
         setPlaylists((previous) =>
           previous.map((p) => (p.id === updated.id ? updated : p)),
@@ -915,17 +1033,20 @@ export function CrateApp({
   const queueForPlaylist = useCallback(
     (item: Playable | null) => {
       if (!item) return;
-      if (activePlaylist) {
-        void addToPlaylist(activePlaylist.id, item);
-        return;
-      }
-      if (playlists.length === 1) {
-        void addToPlaylist(playlists[0]!.id, item);
-        return;
-      }
+      /*
+       * Always ask. This used to add straight to the open playlist, and to the
+       * only playlist when there was one — a reasonable shortcut that became
+       * wrong the moment a second list existed, and silently, which is the
+       * worst way for a shortcut to break. The cost of asking is one tap; the
+       * cost of not asking is a record in the wrong set and no way to notice.
+       *
+       * The tap is cheap because the list is ordered: whatever you added to
+       * last is at the top, so the common case is tap-tap and gone.
+       */
+      setJustAdded(new Set());
       setPicker(item);
     },
-    [activePlaylist, playlists, addToPlaylist],
+    [],
   );
 
   const mutateEntries = useCallback(
@@ -1172,6 +1293,101 @@ export function CrateApp({
       });
     },
     [],
+  );
+
+  /* ================= adding from Discogs ================= */
+
+  /**
+   * Open the Discogs panel, carrying the crate query across.
+   *
+   * Desktop gets the rail; a phone gets a sheet, because the rail is
+   * `lg:` only and opening a hidden tab would look like the button did
+   * nothing at all.
+   */
+  /**
+   * The crate, newest arrivals first.
+   *
+   * Deliberately a view rather than a stored playlist. It has no contents of
+   * its own — it is the crate you are already looking at, reordered — so it
+   * cannot drift out of date, cannot be half-populated, and needs no sync of
+   * its own. Pressing it twice puts you back where you were.
+   */
+  const openDiscogsSearch = useCallback((seed = "") => {
+    setSearchSeed(seed);
+    setRail("search");
+    if (window.matchMedia("(max-width: 1023px)").matches) setSheet("search");
+  }, []);
+
+  /**
+   * Add a record you just found on Discogs, and have it playable immediately.
+   *
+   * Three things happen, in an order chosen so that a failure part-way through
+   * never leaves a lie on screen:
+   *
+   *   1. POST the add. Until this returns, nothing local changes — an
+   *      optimistic update here would show the record in your crate when
+   *      Discogs had rejected it.
+   *   2. Fetch that one release. This is what makes it playable without
+   *      waiting on a sync that walks the entire collection.
+   *   3. Write it where a sync would have written it — the summary index and
+   *      the detail cache — then mirror both into state.
+   *
+   * If step 2 or 3 fails the add is still true, and `describePartialAdoption`
+   * says so rather than reporting an error that sounds like nothing happened.
+   */
+  const addFromSearch = useCallback(
+    async (hit: SearchHit) => {
+      await collectionApi.add(hit.id);
+
+      // The add itself has landed. From here, nothing may claim otherwise.
+      setSourceIds((previous) => {
+        const collection = new Set(previous.collection);
+        collection.add(hit.id);
+        return { ...previous, collection };
+      });
+
+      try {
+        const { results } = await releasesApi.detail([hit.id]);
+        const found = results.find((r) => r.id === hit.id);
+        if (!found?.ok) {
+          say(describePartialAdoption(hit));
+          return;
+        }
+
+        const detail = found.release;
+        await Promise.all([
+          putDetails([detail]),
+          putSummaries(username, "collection", [
+            // Stamped here because this is the moment it happened; the
+            // release endpoint reports null for every copy of every record.
+            summaryOf(detail, new Date().toISOString()),
+          ]),
+        ]);
+        setDetails((previous) => mergeDetail(previous, detail));
+        // Recorded here too, so a record you just added sorts to the top of
+        // Recently added immediately rather than after the next sync.
+        setAddedAt((previous) =>
+          new Map(previous).set(hit.id, new Date().toISOString()),
+        );
+        say(describeAdoption(detail));
+      } catch {
+        say(describePartialAdoption(hit));
+      }
+    },
+    [username, say],
+  );
+
+  /**
+   * The wantlist half of the same panel. No detail fetch: a wantlist record is
+   * one you do not own yet, and pulling its tracklist would spend part of a
+   * 60-request minute on something the crate is not going to play.
+   */
+  const wantFromSearch = useCallback(
+    async (hit: SearchHit) => {
+      await wantlistApi.add(hit.id);
+      applyWantlistChange(hit.id, true);
+    },
+    [applyWantlistChange],
   );
 
   /* ================= auth ================= */
@@ -1493,7 +1709,7 @@ export function CrateApp({
         */}
         <nav className="hidden shrink-0 flex-col border-b border-ink-800 bg-ink-900 lg:flex lg:w-[300px] lg:border-b-0 lg:border-r">
           <div className="flex shrink-0 border-b border-ink-800">
-            {(["filters", "playlists", "insights"] as const).map((value) => (
+            {(["filters", "playlists", "insights", "search"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -1542,6 +1758,18 @@ export function CrateApp({
               />
             )}
 
+            {rail === "search" && (
+              <div className="h-full overflow-y-auto">
+                <DiscogsSearch
+                  key={searchSeed}
+                  sets={sourceIds}
+                  initialQuery={searchSeed}
+                  onAddToCollection={addFromSearch}
+                  onAddToWantlist={wantFromSearch}
+                />
+              </div>
+            )}
+
             {rail === "insights" && (
               <InsightsPanel
                 playlistName={activePlaylist?.name ?? null}
@@ -1578,7 +1806,15 @@ export function CrateApp({
                 </button>
 
                 <span className="shrink-0 font-mono text-[11px] text-neutral-600">
-                  {visible.length.toLocaleString()}
+                  {silence.playable.toLocaleString()}
+                  {silence.noAudio + silence.notLoaded > 0 && (
+                    <span
+                      className="text-neutral-700"
+                      title={`${(silence.noAudio + silence.notLoaded).toLocaleString()} shown but not playable`}
+                    >
+                      +{(silence.noAudio + silence.notLoaded).toLocaleString()}
+                    </span>
+                  )}
                 </span>
 
                 <button
@@ -1637,6 +1873,23 @@ export function CrateApp({
                     </span>
                   )}
                 </button>
+
+                {/*
+                  Permanent, not only offered when a search fails. The record
+                  in your hand is often one you have never typed into this app,
+                  so there is nothing to come up empty first — and a button you
+                  can only reach by failing at something else is a button
+                  nobody finds.
+                */}
+                <button
+                  type="button"
+                  onClick={() => openDiscogsSearch(filters.query.trim())}
+                  aria-label="Search Discogs and add a record"
+                  className="flex shrink-0 items-center gap-1.5 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-400"
+                >
+                  <Search className="h-3.5 w-3.5" />
+                  Discogs
+                </button>
               </div>
             </div>
           )}
@@ -1650,7 +1903,26 @@ export function CrateApp({
               {activePlaylist ? activePlaylist.name : `Your ${source}`}
             </h2>
             <span className="text-[11px] text-neutral-600">
-              {visible.length.toLocaleString()} clips
+              {silence.playable.toLocaleString()} clips
+              {silence.noAudio > 0 && (
+                <span title="Discogs holds no audio for these pressings">
+                  {" · "}
+                  {silence.noAudio.toLocaleString()} without a preview
+                </span>
+              )}
+              {silence.notLoaded > 0 && (
+                <>
+                  {" · "}
+                  <button
+                    type="button"
+                    onClick={() => runSync(source, true)}
+                    title="These releases never finished syncing"
+                    className="underline decoration-dotted underline-offset-2 hover:text-neutral-300"
+                  >
+                    {silence.notLoaded.toLocaleString()} not synced
+                  </button>
+                </>
+              )}
             </span>
             {activePlaylist && (
               <button
@@ -1726,7 +1998,28 @@ export function CrateApp({
                       ? "Still pulling your crate from Discogs…"
                       : pool.length === 0
                         ? `Nothing cached for your ${source} yet. Hit refresh to sync.`
-                        : "No clips match those filters."
+                        : filters.query.trim()
+                          ? `Nothing in your crate matches “${filters.query.trim()}”.`
+                          : "No clips match those filters."
+                }
+                emptyAction={
+                  /*
+                   * Only when a search came up empty, and only in the crate.
+                   * "No clips match those filters" is a filter problem and the
+                   * answer is to widen them; a name typed into the box that
+                   * finds nothing is usually a record you do not own yet, and
+                   * that is now a thing this app can fix.
+                   */
+                  !activePlaylist && !syncing && pool.length > 0 && filters.query.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => openDiscogsSearch(filters.query.trim())}
+                      className="inline-flex items-center gap-1.5 rounded-md border border-ink-700 px-3 py-1.5 text-xs text-neutral-300 hover:border-accent/50 hover:text-accent"
+                    >
+                      <Search className="h-3.5 w-3.5" />
+                      Look for it on Discogs
+                    </button>
+                  ) : undefined
                 }
               />
             )}
@@ -1782,6 +2075,32 @@ export function CrateApp({
         onExpand={() => setSheet("player")}
       />
 
+      {/* ---- mobile: find a record that is not in the crate yet ---- */}
+      <Sheet
+        open={sheet === "search"}
+        onClose={() => setSheet("none")}
+        title="Add from Discogs"
+      >
+        {/*
+          No scroll container here: the Sheet already scrolls its children, and
+          nesting a second one is how a list ends up moving the wrong thing
+          under your thumb. The panel's own header is `sticky`, so it pins to
+          the Sheet's scroller the way Bandcamp's does.
+
+          The minimum height stops the sheet snapping from one line to full
+          height the moment results land, which in the hand reads as a jump.
+        */}
+        <div className="min-h-[60vh]">
+          <DiscogsSearch
+            key={searchSeed}
+            sets={sourceIds}
+            initialQuery={searchSeed}
+            onAddToCollection={addFromSearch}
+            onAddToWantlist={wantFromSearch}
+          />
+        </div>
+      </Sheet>
+
       {/* ---- mobile: what am I looking at ---- */}
       <Sheet
         open={sheet === "source"}
@@ -1789,6 +2108,7 @@ export function CrateApp({
         title="Play from"
       >
         <div className="px-4 pb-4">
+
           <div className="mb-4 grid grid-cols-2 gap-2">
             {(["collection", "wantlist"] as const).map((value) => (
               <button
@@ -1965,36 +2285,104 @@ export function CrateApp({
 
       {picker && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
+          /*
+            Bottom sheet on a phone, centred dialog from `sm` up. A modal
+            floating in the middle of a phone puts the thing you have to tap
+            where the thumb does not reach, and every music app on a handset
+            solved this the same way for the same reason.
+          */
+          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 sm:grid sm:place-items-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Add to playlist"
           onClick={(e) => e.target === e.currentTarget && setPicker(null)}
         >
-          <div className="w-full max-w-sm rounded-lg border border-ink-700 bg-ink-900 p-4">
-            <h3 className="text-sm font-semibold text-neutral-100">Add to playlist</h3>
-            <p className="mt-0.5 truncate text-xs text-neutral-500">
-              {picker.artist} — {picker.title}
-            </p>
+          <div className="w-full rounded-t-2xl border-t border-ink-700 bg-ink-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-w-sm sm:rounded-lg sm:border sm:pb-4">
+            {/* Grab handle — the signal that this dismisses. Phones only. */}
+            <div className="mb-3 flex justify-center sm:hidden" aria-hidden="true">
+              <span className="h-1 w-9 rounded-full bg-ink-600" />
+            </div>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-neutral-100">Add to playlist</h3>
+                <p className="mt-0.5 truncate text-xs text-neutral-500">
+                  {picker.artist} — {picker.title}
+                </p>
+              </div>
+              {/*
+                An explicit dismiss. The backdrop still closes it, but a sheet
+                that no longer closes itself needs a target you can see — on a
+                phone "tap outside the box" is a guess.
+              */}
+              <button
+                type="button"
+                onClick={() => setPicker(null)}
+                aria-label="Done"
+                className="-mr-1 -mt-1 shrink-0 rounded-full px-3 py-1 text-xs text-neutral-500 hover:bg-ink-800 hover:text-neutral-200"
+              >
+                Done
+              </button>
+            </div>
 
+            {/*
+              The sheet stays open after an add. One record often belongs in
+              more than one set — a warm-up list and a peak-time list share
+              plenty — and closing after the first tap makes the second add
+              cost the whole journey again. Rows confirm in place instead, and
+              you leave when you are done rather than when the app decides.
+            */}
             <ul className="my-3 max-h-56 space-y-1 overflow-y-auto">
-              {playlists.map((playlist) => (
-                <li key={playlist.id}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void addToPlaylist(playlist.id, picker);
-                      setPicker(null);
-                    }}
-                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-ink-800"
-                  >
-                    <span className="truncate">{playlist.name}</span>
-                    <span className="ml-2 shrink-0 text-neutral-600">
-                      {playlist.items.length}
-                    </span>
-                  </button>
-                </li>
-              ))}
+              {orderByRecent(playlists, recentPlaylists).map((playlist, index) => {
+                const added = justAdded.has(playlist.id);
+                const isDefault = index === 0 && recentPlaylists.length > 0;
+                return (
+                  <li key={playlist.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void addToPlaylist(playlist.id, picker);
+                        setRecentPlaylists((r) => promote(r, playlist.id));
+                        setJustAdded((a) => new Set(a).add(playlist.id));
+                      }}
+                      /*
+                        The first row is the default target, not merely the
+                        first row. Recency is a real prediction — you are
+                        usually still filling the list you were just filling —
+                        so it gets a border and a tint and reads as "this one,
+                        unless you say otherwise". Everything below stays
+                        one tap away.
+
+                        It only gets that treatment once something has actually
+                        been added this session. Before that the order is
+                        arbitrary and dressing row one as a prediction would be
+                        inventing confidence we do not have.
+                      */
+                      className={`flex w-full items-center gap-2 rounded-md border px-2 text-left text-xs hover:bg-ink-800 ${
+                        isDefault ? "border-accent/40 bg-accent/5 py-2.5" : "border-transparent py-2"
+                      } ${added ? "text-accent" : isDefault ? "text-accent" : "text-neutral-300"}`}
+                    >
+                      <span className="w-4 shrink-0 text-center">
+                        {added ? "✓" : "+"}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{playlist.name}</span>
+                      {/*
+                        Only the first row is marked, and only when something
+                        actually put it there. A badge on every row would be
+                        noise; a badge on row one when the order is arbitrary
+                        would be a lie.
+                      */}
+                      {isDefault && !added && (
+                        <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">
+                          last used
+                        </span>
+                      )}
+                      <span className="shrink-0 text-neutral-600">
+                        {playlist.items.length}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
 
             <form

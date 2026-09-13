@@ -86,7 +86,7 @@ const sessionSchema = z.object({
    * Every authenticated request compares this against the stored value, so
    * bumping that value kills this cookie and every other one the user holds.
    * It is the revocation mechanism that stateless sessions otherwise lack —
-   * see repo.revokeAllSessions and SECURITY.md §6.
+   * see repo.revokeAllSessions and THREAT_MODEL.md §6.
    */
   v: z.number().int().positive(),
   /** Issued-at, epoch seconds. */

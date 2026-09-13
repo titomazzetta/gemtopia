@@ -10,7 +10,12 @@
  * re-render cannot make the list twitch.
  */
 import assert from "node:assert/strict";
-import { sortItems, nextSort, naturalDirection } from "../src/client/sorting.ts";
+import {
+  sortItems,
+  nextSort,
+  naturalDirection,
+  DEFAULT_SORT,
+} from "../src/client/sorting.ts";
 
 let ran = 0;
 let failed = 0;
@@ -195,4 +200,77 @@ if (failed > 0) {
   console.error(`\n${failed} of ${ran} sorting tests failed.`);
   process.exit(1);
 }
+/* ---- added date ------------------------------------------------------- */
+
+check("recently added reads newest first, unlike every other column", () => {
+  assert.equal(naturalDirection("added"), "desc");
+});
+
+check("added sorts chronologically, not lexically", () => {
+  // The trap: string comparison happens to work for UTC ISO-8601 and stops
+  // working the moment Discogs returns an offset. "+01:00" sorts before "Z"
+  // lexically and after it chronologically, so a record bought at 23:30 in
+  // London would file a day late.
+  const items = [
+    item({ key: "a", addedAt: "2026-01-02T00:30:00+01:00" }),
+    item({ key: "b", addedAt: "2026-01-01T23:00:00Z" }),
+  ];
+  const sorted = sortItems(items, { key: "added", direction: "asc" });
+  assert.deepEqual(
+    sorted.map((i) => i.key),
+    ["b", "a"],
+    "sorted ISO strings lexically instead of comparing instants",
+  );
+});
+
+check("a record with no added date sinks, in both directions", () => {
+  const items = [
+    item({ key: "unknown", addedAt: null }),
+    item({ key: "known", addedAt: "2026-01-01T00:00:00Z" }),
+  ];
+  for (const direction of ["asc", "desc"]) {
+    const sorted = sortItems(items, { key: "added", direction });
+    assert.equal(
+      sorted[sorted.length - 1].key,
+      "unknown",
+      `unknown floated to the top in ${direction}`,
+    );
+  }
+});
+
+check("a malformed date is treated as unknown, not as zero", () => {
+  // Date.parse returns NaN, and NaN must sink like null rather than sorting
+  // as the beginning of time and claiming to be your oldest record.
+  const items = [
+    item({ key: "bad", addedAt: "not a date" }),
+    item({ key: "good", addedAt: "2026-01-01T00:00:00Z" }),
+  ];
+  const sorted = sortItems(items, { key: "added", direction: "asc" });
+  assert.equal(sorted[0].key, "good");
+  assert.equal(sorted[1].key, "bad");
+});
+
+check("the crate reads newest first before anybody sorts it", () => {
+  assert.deepEqual(DEFAULT_SORT, { key: "added", direction: "desc" });
+});
+
+check("the default puts this week's record above one bought years ago", () => {
+  const items = [
+    item({ key: "old", addedAt: "2019-04-01T00:00:00Z" }),
+    item({ key: "new", addedAt: "2026-09-10T00:00:00Z" }),
+  ];
+  assert.deepEqual(
+    sortItems(items, DEFAULT_SORT).map((i) => i.key),
+    ["new", "old"],
+  );
+});
+
+check("clearing a sort lands on the default, not on an arbitrary order", () => {
+  // Third click returns null, and null means DEFAULT_SORT to the caller. What
+  // it used to mean was IndexedDB key order, which is by release id and is
+  // not an order anybody chose.
+  const cleared = nextSort({ key: "year", direction: "desc" }, "year");
+  assert.equal(cleared, null);
+});
+
 console.log(`All ${ran} sorting tests passed.`);

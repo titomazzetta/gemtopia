@@ -580,6 +580,31 @@ export async function addToWantlist(
   );
 }
 
+/**
+ * Add a release to the user's collection.
+ *
+ * Folder 1 is "Uncategorized", the default every Discogs account has. Folder 0
+ * is the synthetic "All" view and rejects writes, so it is never a valid
+ * target however tempting the id looks.
+ *
+ * There is deliberately no `removeFromCollection`. Adding is the thing a DJ
+ * needs from a phone; removing is rare, destructive, and better done on
+ * Discogs itself where you can see what you are deleting. The sign-in page
+ * promises this app never removes anything, and the cheapest way to keep a
+ * promise is to not write the function.
+ */
+export async function addToCollection(
+  user: UserToken,
+  username: string,
+  releaseId: number,
+): Promise<void> {
+  await writeRequest(
+    "POST",
+    `/users/${encodeURIComponent(username)}/collection/folders/1/releases/${releaseId}`,
+    user,
+  );
+}
+
 export async function removeFromWantlist(
   user: UserToken,
   username: string,
@@ -612,6 +637,15 @@ const searchSchema = z.object({
       style: z.array(z.string()).nullish(),
       country: z.string().nullish(),
       format: z.array(z.string()).nullish(),
+      /*
+       * The catalogue number is the field a DJ actually reads off a label, and
+       * the one that separates twelve near-identical pressings in a result
+       * list. Discogs has always returned it; this codebase simply never asked
+       * for it, because the recommender did not need it.
+       */
+      catno: z.string().nullish(),
+      /* Parsed for the photo-identification path that will search by it. */
+      barcode: z.array(z.string()).nullish(),
       community: z
         .object({ have: z.number().nullish(), want: z.number().nullish() })
         .nullish(),
@@ -631,11 +665,25 @@ export interface SearchHit {
   styles: string[];
   country: string | null;
   formats: string[];
+  /** Catalogue number, e.g. "PF-045". The strongest human-readable pressing id. */
+  catno: string | null;
+  barcodes: string[];
   have: number | null;
   want: number | null;
 }
 
 export interface SearchParams {
+  /** Catalogue number. The highest-signal field on a record you are holding. */
+  catno?: string;
+  /** EAN/UPC. Near-exact when present — absent on most white labels and promos. */
+  barcode?: string;
+  /**
+   * Track title. Discogs searches tracklists with this, which `q` does not do
+   * — a plain query only matches a track name when it happens to also appear
+   * in the release title. That gap is the difference between finding the EP a
+   * track is on and finding nothing at all.
+   */
+  track?: string;
   style?: string;
   genre?: string;
   label?: string;
@@ -661,6 +709,9 @@ export async function searchReleases(
   // Only whitelisted keys reach the upstream query string; values are encoded
   // by URLSearchParams, so a hostile style name cannot inject extra params.
   for (const key of [
+    "catno",
+    "barcode",
+    "track",
     "style",
     "genre",
     "label",
@@ -702,6 +753,8 @@ export async function searchReleases(
       styles: row.style ?? [],
       country: row.country ?? null,
       formats: row.format ?? [],
+      catno: row.catno?.trim() || null,
+      barcodes: (row.barcode ?? []).filter((code) => code.trim().length > 0),
       have: row.community?.have ?? null,
       want: row.community?.want ?? null,
     };

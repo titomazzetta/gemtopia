@@ -537,6 +537,87 @@ await check("wantlist rejects an unknown property", async () => {
   );
 });
 
+console.log("\ncollection writes");
+
+await check("collection add requires authentication", async () => {
+  const res = await alice.call("/api/collection", {
+    method: "POST",
+    body: { releaseId: 12345 },
+    cookie: "",
+  });
+  assert.equal(res.status, 401);
+});
+
+await check("collection add requires a CSRF token", async () => {
+  const res = await alice.call("/api/collection", {
+    method: "POST",
+    body: { releaseId: 12345 },
+    csrfToken: null,
+  });
+  assert.equal(res.status, 403);
+});
+
+await check("collection rejects a non-numeric release id", async () => {
+  const res = await alice.call("/api/collection", {
+    method: "POST",
+    body: { releaseId: "not-a-number" },
+  });
+  assert.equal(res.status, 400);
+});
+
+await check("a client cannot name the account it writes to", async () => {
+  const res = await alice.call("/api/collection", {
+    method: "POST",
+    body: { releaseId: 123, username: "someone-else" },
+  });
+  assert.equal(
+    res.status,
+    400,
+    "username in the body must be rejected, not honoured",
+  );
+});
+
+await check("there is no way to remove from a collection", async () => {
+  // The promise on the sign-in page is that this app never removes anything.
+  // A route that simply does not implement DELETE is the only version of that
+  // promise which cannot be broken by a later refactor.
+  for (const method of ["DELETE", "PUT", "PATCH"]) {
+    const res = await alice.call("/api/collection?releaseId=123", { method });
+    assert.ok(
+      res.status === 405 || res.status === 404,
+      `${method} /api/collection answered ${res.status}`,
+    );
+  }
+});
+
+console.log("\ndiscogs search");
+
+await check("search requires authentication", async () => {
+  const res = await alice.call("/api/discogs/search?q=peacefrog", { cookie: "" });
+  assert.equal(res.status, 401);
+});
+
+await check("search refuses an empty query", async () => {
+  const res = await alice.call("/api/discogs/search");
+  assert.equal(res.status, 400);
+});
+
+await check("search refuses a one-character query", async () => {
+  // Two characters minimum: a single letter matches most of Discogs and
+  // spends a request from a 60/minute budget shared with collection sync.
+  const res = await alice.call("/api/discogs/search?q=a");
+  assert.equal(res.status, 400);
+});
+
+await check("search rejects an unknown parameter", async () => {
+  const res = await alice.call("/api/discogs/search?q=peacefrog&type=artist");
+  assert.equal(
+    res.status,
+    400,
+    "only whitelisted keys may reach the upstream query string",
+  );
+});
+
 console.log("\ndig endpoint");
 
 await check("dig requires authentication", async () => {

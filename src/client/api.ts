@@ -223,6 +223,21 @@ export const wantlistApi = {
     ),
 };
 
+export const collectionApi = {
+  /**
+   * Put a release in the collection. There is no `remove` here because there
+   * is no DELETE on the route — see the comment in
+   * `app/api/collection/route.ts`. If you are looking for the function that
+   * takes a record out, it does not exist anywhere in this codebase, and that
+   * is the feature.
+   */
+  add: (releaseId: number) =>
+    request<{ ok: true; releaseId: number; collected: true }>("/api/collection", {
+      method: "POST",
+      body: JSON.stringify({ releaseId }),
+    }),
+};
+
 export const releasesApi = {
   /** Full detail — tracklist, videos, marketplace signals — for up to 8 ids. */
   detail: (ids: number[]) =>

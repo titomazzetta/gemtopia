@@ -6,7 +6,7 @@ const FEATURES = [
   ["Playlists on the fly", "Hit A while something is playing. Reorder by drag, play in order or shuffled. Private to your account."],
   ["Know it'll beatmatch", "Tap the BPM in as you listen, or let it detect. Every transition in a playlist checked against your decks' pitch range."],
   ["Dig from anything", "Press D on a record for its full metadata, everything else you own that connects to it, and records you don't own yet."],
-  ["Wantlist both ways", "Shuffle it like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist."],
+  ["Both lists, both ways", "Shuffle the wantlist like a crate. Search Discogs for a record that just arrived and put it in your collection. Adding is the only thing this app writes."],
 ];
 
 export function SignIn({ error }: { error: string | null }) {
@@ -74,9 +74,13 @@ export function SignIn({ error }: { error: string | null }) {
           <strong className="font-medium text-neutral-400">
             What it does on your behalf.
           </strong>{" "}
-          It reads your collection and wantlist, and — only when you press the
-          heart on a record — adds to your wantlist. It never edits your
-          collection, never posts, and never lists anything for sale.
+          It reads your collection and wantlist, and only writes when you
+          press something. The heart puts a record on your wantlist, and
+          pressing it again takes it off. <em>Add</em> on a Discogs search
+          result puts that one record in your collection — and nothing here can
+          take it back out, on purpose: there is no remove-from-collection
+          anywhere in this app, so no button, no bug and no crafted request can
+          reach one. It never posts, comments, or lists anything for sale.
         </p>
       </section>
     </main>

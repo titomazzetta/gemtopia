@@ -1,15 +1,36 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Playable } from "@/lib/types";
 import { VERDICT_META, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { formatBpm } from "@/lib/mixing";
-import { Play, Plus, Trash } from "./Icons";
+import { NoPreview, Play, Plus, Trash } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import type { SortKey, SortState } from "@/client/sorting";
 
 const BASE_ROW_HEIGHT = 56;
+
+/**
+ * How long ago a record entered the collection, in twelve pixels.
+ *
+ * A date does not fit and would not help: scanning for new arrivals is a
+ * question about recency, not about the 4th of March. Blank rather than a
+ * dash when Discogs gave us no date, because the column is already quiet and
+ * a row of dashes reads as an error.
+ */
+function formatAdded(iso: string | null): string {
+  if (!iso) return "";
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return "";
+
+  const days = Math.floor((Date.now() - then) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "1d";
+  if (days < 30) return `${days}d`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
 /** Extra height for the transition strip when set-prep mode is on. */
 const TRANSITION_HEIGHT = 22;
 const OVERSCAN = 8;
@@ -110,6 +131,7 @@ export function TrackList({
   onAdd,
   onRemove,
   emptyMessage,
+  emptyAction,
   reorderable = false,
   onReorder,
   transitions,
@@ -122,6 +144,13 @@ export function TrackList({
   onAdd?: (item: Playable) => void;
   onRemove?: (item: Playable, index: number) => void;
   emptyMessage: string;
+  /**
+   * Offered beneath the empty message. An empty crate is the one moment the
+   * app knows exactly what you were looking for and cannot give it to you,
+   * which makes it the right place to offer the next move rather than a full
+   * stop.
+   */
+  emptyAction?: ReactNode;
   reorderable?: boolean;
   onReorder?: (from: number, to: number) => void;
   /** Mix check for the transition *into* each index. Index 0 has none. */
@@ -163,8 +192,9 @@ export function TrackList({
 
   if (items.length === 0) {
     return (
-      <div className="flex h-full items-center justify-center p-8 text-center text-sm text-neutral-600">
-        {emptyMessage}
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center text-sm text-neutral-600">
+        <p>{emptyMessage}</p>
+        {emptyAction}
       </div>
     );
   }
@@ -197,6 +227,19 @@ export function TrackList({
               onSort={onSort}
               className="hidden w-8 justify-end sm:flex"
             />
+            {/*
+              Date added. Hidden on a narrow phone along with Year, because
+              seven columns on a 390px screen is none of them — the two
+              "newest first" buttons in the source sheet are the phone's route
+              to this same ordering.
+            */}
+            <SortHeader
+              label="Added"
+              sortKey="added"
+              sort={sort}
+              onSort={onSort}
+              className="hidden w-12 justify-end md:flex"
+            />
             <SortHeader
               label="BPM"
               sortKey="bpm"
@@ -225,6 +268,18 @@ export function TrackList({
           {slice.map((item, i) => {
             const index = start + i;
             const active = item.key === currentKey;
+            /*
+             * Shown, but visibly not playable. Hiding these was the old
+             * behaviour and it meant you could own a record, sync it, and
+             * never see it — with nothing on screen admitting that. Dimmed
+             * plus an icon plus a title attribute, so the reason survives
+             * whether you are scanning, hovering, or using a screen reader.
+             */
+            const silent = item.silence !== null;
+            const silentReason =
+              item.silence === "not-loaded"
+                ? "Not synced yet — hit refresh to fetch this release"
+                : "Discogs has no audio for this pressing";
 
             return (
               <li
@@ -240,7 +295,9 @@ export function TrackList({
                 }}
                 className={`group border-b border-ink-850 ${
                   active ? "bg-accent/10" : "hover:bg-ink-850"
-                } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""}`}
+                } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""} ${
+                  silent ? "opacity-45" : ""
+                }`}
               >
                 {showTransitions &&
                   (transitions?.get(index) ? (
@@ -269,13 +326,22 @@ export function TrackList({
                         className="h-full w-full object-cover"
                       />
                     ) : null}
-                    <span
-                      className={`absolute inset-0 hidden place-items-center bg-black/60 group-hover:grid ${
-                        active ? "grid" : ""
-                      }`}
-                    >
-                      <Play className="h-3 w-3 text-white" />
-                    </span>
+                    {silent ? (
+                      <span
+                        className="absolute inset-0 grid place-items-center bg-black/65"
+                        title={silentReason}
+                      >
+                        <NoPreview className="h-3.5 w-3.5 text-neutral-400" />
+                      </span>
+                    ) : (
+                      <span
+                        className={`absolute inset-0 hidden place-items-center bg-black/60 group-hover:grid ${
+                          active ? "grid" : ""
+                        }`}
+                      >
+                        <Play className="h-3 w-3 text-white" />
+                      </span>
+                    )}
                   </span>
 
                   <span className="min-w-0 flex-1">
@@ -294,6 +360,14 @@ export function TrackList({
                     <span className="block truncate text-[11px] text-neutral-500">
                       {item.artist}
                       <span className="text-neutral-700"> — {item.releaseTitle}</span>
+                      {silent && (
+                        <span className="ml-1.5 text-neutral-600">
+                          ·{" "}
+                          {item.silence === "not-loaded"
+                            ? "not synced"
+                            : "no preview"}
+                        </span>
+                      )}
                     </span>
                   </span>
 
@@ -305,6 +379,16 @@ export function TrackList({
                     )}
                     <span className="hidden w-8 text-right font-mono text-[10px] text-neutral-600 sm:inline">
                       {item.year ?? ""}
+                    </span>
+                    <span
+                      className="hidden w-12 text-right font-mono text-[10px] text-neutral-600 md:inline"
+                      title={
+                        item.addedAt
+                          ? `Added ${new Date(item.addedAt).toLocaleDateString()}`
+                          : "No date from Discogs"
+                      }
+                    >
+                      {formatAdded(item.addedAt)}
                     </span>
                     {/*
                       BPM sits immediately left of the runtime and holds its
@@ -339,7 +423,7 @@ export function TrackList({
 
                 <ShareButton track={item} />
 
-                {onAdd && (
+                {onAdd && !silent && (
                   <button
                     type="button"
                     onClick={() => onAdd(item)}

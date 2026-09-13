@@ -369,11 +369,11 @@ The rate limiter is per serverless instance, which bounds abuse per instance
 rather than globally — fine for you and a few friends, thin if the link travels.
 Vercel's WAF rate rules are the cheapest fix.
 
-It's written up as the top residual risk in [SECURITY.md](./SECURITY.md), along
+It's written up as a residual risk in [THREAT_MODEL.md](./THREAT_MODEL.md), along
 with everything else that is known and deliberately unmitigated.
 
 ---
 
 **See also:** [README.md](./README.md) for what the app does and how it's built ·
-[SECURITY.md](./SECURITY.md) for the threat model ·
-[PUSH_TO_GITHUB.md](./PUSH_TO_GITHUB.md) for the push and hardening steps alone.
+[THREAT_MODEL.md](./THREAT_MODEL.md) for the threat model ·
+[SECURITY.md](./SECURITY.md) to report a vulnerability.

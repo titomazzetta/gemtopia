@@ -2,10 +2,10 @@
 
 # Gemtopia
 
-**Dig your record collection when you're nowhere near your turntables.**
+**A crate-digging app for vinyl DJs, built by one.**
 
 [![CI](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml/badge.svg)](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml)
-[![Security](https://img.shields.io/badge/threat%20model-SECURITY.md-4ade80)](./SECURITY.md)
+[![Threat model](https://img.shields.io/badge/threat%20model-documented-4ade80)](./THREAT_MODEL.md)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 </div>
@@ -16,19 +16,19 @@
 
 **Vinyl DJs, away from the decks.**
 
-If you play records, the crate is the instrument — and you can only really use it
-standing in front of it. Everywhere else, a collection is an inventory: a list of
-things you own and can't hear. Meanwhile the useful thinking happens exactly where
-the records aren't. On a train. In a hotel the night before. Three weeks out from a
-gig, when you know roughly what you want the set to feel like and can't audition a
-single record to find it.
+I play records, and the problem I kept having is that the crate is the instrument —
+you can only really play it standing in front of it. Everywhere else your
+collection is just an inventory: a list of things you own and can't hear. Meanwhile
+the useful thinking always happens exactly where the records aren't. On a train. In
+a hotel the night before. Three weeks out from a gig, when you know roughly what
+you want the set to feel like and can't audition a single record to find it.
 
-Gemtopia is for those hours. Your collection becomes something you can **hear,
-sort, sequence and argue with from a phone** — so the set is half-built before you
-get home, and pulling the records becomes twenty minutes of picking rather than an
-evening of rediscovery.
+So I built the thing I wanted. Gemtopia turns your Discogs collection into
+something you can **hear, sort, sequence and argue with from your phone** — so the
+set is half-built before you get home, and pulling the records is twenty minutes of
+picking instead of an evening of rediscovery.
 
-Two things it's built to do:
+Two things I use it for constantly:
 
 ### Prep a set on the road
 
@@ -59,9 +59,10 @@ browsing a database usually doesn't.
 
 ---
 
-It's built on the Discogs API, meant to be used on trains and in hotel rooms, and
-written to be read by people who care how software is put together. The
-[threat model](./SECURITY.md) is the part I'd point at first.
+It runs on the Discogs API, it's meant to be used on trains and in hotel rooms,
+and I wrote it to be read as well as run. If you're here for the code rather than
+the records, the [threat model](./THREAT_MODEL.md) is the part I'd point at
+first — it says what's defended, how, and what deliberately isn't.
 
 ---
 
@@ -96,6 +97,9 @@ written to be read by people who care how software is put together. The
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range. Flags the ones that won't beatmatch before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
+| **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
+| **Newest first, by default** | Your collection and wantlist both open in the order you added to them, newest at the top — the same way Discogs presents them. No button to press and nothing to keep in sync: the dates come off the collection and wantlist endpoints, which we already read. Sortable both ways as an **Added** column. |
+| **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, dimmed and marked, instead of silently not existing. The header splits the count: what plays, what Discogs has no audio for, and what hasn't finished syncing — the last of which is a button. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
 
 ### Keyboard
@@ -173,12 +177,118 @@ pass to rank and explain those candidates — but it can only reorder what the
 graph found. Any release ID the model invents is discarded before it renders. A
 catalogue number you walk into a shop with has to exist.
 
+### The records that were never there
+
+The crate is built from the YouTube links Discogs holds against a release, so
+for most of this app's life a record with no links produced no rows — and a
+row that does not exist looks exactly like a record you do not own. You could
+buy it, sync it successfully, see it on Discogs, and never once find it here.
+There was a test asserting that behaviour, which is the uncomfortable part: it
+was deliberate, and it was wrong.
+
+They now appear, dimmed, with a struck-through play icon. **The two kinds of
+silence are never reported as each other**, because they lead somewhere
+different:
+
+- **No preview** — Discogs holds no audio for this pressing. Permanent, and
+  there is nothing to do about it.
+- **Not synced** — the sync never fetched the release, so we do not actually
+  know whether it has audio. One refresh away from being fixed, which is why
+  that count in the header is a button.
+
+`market` is what tells them apart: a real `/releases/{id}` fetch always returns
+`num_for_sale` and `lowest_price`, so a null market can only be a placeholder
+the sync wrote without ever reaching the release. Calling that "Discogs has no
+audio" would be a confident wrong answer about a record you can play on Discogs
+right now.
+
+`Playable.videoId` is `string | null` rather than an empty-string sentinel,
+specifically so the compiler finds every consumer that assumed a video exists.
+It found four. Silent records are filtered at `playFrom`, the single door into
+the queue, and `queueFrom` re-derives the index rather than reusing it — row 40
+on screen is not row 40 in the queue once rows are dropped.
+
+### The record that just arrived
+
+Everything above works on records you already own. This is the one place the
+app looks outward, and it exists because of a gap in the loop it otherwise
+closes: records turn up in the post, and adding one meant leaving for
+discogs.com, searching a site that is unkind on a phone, and coming back.
+
+**The second line of each result is the whole feature.** Search "Untitled" on
+Discogs and you get twelve pressings that look identical until you open each
+one. You are not looking for *a* pressing of this record — you are looking for
+the one in your hand. Year, catalogue number, label, country and format on one
+truncated monospace line answers that without a tap, and every row stays the
+same height so the list is scannable rather than readable.
+
+**Four fields, chosen rather than guessed.** `q` is a fuzzy match over artist
+and release title and **does not look at tracklists**, so searching a track
+name used to return nothing whenever that name was not also the release title —
+which for a 12" of untitled cuts is always. Discogs exposes `track` for exactly
+this, and `catno` and `barcode` are exact-match fields where a value typed into
+`q` would just be noise. Inferring the field from the shape of the input was the
+alternative; plenty of real record titles look like catalogue numbers, and a
+search that quietly ran a different query than you asked for is worse than a tap.
+
+Searching is explicit — submit, not debounced-as-you-type. Discogs allows 60
+authenticated requests a minute for the whole account, shared with a collection
+sync that may be running in another tab. A request per keystroke would race the
+thing that makes the app usable at all.
+
+**Opening a result costs one request, and buys the one fact the list cannot
+have.** The search response carries no video links, so until a release is
+fetched there is no honest way to say whether it has anything to play.
+Expanding a row fetches it once and shows the tracklist, copies for sale, the
+green in-collection tick, and whether any previews exist. If that fetch fails
+it says the release could not be loaded — not "no previews", which would be a
+claim about the record invented out of a failure of ours.
+
+**Adding to your collection asks first; the heart doesn't.** That asymmetry is
+the whole argument. The wantlist is a toggle — press the heart again and the
+record leaves — so a confirmation there would be friction with nothing behind
+it. A collection add has no undo anywhere in this app, on purpose, so a mis-tap
+on a phone can only be fixed by opening Discogs on something else. The
+confirmation isn't friction; it's the only safety net that exists.
+
+It's an inline strip rather than a dialog, because the disambiguation line sits
+three pixels above it and that line is the thing being confirmed — a modal
+covering the row would hide the evidence. And if you already own the record it
+says so, since Discogs models a collection as instances and a second copy is
+legal but rarely intended.
+
+**Adding makes it playable now.** A collection sync walks everything you own
+and takes about ten minutes on a large collection — fine as a background
+top-up, useless when you are stood at the decks with the record in your hand.
+So the add path fetches that one release and writes it exactly where a sync
+would have: the summary index and the detail cache. Nothing downstream has a
+special case for it.
+
+Two honesty constraints fell out of that, both in `client/adopt.ts`:
+
+- A crate is built from the YouTube links Discogs holds against a release, so a
+  pressing with no links is a record you now own that will **never** appear in
+  the list. Saying "added to your collection" next to a crate that did not
+  change is how people end up pressing the button twice. The message names
+  which of the two things happened.
+- The add and the detail fetch are two calls, and only the first changes
+  anything on Discogs. If the POST lands and the fetch then fails, the record
+  *is* in your collection, and the message must not read like nothing happened.
+
 ### What's not built
 
 **Reddit mining** — deferred by choice. It needs its own OAuth app, costs money
 above the free tier, and returns unstructured comment text that would need an LLM
 pass *and* a Discogs verification pass to be trustworthy. The dig engine is
 structured so an adapter can drop in later without a rewrite.
+
+**Identifying a record from a photo** — deferred, not abandoned. Discogs has no
+image search endpoint, so this would mean a vision model reading the label and
+then a Discogs lookup on what it read. The lookup half is what shipped here;
+`catno` and `barcode` are already plumbed through the search route as exact-match
+parameters, which is precisely what a photo of a label or a sleeve barcode would
+produce. The remaining question is who pays for the vision call, and that is a
+product question rather than a technical one.
 
 **Browsing stores with recent finds** — not possible. The Discogs API exposes no
 way to enumerate sellers or their recent stock. What it *does* expose is per
@@ -327,10 +437,28 @@ own BPM and the mixability verdict for the transition into the next one. A List
 can hold none of that. Playlists live in Gemtopia's own Postgres, in
 `playlists` / `playlist_items`, private to your account.
 
-**The only thing this app ever writes to Discogs is the wantlist heart.**
-`addToWantlist` and `removeFromWantlist` are the only two write calls in the
-codebase — grep for `writeRequest` and you'll find exactly those two callers.
-Your collection, your Lists, your profile, the marketplace: read-only, always.
+**Your collection is add-only. Your wantlist is a toggle.** Grep for
+`writeRequest` and you will find exactly three callers: `addToWantlist`
+(`PUT`), `removeFromWantlist` (`DELETE`) and `addToCollection` (`POST`). The
+heart has to be able to turn off, so a wantlist delete exists and always will.
+
+There is deliberately no `removeFromCollection`. Not a guarded one, not an
+unreachable one — the function does not exist, so no route, no bug and no
+crafted request can reach a `DELETE` against your collection, and the one
+`DELETE` that does exist can only address `/wants/{id}` because that path is
+written at its own call site. Removing a record is something Discogs does
+perfectly well, and this app has no business doing it at three in the morning
+next to a fader. Your Lists, your profile, your marketplace listings:
+untouched, always.
+
+That restraint is the app's own choice rather than a permission boundary, and
+the difference matters. Discogs' OAuth 1.0a has no scopes, so the token every
+Discogs app holds — including this one — carries the full authority of the
+account. There is no way to ask for a read-mostly token. What bounds this app
+is public source you can audit and a credential that is never stored anywhere
+this app controls; [THREAT_MODEL.md §12.1](./THREAT_MODEL.md) sets out the whole
+argument, including
+the part that isn't solved.
 
 ---
 
@@ -391,7 +519,7 @@ stops working immediately. Signing back in works straight away.
 
 It costs no extra database round trip: resolving your session into a user id
 was already a query, and the version comes back in the same row. Full write-up
-in [SECURITY.md §6](./SECURITY.md).
+in [THREAT_MODEL.md §6](./THREAT_MODEL.md).
 
 ---
 
@@ -496,7 +624,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 209 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 314 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 80 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -568,10 +696,17 @@ scripts/
 ├── verify-discogs.mjs         real OAuth handshake, no deps, redacts on failure
 ├── test-env.mjs               configuration contract (36 cases)
 ├── test-headers.mjs           security headers, both directions (20 cases)
-├── test-playables.mjs         clip de-duplication and best-clip choice (18 cases)
-├── test-sorting.mjs           crate ordering, and where unknowns go (17 cases)
+├── test-playables.mjs         clip choice, silent records, queueing (29 cases)
+├── test-sorting.mjs           crate ordering, and where unknowns go (24 cases)
+├── test-share.mjs             what actually reaches the share sheet (28 cases)
+├── test-scrub.mjs             playhead position maths (12 cases)
+├── test-ownership.mjs         "do I own this?" without claiming absence (22 cases)
+├── test-recent-playlists.mjs  which playlist you probably mean (12 cases)
+├── test-adopt.mjs             add -> playable, and what to say (15 cases)
+├── test-search-fields.mjs     what actually leaves the browser (11 cases)
+├── test-write-surface.mjs     every write this app can send (7 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
-├── test-mixing.mjs            beatmatch maths and set length (55 cases)
+├── test-mixing.mjs            beatmatch maths and set length (61 cases)
 └── test-api.mjs               auth, CSRF, IDOR, sharing, privacy (80 cases)
 src/
 ├── proxy.ts                   per-request CSP + script nonce
@@ -590,12 +725,16 @@ src/
 │   ├── llm.ts                 optional Claude pass + anti-hallucination filter
 │   ├── validation.ts          every accepted payload shape, in one file
 │   └── ratelimit.ts           sliding-window limiter
-├── app/api/                   auth · discogs · dig · wantlist · playlists · track-meta · insights
+├── app/api/                   auth · discogs · dig · wantlist · collection · playlists · track-meta · insights
 ├── client/                    browser-only
 │   ├── db.ts                  IndexedDB crate cache
 │   ├── sync.ts                resumable, rate-limit-aware background sync
 │   ├── playables.ts           video↔track matching, Fisher–Yates, spread shuffle
 │   ├── digLocal.ts            in-collection pivots, zero network
+│   ├── adopt.ts               a just-added record, folded into the crate
+│   ├── searchFields.ts        which Discogs field a search runs against
+│   ├── ownership.ts           what the app may claim about what you own
+│   ├── share.ts               exactly what crosses into the share sheet
 │   ├── tempo.ts               pure tempo estimator + tap tempo + BPM parsing
 │   ├── useTempoDetector.ts    tab/mic capture → onset envelope
 │   └── api.ts                 typed client, CSRF on every mutation
@@ -610,9 +749,15 @@ src/
 npm run test           # everything below
 npm run test:env       # 36 cases, no server needed
 npm run test:headers   # 20 cases, no server needed
-npm run test:playables # 18 cases, no server needed
-npm run test:sorting   # 17 cases, no server needed
-npm run test:share     # 20 cases, no server needed
+npm run test:playables # 29 cases, no server needed
+npm run test:sorting   # 24 cases, no server needed
+npm run test:share     # 28 cases, no server needed
+npm run test:scrub     # 12 cases, no server needed
+npm run test:ownership # 22 cases, no server needed
+npm run test:recent    # 12 cases, no server needed
+npm run test:adopt     # 15 cases, no server needed
+npm run test:search    # 11 cases, no server needed
+npm run test:writes    # 7 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 61 cases, no server needed
 npm run test:api       # 80 cases, needs a running server + Postgres
@@ -677,7 +822,7 @@ ever landed in the client bundle.
 - Jungle/DnB tempo often reads at half — use ÷2 / ×2, or tap it.
 - Clips that are private, deleted, or region-blocked on YouTube auto-skip after ~1s.
 - Discogs' video data is patchy. Some releases have none; that's upstream.
-- The rate limiter is per serverless instance — see *Residual risks* in SECURITY.md.
+- The rate limiter is per serverless instance — see *Residual risks* in THREAT_MODEL.md.
 - Musical key / Camelot harmonic mixing isn't built. The column exists, and it
   is the natural companion to the tempo checks.
 - Transition checks assume a constant tempo per record. Live drummers and
