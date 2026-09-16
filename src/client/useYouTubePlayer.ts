@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { describePlaybackError } from "./playbackErrors";
 
 /**
  * Thin wrapper around the YouTube IFrame Player API.
@@ -173,13 +174,21 @@ export function useYouTubePlayer(options: {
                 setStatus("loading");
               }
             },
-            onError: () => {
+            onError: (event: { data: number }) => {
               if (disposed) return;
-              // 100/101/150: removed, private, or embedding disabled.
-              // Common enough in a big crate that we just move on.
+
+              /*
+               * The code is read rather than assumed. This handler used to
+               * take no argument and treat every failure as "the video is
+               * unplayable, skip it" — true of 100/101/150, false of 5, the
+               * HTML5 player error Safari throws on clips that play fine in
+               * Chrome. Skipping on 5 walks the queue marking good records
+               * bad, one per browser.
+               */
+              const failure = describePlaybackError(event.data);
               setStatus("error");
-              setError("This clip can't be played — skipping.");
-              onUnplayableRef.current();
+              setError(failure.message);
+              if (failure.permanent) onUnplayableRef.current();
             },
           },
         });
