@@ -17,7 +17,7 @@
     "db:migrate": "node scripts/migrate.mjs",
     "verify:discogs": "node scripts/verify-discogs.mjs",
     "verify:db": "node scripts/verify-db.mjs",
-    "test": "npm run test:env && npm run test:headers && npm run test:playables && npm run test:sorting && npm run test:share && npm run test:scrub && npm run test:ownership && npm run test:recent && npm run test:adopt && npm run test:search && npm run test:writes && npm run test:playback && npm run test:watchdog && npm run test:freshness && npm run test:tempo && npm run test:mixing && npm run test:api",
+    "test": "npm run test:env && npm run test:headers && npm run test:playables && npm run test:sorting && npm run test:share && npm run test:scrub && npm run test:ownership && npm run test:recent && npm run test:adopt && npm run test:search && npm run test:writes && npm run test:playback && npm run test:watchdog && npm run test:freshness && npm run test:tempo && npm run test:mixing && npm run test:api && npm run test:bpm-scale",
     "test:env": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-env.mjs",
     "test:headers": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-headers.mjs",
     "test:playables": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playables.mjs",
@@ -35,6 +35,8 @@
     "test:playback": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playback-errors.mjs",
     "test:watchdog": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playback-watchdog.mjs",
     "test:freshness": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-crate-freshness.mjs"
+    "test:freshness": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-crate-freshness.mjs",
+    "test:bpm-scale": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-bpm-scaling.mjs"
   },
   "dependencies": {
     "next": "16.3.4",
