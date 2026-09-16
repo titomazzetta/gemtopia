@@ -5,6 +5,22 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # Majors deferred deliberately, each needing its own migration pass.
+      # Scoped to these three by name rather than blanket-ignoring every major,
+      # so a major that does matter still opens a PR and still gets looked at.
+      - dependency-name: tailwindcss
+        # v4 moves configuration out of tailwind.config.ts and into CSS, and
+        # changes the @tailwind directives and @apply semantics this app uses.
+        update-types: ["version-update:semver-major"]
+      - dependency-name: zod
+        # v4 changes error shapes and parsing semantics across 15 files — every
+        # API route boundary plus env.ts. The one where a quiet behavioural
+        # change would land on a security surface rather than a build failure.
+        update-types: ["version-update:semver-major"]
+      - dependency-name: eslint
+        # v10 needs matching majors of @typescript-eslint and the Next plugin.
+        update-types: ["version-update:semver-major"]
     groups:
       # One PR for routine patch bumps; anything major gets its own review.
       patch-and-minor:

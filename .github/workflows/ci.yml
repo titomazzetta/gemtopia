@@ -96,6 +96,9 @@ jobs:
       - name: Discogs write-surface tests
         run: npm run test:writes
 
+      - name: Playback error tests
+        run: npm run test:playback
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 
