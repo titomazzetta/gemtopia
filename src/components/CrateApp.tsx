@@ -8,20 +8,16 @@ import type {
   PlaylistItemRow,
   ReleaseDetail,
   Source,
-  SyncState,
   TrackMeta,
 } from "@/lib/types";
 import {
   clearLegacyPlaylists,
   getAllDetails,
   getLegacyPlaylists,
-  getSummaries,
   getSyncState,
   isMigrated,
   markMigrated,
   nuke,
-  putDetails,
-  putSummaries,
 } from "@/client/db";
 import {
   ApiError,
@@ -37,8 +33,8 @@ import {
   type InsightsResponse,
 } from "@/client/api";
 import type { FacetKey } from "./Filters";
-import { startSync, type SyncHandle } from "@/client/sync";
 import { needsSync } from "@/client/crateFreshness";
+import { useCrateCache } from "@/client/useCrateCache";
 import {
   buildPlayables,
   countSilence,
@@ -95,8 +91,6 @@ import { promote, orderByRecent } from "@/client/recentPlaylists";
 import {
   describeAdoption,
   describePartialAdoption,
-  mergeDetail,
-  summaryOf,
 } from "@/client/adopt";
 import { DiscogsSearch } from "./DiscogsSearch";
 import type { SearchHit } from "@/lib/discogs";
@@ -150,19 +144,23 @@ export function CrateApp({
   setCsrfToken(csrfToken);
 
   /* ---------------- data ---------------- */
-  const [details, setDetails] = useState<ReleaseDetail[]>([]);
   /**
-   * When each release entered the collection, straight off the summary index.
-   *
-   * Kept beside `sourceIds` because it comes from the same read and has the
-   * same shape of staleness. Only the collection endpoint reports this, so it
-   * cannot be recovered from the detail cache.
+   * Everything about what you own and how fresh that knowledge is, in one
+   * place — see client/useCrateCache.ts. This used to be six useState calls
+   * and two useCallbacks inline, mixed in among five other concerns.
    */
-  const [addedAt, setAddedAt] = useState<Map<number, string | null>>(new Map());
-  const [sourceIds, setSourceIds] = useState<Record<Source, Set<number>>>({
-    collection: new Set(),
-    wantlist: new Set(),
-  });
+  const crate = useCrateCache(username);
+  const {
+    details,
+    addedAt,
+    sourceIds,
+    sync,
+    loading,
+    runSync,
+    adopt,
+    markCollected,
+    markWanted,
+  } = crate;
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   /*
    * Playlist ids, most recently added-to first. Session-scoped and in memory
@@ -175,9 +173,6 @@ export function CrateApp({
   const [justAdded, setJustAdded] = useState<Set<string>>(new Set());
   const [trackMeta, setTrackMeta] = useState<Map<string, TrackMeta>>(new Map());
   const [source, setSource] = useState<Source>("collection");
-  const [sync, setSync] = useState<SyncState | null>(null);
-  const [loading, setLoading] = useState(true);
-  const syncRef = useRef<SyncHandle | null>(null);
 
   /* ---------------- view ---------------- */
   const [rail, setRail] = useState<Rail>("filters");
@@ -560,48 +555,12 @@ export function CrateApp({
 
   /* ================= boot ================= */
 
-  const reloadCache = useCallback(async () => {
-    const [cachedDetails, collection, wantlist] = await Promise.all([
-      getAllDetails(),
-      getSummaries(username, "collection"),
-      getSummaries(username, "wantlist"),
-    ]);
-    setDetails(cachedDetails);
-    setSourceIds({
-      collection: new Set(collection.map((s) => s.id)),
-      wantlist: new Set(wantlist.map((s) => s.id)),
-    });
-    setAddedAt(
-      new Map(
-        [...collection, ...wantlist].map((s) => [s.id, s.addedAt] as const),
-      ),
-    );
-  }, [username]);
-
-  const runSync = useCallback(
-    (target: Source, force = false) => {
-      syncRef.current?.cancel();
-      syncRef.current = startSync({
-        owner: username,
-        source: target,
-        force,
-        onProgress: (state) => {
-          setSync(state);
-          if (state.status === "done" || state.status === "detailing") {
-            void reloadCache();
-          }
-        },
-      });
-    },
-    [username, reloadCache],
-  );
-
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        await reloadCache();
+        await crate.reload();
 
         const [serverPlaylists, meta, prefs, state] = await Promise.all([
           playlistsApi.list().catch(() => [] as Playlist[]),
@@ -614,7 +573,7 @@ export function CrateApp({
         setPlaylists(serverPlaylists);
         setTrackMeta(new Map(meta.map((m) => [m.clipKey, m])));
         setPitchPercent(prefs.pitchPercent);
-        setSync(state);
+        crate.setSync(state);
 
         // Lift v1's browser-local playlists into the account, once.
         if (!(await isMigrated(username))) {
@@ -654,13 +613,13 @@ export function CrateApp({
         console.error("[boot]", error);
         if (!cancelled) say("Could not open your crate. Try reloading.");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) crate.setLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
-      syncRef.current?.cancel();
+      crate.cancelSync();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1263,17 +1222,7 @@ export function CrateApp({
     [bpmByClip, playFrom, say],
   );
 
-  const applyWantlistChange = useCallback(
-    (releaseId: number, wanted: boolean) => {
-      setSourceIds((previous) => {
-        const wantlist = new Set(previous.wantlist);
-        if (wanted) wantlist.add(releaseId);
-        else wantlist.delete(releaseId);
-        return { ...previous, wantlist };
-      });
-    },
-    [],
-  );
+  const applyWantlistChange = markWanted;
 
   /* ================= adding from Discogs ================= */
 
@@ -1320,11 +1269,7 @@ export function CrateApp({
       await collectionApi.add(hit.id);
 
       // The add itself has landed. From here, nothing may claim otherwise.
-      setSourceIds((previous) => {
-        const collection = new Set(previous.collection);
-        collection.add(hit.id);
-        return { ...previous, collection };
-      });
+      markCollected(hit.id);
 
       try {
         const { results } = await releasesApi.detail([hit.id]);
@@ -1335,26 +1280,16 @@ export function CrateApp({
         }
 
         const detail = found.release;
-        await Promise.all([
-          putDetails([detail]),
-          putSummaries(username, "collection", [
-            // Stamped here because this is the moment it happened; the
-            // release endpoint reports null for every copy of every record.
-            summaryOf(detail, new Date().toISOString()),
-          ]),
-        ]);
-        setDetails((previous) => mergeDetail(previous, detail));
-        // Recorded here too, so a record you just added sorts to the top of
-        // Recently added immediately rather than after the next sync.
-        setAddedAt((previous) =>
-          new Map(previous).set(hit.id, new Date().toISOString()),
-        );
+        // Writes IndexedDB and moves details, addedAt and sourceIds together.
+        // The caller still decides what to say, because only it knows whether
+        // the record it just added has anything to play.
+        await adopt(detail, new Date().toISOString());
         say(describeAdoption(detail));
       } catch {
         say(describePartialAdoption(hit));
       }
     },
-    [username, say],
+    [adopt, markCollected, say],
   );
 
   /**
@@ -1564,8 +1499,10 @@ export function CrateApp({
                 setActivePlaylistId(null);
                 void (async () => {
                   const state = await getSyncState(username, value);
-                  setSync(state);
-                  if (!state || state.status !== "done") runSync(value);
+                  crate.setSync(state);
+                  // Same rule as boot. This used to be its own inline copy,
+                  // in the pre-fix form that never re-checked a finished sync.
+                  if (needsSync(state)) runSync(value);
                 })();
               }}
               className={`rounded px-2.5 py-1 text-xs capitalize transition-colors ${
