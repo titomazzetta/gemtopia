@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, type RefObject } from "react";
+import type { ScaleFactor } from "@/client/bpmScaling";
 import type { BpmSource, Playable } from "@/lib/types";
 import type { PlayerApi } from "@/client/useYouTubePlayer";
 import type { DetectorStatus } from "@/client/useTempoDetector";
@@ -47,7 +48,7 @@ export interface TempoPanelProps {
   onStartDetector: (source: "tab" | "mic") => void;
   onStopDetector: () => void;
   /** Halve or double the stored reading — the DnB octave escape hatch. */
-  onScaleBpm: (factor: 0.5 | 2) => void;
+  onScaleBpm: (factor: ScaleFactor) => void;
   onClearBpm: () => void;
 }
 

@@ -105,6 +105,9 @@ jobs:
       - name: Sync freshness tests
         run: npm run test:freshness
 
+      - name: BPM scaling tests
+        run: npm run test:bpm-scale
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 

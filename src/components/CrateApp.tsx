@@ -34,6 +34,7 @@ import {
 } from "@/client/api";
 import type { FacetKey } from "./Filters";
 import { needsSync } from "@/client/crateFreshness";
+import { scaleReading, type ScaleFactor } from "@/client/bpmScaling";
 import { useCrateCache } from "@/client/useCrateCache";
 import {
   buildPlayables,
@@ -485,20 +486,25 @@ export function CrateApp({
   const detector = useTempoDetector({ onCommit: onDetectorCommit });
 
   const scaleBpm = useCallback(
-    (factor: 0.5 | 2) => {
+    (factor: ScaleFactor) => {
       const item = currentRef.current;
       if (!item) return;
-      const existing = trackMeta.get(item.key)?.bpm ?? item.bpm;
-      if (existing === null || existing === undefined) return;
 
-      const scaled = Math.round(existing * factor * 10) / 10;
-      if (scaled < 40 || scaled > 260) {
-        say("That would land outside a sensible tempo range.");
+      // The arithmetic and the limits live in client/bpmScaling.ts, where a
+      // test can reach them. A null bpm with no refusal means there was
+      // nothing to scale, which is not an error worth a message.
+      const { bpm, refusal } = scaleReading(
+        trackMeta.get(item.key)?.bpm ?? item.bpm,
+        factor,
+      );
+      if (bpm === null) {
+        if (refusal) say(refusal);
         return;
       }
+
       void saveMeta({
         clipKey: item.key,
-        bpm: scaled,
+        bpm,
         // A deliberate correction is a manual reading — it must outrank
         // whatever the detector decides next time it hears this track.
         bpmSource: "manual",
