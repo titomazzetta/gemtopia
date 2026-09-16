@@ -102,6 +102,9 @@ jobs:
       - name: Playback watchdog tests
         run: npm run test:watchdog
 
+      - name: Sync freshness tests
+        run: npm run test:freshness
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 

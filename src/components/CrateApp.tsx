@@ -38,6 +38,7 @@ import {
 } from "@/client/api";
 import type { FacetKey } from "./Filters";
 import { startSync, type SyncHandle } from "@/client/sync";
+import { needsSync } from "@/client/crateFreshness";
 import {
   buildPlayables,
   countSilence,
@@ -646,32 +647,9 @@ export function CrateApp({
           await markMigrated(username);
         }
 
-        /*
-         * Re-check for new records on every load, not just when a previous
-         * sync was interrupted.
-         *
-         * This used to be `if (!state || state.status !== "done")`, so once a
-         * sync finished the app never looked again — you could buy a record on
-         * Tuesday and it stayed invisible until you manually hit resync. For an
-         * app aimed at people who buy records constantly, that is the wrong
-         * default.
-         *
-         * It is nearly free. `getCollectionPage` already asks Discogs for
-         * `sort=added&sort_order=desc`, so the first page *is* the newest
-         * additions: one request says whether anything appeared. Details are
-         * only fetched for releases not already cached, so an unchanged
-         * collection costs a single call and finishes in about a second.
-         *
-         * The freshness window stops a burst of tab reloads from re-listing
-         * every time; anything older than that gets checked.
-         */
-        const FRESH_FOR_MS = 15 * 60 * 1000;
-        const stale =
-          !state ||
-          state.status !== "done" ||
-          Date.now() - state.updatedAt > FRESH_FOR_MS;
-
-        if (stale) runSync("collection");
+        // The rule lives in client/crateFreshness.ts, where it can be tested.
+        // It has been wrong once already, and nothing failed when it was.
+        if (needsSync(state)) runSync("collection");
       } catch (error) {
         console.error("[boot]", error);
         if (!cancelled) say("Could not open your crate. Try reloading.");
