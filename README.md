@@ -626,6 +626,7 @@ push, no force-push, nothing merges red.
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
 `npm audit --audit-level=high`, 336 offline tests, the schema applied to a
 `npm audit --audit-level=high`, 342 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 352 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 80 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -710,6 +711,7 @@ scripts/
 ├── test-playback-watchdog.mjs a clip that never starts at all (12 cases)
 ├── test-crate-freshness.mjs   when to look for new records (8 cases)
 ├── test-bpm-scaling.mjs       the octave fix, and its limits (10 cases)
+├── test-playlist-order.mjs    drag-to-reorder, both directions (10 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths and set length (61 cases)
 └── test-api.mjs               auth, CSRF, IDOR, sharing, privacy (80 cases)
@@ -742,6 +744,7 @@ src/
 │   ├── playbackWatchdog.ts    noticing a clip that never started
 │   ├── crateFreshness.ts      when a finished sync stops being trusted
 │   ├── bpmScaling.ts          halve/double, and the range it refuses
+│   ├── playlistOrder.ts       moving a row, without an off-by-one
 │   ├── useCrateCache.ts       what you own, and its persistence
 │   ├── ownership.ts           what the app may claim about what you own
 │   ├── share.ts               exactly what crosses into the share sheet
@@ -772,6 +775,7 @@ npm run test:playback  # 10 cases, no server needed
 npm run test:watchdog  # 12 cases, no server needed
 npm run test:freshness # 8 cases, no server needed
 npm run test:bpm-scale # 10 cases, no server needed
+npm run test:order     # 10 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 61 cases, no server needed
 npm run test:api       # 80 cases, needs a running server + Postgres

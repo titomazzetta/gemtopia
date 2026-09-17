@@ -108,6 +108,9 @@ jobs:
       - name: BPM scaling tests
         run: npm run test:bpm-scale
 
+      - name: Playlist order tests
+        run: npm run test:order
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 
