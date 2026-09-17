@@ -35,6 +35,7 @@ import {
 import type { FacetKey } from "./Filters";
 import { needsSync } from "@/client/crateFreshness";
 import { scaleReading, type ScaleFactor } from "@/client/bpmScaling";
+import { moveEntry } from "@/client/playlistOrder";
 import { useCrateCache } from "@/client/useCrateCache";
 import {
   buildPlayables,
@@ -1012,10 +1013,10 @@ export function CrateApp({
   const reorderPlaylist = useCallback(
     (from: number, to: number) => {
       if (!activePlaylist || from === to) return;
-      const entries = activePlaylist.entries.map(reEntry);
-      const [moved] = entries.splice(from, 1);
-      if (!moved) return;
-      entries.splice(to, 0, moved);
+      // The index arithmetic lives in client/playlistOrder.ts, where a test
+      // can reach it. Remove-then-insert shifts everything after `from`, so
+      // the version that looks right dragging down is off by one going up.
+      const entries = moveEntry(activePlaylist.entries.map(reEntry), from, to);
       void mutateEntries(activePlaylist, entries);
     },
     [activePlaylist, mutateEntries],
