@@ -99,6 +99,9 @@ jobs:
       - name: Playback error tests
         run: npm run test:playback
 
+      - name: Playback watchdog tests
+        run: npm run test:watchdog
+
       - name: Tempo estimator tests
         run: npm run test:tempo
 
