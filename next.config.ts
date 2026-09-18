@@ -24,8 +24,30 @@ export const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   // Legacy clickjacking defence; CSP frame-ancestors is the modern control.
   { key: "X-Frame-Options", value: "DENY" },
-  // Never leak our URLs (which contain no secrets, but still) cross-origin.
-  { key: "Referrer-Policy", value: "no-referrer" },
+  /*
+   * `strict-origin-when-cross-origin`, not `no-referrer`, and the difference
+   * is the whole reason audio plays.
+   *
+   * This was `no-referrer` — which meant the YouTube iframe received no
+   * `Referer` header at all, so YouTube could not identify the embedding site
+   * and refused with a player-configuration error (the 153/154 family).
+   * Chrome tolerates it. Safari does not, on desktop or on a phone, which is
+   * why this looked for a while like a browser bug or a dead upload rather
+   * than something we were doing to ourselves.
+   *
+   * This is the second time a header that reads as pure hardening has
+   * silently removed a capability the product is built on — see the
+   * Permissions-Policy note below, which killed BPM detection the same way.
+   * The diff that breaks it looks exactly like the diff that secures it.
+   *
+   * What it actually gives away: on a cross-origin request the browser sends
+   * only the origin — `https://gemtopia.vercel.app` — never a path or query.
+   * A share token lives in a path, so it still cannot leak. Same-origin
+   * requests are unaffected, and downgrades to HTTP send nothing. The only
+   * cross-origin destination this app has is the YouTube player, and this is
+   * exactly the identification it asks for.
+   */
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   /*
    * Drop every powerful browser feature we do not use — and grant, to this
    * origin only, the two we do.

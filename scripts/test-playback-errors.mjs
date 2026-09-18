@@ -110,5 +110,24 @@ check("every branch returns something showable", () => {
   }
 });
 
+check("153 and 154 never skip the clip", () => {
+  // Observed in the wild on Safari, desktop and phone, while Chrome played
+  // the same clip. The cause was our own Referrer-Policy, so the record is
+  // fine and skipping it would walk the crate marking good clips bad.
+  for (const code of [153, 154]) {
+    assert.equal(describePlaybackError(code).permanent, false);
+  }
+});
+
+check("the embed-authorisation message does not blame the record", () => {
+  const { message } = describePlaybackError(154);
+  assert.match(message, /154/);
+  assert.match(message, /clip is fine/i);
+  assert.ok(
+    !/removed|private|uploader/i.test(message),
+    "blamed the video for a configuration problem",
+  );
+});
+
 console.log(`\n${ran - failed}/${ran} playback error tests passed.`);
 if (failed > 0) process.exit(1);
