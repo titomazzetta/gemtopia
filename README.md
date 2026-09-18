@@ -624,7 +624,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 324 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 336 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 80 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -706,6 +706,7 @@ scripts/
 ├── test-search-fields.mjs     what actually leaves the browser (11 cases)
 ├── test-write-surface.mjs     every write this app can send (7 cases)
 ├── test-playback-errors.mjs   whose fault a failed clip is (10 cases)
+├── test-playback-watchdog.mjs a clip that never starts at all (12 cases)
 ├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
 ├── test-mixing.mjs            beatmatch maths and set length (61 cases)
 └── test-api.mjs               auth, CSRF, IDOR, sharing, privacy (80 cases)
@@ -735,6 +736,7 @@ src/
 │   ├── adopt.ts               a just-added record, folded into the crate
 │   ├── searchFields.ts        which Discogs field a search runs against
 │   ├── playbackErrors.ts      whether a failed clip is the video or the browser
+│   ├── playbackWatchdog.ts    noticing a clip that never started
 │   ├── ownership.ts           what the app may claim about what you own
 │   ├── share.ts               exactly what crosses into the share sheet
 │   ├── tempo.ts               pure tempo estimator + tap tempo + BPM parsing
@@ -761,6 +763,7 @@ npm run test:adopt     # 15 cases, no server needed
 npm run test:search    # 11 cases, no server needed
 npm run test:writes    # 7 cases, no server needed
 npm run test:playback  # 10 cases, no server needed
+npm run test:watchdog  # 12 cases, no server needed
 npm run test:tempo     # 37 cases, no server needed
 npm run test:mixing    # 61 cases, no server needed
 npm run test:api       # 80 cases, needs a running server + Postgres

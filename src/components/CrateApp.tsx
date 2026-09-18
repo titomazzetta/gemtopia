@@ -927,7 +927,9 @@ export function CrateApp({
     // silently continuing to show the previous track as if it were this one.
     if (current.videoId === null) return;
     lastLoaded.current = current.key;
-    api.load(current.videoId, true);
+    // The title goes with it so a stall can name the record rather than
+    // reporting an error code that does not exist on this path.
+    api.load(current.videoId, true, current.title);
 
     // New track: throw away the tempo evidence gathered for the previous one.
     detector.reset();

@@ -2,6 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { describePlaybackError } from "./playbackErrors";
+import {
+  describeStall,
+  watchdogAction,
+  START_TIMEOUT_MS,
+} from "./playbackWatchdog";
 
 /**
  * Thin wrapper around the YouTube IFrame Player API.
@@ -97,7 +102,7 @@ export interface PlayerApi {
   duration: number;
   volume: number;
   error: string | null;
-  load(videoId: string, autoplay: boolean): void;
+  load(videoId: string, autoplay: boolean, title?: string): void;
   play(): void;
   pause(): void;
   toggle(): void;
@@ -131,6 +136,36 @@ export function useYouTubePlayer(options: {
   const [volume, setVolumeState] = useState(80);
   const [error, setError] = useState<string | null>(null);
 
+  /*
+   * Stall detection. Kept in refs, and the two controls are stable callbacks,
+   * so the player effect can close over them once without ever rebuilding the
+   * iframe — rebuilding it mid-set would be a far worse bug than the one this
+   * fixes.
+   */
+  const stallTimer = useRef<number | null>(null);
+  const stallTitle = useRef<string>("");
+
+  const clearStallTimer = useCallback(() => {
+    if (stallTimer.current !== null) {
+      window.clearTimeout(stallTimer.current);
+      stallTimer.current = null;
+    }
+  }, []);
+
+  const armStallTimer = useCallback(() => {
+    clearStallTimer();
+    stallTimer.current = window.setTimeout(() => {
+      stallTimer.current = null;
+      setStatus("error");
+      setError(describeStall(stallTitle.current));
+      // Same exit as a reported error: say so, and move on.
+      onUnplayableRef.current();
+    }, START_TIMEOUT_MS);
+  }, [clearStallTimer]);
+
+  // A stall timer must never outlive the component.
+  useEffect(() => clearStallTimer, [clearStallTimer]);
+
   useEffect(() => {
     let disposed = false;
 
@@ -161,6 +196,17 @@ export function useYouTubePlayer(options: {
             onStateChange: (event: { data: number }) => {
               if (disposed) return;
               const state = event.data;
+
+              /*
+               * The watchdog. `onError` only covers failures YouTube reports;
+               * an unavailable upload draws its own card inside the iframe and
+               * reports nothing at all, which left the player sitting at 0:00
+               * forever with a track that was never going to play.
+               */
+              const action = watchdogAction(state);
+              if (action === "clear") clearStallTimer();
+              else if (action === "extend") armStallTimer();
+
               if (state === YT.PlayerState.ENDED) {
                 setStatus("ended");
                 onEndedRef.current();
@@ -185,6 +231,7 @@ export function useYouTubePlayer(options: {
                * Chrome. Skipping on 5 walks the queue marking good records
                * bad, one per browser.
                */
+              clearStallTimer();
               const failure = describePlaybackError(event.data);
               setStatus("error");
               setError(failure.message);
@@ -234,16 +281,28 @@ export function useYouTubePlayer(options: {
     };
   }, [ready]);
 
-  const load = useCallback((videoId: string, autoplay: boolean) => {
-    const player = playerRef.current;
-    if (!player) return;
-    setError(null);
-    setCurrentTime(0);
-    setDuration(0);
-    setStatus("loading");
-    if (autoplay) player.loadVideoById(videoId);
-    else player.cueVideoById(videoId);
-  }, []);
+  const load = useCallback(
+    (videoId: string, autoplay: boolean, title = "") => {
+      const player = playerRef.current;
+      if (!player) return;
+      setError(null);
+      setCurrentTime(0);
+      setDuration(0);
+      setStatus("loading");
+      stallTitle.current = title;
+
+      if (autoplay) {
+        player.loadVideoById(videoId);
+        // Armed only when playback was actually asked for. A cued clip is
+        // sitting there on purpose and is not stuck.
+        armStallTimer();
+      } else {
+        clearStallTimer();
+        player.cueVideoById(videoId);
+      }
+    },
+    [armStallTimer, clearStallTimer],
+  );
 
   const play = useCallback(() => playerRef.current?.playVideo(), []);
   const pause = useCallback(() => playerRef.current?.pauseVideo(), []);
