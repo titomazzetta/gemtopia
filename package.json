@@ -34,7 +34,6 @@
     "test:writes": "node scripts/test-write-surface.mjs",
     "test:playback": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playback-errors.mjs",
     "test:watchdog": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playback-watchdog.mjs",
-    "test:freshness": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-crate-freshness.mjs"
     "test:freshness": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-crate-freshness.mjs",
     "test:bpm-scale": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-bpm-scaling.mjs",
     "test:order": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playlist-order.mjs"
