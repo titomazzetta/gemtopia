@@ -121,8 +121,24 @@ check("framing is denied", () => {
   assert.equal(header("X-Frame-Options"), "DENY");
 });
 
-check("referrers do not leak", () => {
-  assert.equal(header("Referrer-Policy"), "no-referrer");
+check("referrers identify the origin, and nothing more", () => {
+  /*
+   * NOT `no-referrer`, and this test exists to stop it going back.
+   *
+   * Under `no-referrer` the YouTube iframe gets no Referer header, so YouTube
+   * cannot identify the embedding site and refuses to play — error 153/154.
+   * Chrome tolerates it; Safari does not, on desktop or phone. It cost a day
+   * of chasing a browser bug that was ours.
+   *
+   * `strict-origin-when-cross-origin` sends the origin only: no path, no
+   * query. A share token lives in a path, so it still cannot leak.
+   */
+  assert.equal(header("Referrer-Policy"), "strict-origin-when-cross-origin");
+  assert.notEqual(
+    header("Referrer-Policy"),
+    "no-referrer",
+    "no-referrer stops YouTube playing in Safari — see next.config.ts",
+  );
 });
 
 check("CSP is not set statically — it carries a per-request nonce", () => {

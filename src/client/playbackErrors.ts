@@ -34,6 +34,23 @@ export function describePlaybackError(code: unknown): PlaybackFailure {
         permanent: true,
       };
 
+    case 153:
+    case 154:
+      /*
+       * YouTube could not identify the embedding site, because it received no
+       * usable Referer header. Undocumented codes, and for a while this app
+       * caused them itself with `Referrer-Policy: no-referrer` — see
+       * next.config.ts. Kept as non-permanent: the clip is fine, and skipping
+       * it would walk the crate marking good records bad.
+       */
+      return {
+        message:
+          "YouTube wouldn't authorise the embed (error " +
+          `${code}). The clip is fine — this is a configuration problem, ` +
+          "not the record.",
+        permanent: false,
+      };
+
     case 5:
       return {
         message:
