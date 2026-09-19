@@ -3,8 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { describePlaybackError } from "./playbackErrors";
 import {
+  describeBlockedPlay,
   describeStall,
+  playOutcome,
+  shouldSkipOnStall,
+  stallVerdict,
   watchdogAction,
+  PLAY_CONFIRM_MS,
   START_TIMEOUT_MS,
 } from "./playbackWatchdog";
 
@@ -22,6 +27,32 @@ import {
  */
 
 const API_SRC = "https://www.youtube.com/iframe_api";
+const PLAYER_ORIGIN = "https://www.youtube-nocookie.com";
+
+/**
+ * Ask the browser whether the player's frame is allowed to start audio.
+ *
+ * The answer comes from Permissions Policy, which is decided by a response
+ * header this repo controls — so a `false` here is very often our own bug
+ * rather than the viewer's settings, and it is worth asking before blaming
+ * either. `featurePolicy` is unevenly implemented, so an unknown answer is
+ * treated as permitted: a missing API must not invent a diagnosis.
+ */
+function autoplayPermitted(): boolean {
+  try {
+    const policy = (
+      document as Document & {
+        featurePolicy?: {
+          allowsFeature(feature: string, origin?: string): boolean;
+        };
+      }
+    ).featurePolicy;
+    if (!policy) return true;
+    return policy.allowsFeature("autoplay", PLAYER_ORIGIN);
+  } catch {
+    return true;
+  }
+}
 
 /* Minimal typings for the slice of the API we touch. */
 export interface YTPlayer {
@@ -165,6 +196,23 @@ export function useYouTubePlayer(options: {
     title: string;
   } | null>(null);
 
+  /*
+   * A press of play that arrived before the player existed. Separate from
+   * `pendingLoad` because the two are genuinely different requests: one says
+   * which record, the other says go. Pressing play while a track is already
+   * queued must not be mistaken for choosing a track, and vice versa.
+   */
+  const pendingPlay = useRef(false);
+
+  /*
+   * Whether an explicit press of play was actually obeyed.
+   *
+   * `playVideo()` returns nothing and throws nothing when the browser refuses
+   * it, so a blocked press is indistinguishable from a press that worked
+   * until you look at the player a moment later. This is that look.
+   */
+  const playConfirm = useRef<number | null>(null);
+
   const clearStallTimer = useCallback(() => {
     if (stallTimer.current !== null) {
       window.clearTimeout(stallTimer.current);
@@ -172,19 +220,65 @@ export function useYouTubePlayer(options: {
     }
   }, []);
 
+  const clearPlayConfirm = useCallback(() => {
+    if (playConfirm.current !== null) {
+      window.clearTimeout(playConfirm.current);
+      playConfirm.current = null;
+    }
+  }, []);
+
   const armStallTimer = useCallback(() => {
     clearStallTimer();
     stallTimer.current = window.setTimeout(() => {
       stallTimer.current = null;
+
+      const allowed = autoplayPermitted();
+      const verdict = stallVerdict(allowed);
+
       setStatus("error");
-      setError(describeStall(stallTitle.current));
-      // Same exit as a reported error: say so, and move on.
-      onUnplayableRef.current();
+      setError(describeStall(stallTitle.current, allowed));
+
+      // Only a dead upload advances. Skipping a policy block would skip the
+      // whole crate, one record every eight seconds, for a reason that has
+      // nothing to do with any of them.
+      if (shouldSkipOnStall(verdict)) onUnplayableRef.current();
     }, START_TIMEOUT_MS);
   }, [clearStallTimer]);
 
-  // A stall timer must never outlive the component.
+  // Neither timer may outlive the component.
   useEffect(() => clearStallTimer, [clearStallTimer]);
+  useEffect(() => clearPlayConfirm, [clearPlayConfirm]);
+
+  /**
+   * Press play, and check a second later that it took.
+   *
+   * Every route to playback funnels through here — the transport button, the
+   * spacebar, and a queued press replayed on ready — so there is one place
+   * where "it did nothing" can be noticed, rather than three places where it
+   * cannot.
+   */
+  const requestPlay = useCallback(() => {
+    const player = playerRef.current;
+    if (!player) {
+      // Held, not dropped. The press is honoured the moment the player lands.
+      pendingPlay.current = true;
+      setStatus("loading");
+      return;
+    }
+
+    player.playVideo();
+    clearPlayConfirm();
+    playConfirm.current = window.setTimeout(() => {
+      playConfirm.current = null;
+      const state = playerRef.current?.getPlayerState();
+      if (state === undefined) return;
+      if (playOutcome(state) === "started") return;
+
+      // Not an error about the record — an instruction the person can act on.
+      setStatus("paused");
+      setError(describeBlockedPlay());
+    }, PLAY_CONFIRM_MS);
+  }, [clearPlayConfirm]);
 
   /*
    * The part that needs a live player. Split out so `onReady` can replay a
@@ -223,7 +317,7 @@ export function useYouTubePlayer(options: {
         if (disposed || !containerRef.current) return;
 
         playerRef.current = new YT.Player(containerRef.current, {
-          host: "https://www.youtube-nocookie.com",
+          host: PLAYER_ORIGIN,
           width: "100%",
           height: "100%",
           playerVars: {
@@ -244,12 +338,19 @@ export function useYouTubePlayer(options: {
 
               const queued = pendingLoad.current;
               pendingLoad.current = null;
-              if (!queued) return;
+              if (queued) {
+                // Deliberately still autoplays. The gesture that asked for
+                // this happened seconds ago and has not been withdrawn;
+                // honouring it late is what the viewer is waiting for.
+                startPlayback(queued.videoId, queued.autoplay, queued.title);
+              }
 
-              // Deliberately still autoplays. The gesture that asked for this
-              // happened seconds ago and has not been withdrawn; honouring it
-              // late is what the viewer is waiting for.
-              startPlayback(queued.videoId, queued.autoplay, queued.title);
+              // A press of play that landed before the player did. Replayed
+              // after the load above, so it acts on the right record.
+              if (pendingPlay.current) {
+                pendingPlay.current = false;
+                requestPlay();
+              }
             },
             onStateChange: (event: { data: number }) => {
               if (disposed) return;
@@ -264,6 +365,15 @@ export function useYouTubePlayer(options: {
               const action = watchdogAction(state);
               if (action === "clear") clearStallTimer();
               else if (action === "extend") armStallTimer();
+
+              // Any sign of life answers the question the confirm timer was
+              // about to ask, including a press on the player's own controls.
+              if (
+                state === YT.PlayerState.PLAYING ||
+                state === YT.PlayerState.BUFFERING
+              ) {
+                clearPlayConfirm();
+              }
 
               if (state === YT.PlayerState.ENDED) {
                 setStatus("ended");
@@ -358,15 +468,22 @@ export function useYouTubePlayer(options: {
     [startPlayback],
   );
 
-  const play = useCallback(() => playerRef.current?.playVideo(), []);
-  const pause = useCallback(() => playerRef.current?.pauseVideo(), []);
+  const play = requestPlay;
+
+  const pause = useCallback(() => {
+    clearPlayConfirm();
+    playerRef.current?.pauseVideo();
+  }, [clearPlayConfirm]);
 
   const toggle = useCallback(() => {
-    const player = playerRef.current;
-    if (!player) return;
-    if (status === "playing") player.pauseVideo();
-    else player.playVideo();
-  }, [status]);
+    if (status === "playing") {
+      clearPlayConfirm();
+      playerRef.current?.pauseVideo();
+      return;
+    }
+    // No early return on a missing player: requestPlay holds the press.
+    requestPlay();
+  }, [status, requestPlay, clearPlayConfirm]);
 
   const seek = useCallback((seconds: number) => {
     playerRef.current?.seekTo(Math.max(0, seconds), true);
