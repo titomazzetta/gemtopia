@@ -171,12 +171,45 @@ export function playOutcome(playerState: number): PlayOutcome {
 }
 
 /**
- * What to say when the play button did nothing.
+ * How many times to simply ask again before concluding anything.
  *
- * Deliberately not an error about the record. Nothing is wrong with the
- * record; the browser declined to start audio, and the person needs the one
- * action that fixes it rather than a diagnosis they cannot act on.
+ * Not every ignored press is a policy refusal. The iframe can report ready
+ * while its video module is still coming up, and a press that lands in that
+ * window is dropped on the floor with no error and no state change — which
+ * looks identical to a browser saying no, and is cured by asking once more a
+ * second later.
+ *
+ * One retry, because the two causes need opposite handling and a retry is the
+ * cheap way to tell them apart. A refusal will refuse again; a race will not.
+ * Retrying more would just delay an honest answer.
+ */
+export const PLAY_RETRY_LIMIT = 1;
+
+export type PlayAttemptAction =
+  /** Ask again. Probably a race inside the player. */
+  | "retry"
+  /** Asked enough. Something is actually refusing. */
+  | "give-up";
+
+export function nextPlayAttempt(attempt: number): PlayAttemptAction {
+  return attempt < PLAY_RETRY_LIMIT ? "retry" : "give-up";
+}
+
+/**
+ * What to say when the play button did nothing, twice.
+ *
+ * This is a last resort and should never be seen in normal use. Once the
+ * player's origin is granted autoplay, a press works the first time — the
+ * press-YouTube's-own-play ritual is a bug being worked around, not a way to
+ * use the app, and if this string appears on a healthy deployment that is a
+ * defect report rather than a feature.
+ *
+ * What is left after the header fix is a viewer who has told their browser,
+ * explicitly and per-site, never to start audio. Safari has that switch.
+ * Honouring their setting is right; leaving them staring at a dead button is
+ * not. So it names the one action that works, and says why, without implying
+ * anyone should have to do this routinely.
  */
 export function describeBlockedPlay(): string {
-  return "This browser blocked playback from starting on its own. Press play on the video once — after that, the controls here work normally.";
+  return "Your browser is set to block audio from starting here. Press play on the video itself once to allow it — you shouldn't need to do this again.";
 }

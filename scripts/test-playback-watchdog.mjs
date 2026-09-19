@@ -24,10 +24,12 @@ import {
   watchdogAction,
   describeStall,
   describeBlockedPlay,
+  nextPlayAttempt,
   playOutcome,
   shouldSkipOnStall,
   stallVerdict,
   PLAY_CONFIRM_MS,
+  PLAY_RETRY_LIMIT,
   PLAYER_STATE,
   START_TIMEOUT_MS,
 } from "../src/client/playbackWatchdog.ts";
@@ -191,9 +193,38 @@ check("the confirm window is much shorter than the stall window", () => {
   assert.equal(PLAY_CONFIRM_MS, 1_200);
 });
 
-check("the blocked-play message names the one action that fixes it", () => {
+check("an ignored press is retried once before anything is concluded", () => {
+  /*
+   * Not every ignored press is a refusal. A player whose video module is
+   * still waking up drops the first press with no error and no state change,
+   * which looks exactly like a policy block and is cured by asking again.
+   * A refusal refuses twice; a race does not.
+   */
+  assert.equal(nextPlayAttempt(0), "retry");
+  assert.equal(nextPlayAttempt(1), "give-up");
+  assert.equal(PLAY_RETRY_LIMIT, 1);
+});
+
+check("retrying cannot loop", () => {
+  // The give-up branch must be reachable from every attempt count, or a
+  // blocked player retries forever and the message never appears.
+  for (const attempt of [1, 2, 7, 99]) {
+    assert.equal(nextPlayAttempt(attempt), "give-up");
+  }
+});
+
+check("the blocked-play message is a last resort, not an instruction manual", () => {
   const message = describeBlockedPlay();
+
+  // It still names the action that works, because a dead button with no
+  // explanation is worse than a workaround.
   assert.match(message, /press play on the video/i);
+
+  // But it must not read as normal operation. Pressing YouTube's own play
+  // button first is a bug being worked around, and the copy says so.
+  assert.match(message, /shouldn't need to do this again/i);
+  assert.match(message, /your browser/i);
+
   assert.ok(
     !/error/i.test(message),
     "called it an error; nothing is wrong with the record",

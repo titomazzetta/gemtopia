@@ -5,6 +5,7 @@ import { describePlaybackError } from "./playbackErrors";
 import {
   describeBlockedPlay,
   describeStall,
+  nextPlayAttempt,
   playOutcome,
   shouldSkipOnStall,
   stallVerdict,
@@ -258,26 +259,48 @@ export function useYouTubePlayer(options: {
    * cannot.
    */
   const requestPlay = useCallback(() => {
-    const player = playerRef.current;
-    if (!player) {
-      // Held, not dropped. The press is honoured the moment the player lands.
-      pendingPlay.current = true;
-      setStatus("loading");
-      return;
+    /*
+     * A local declaration rather than a second `useCallback`, because it
+     * recurses: the retry is the same request with the attempt count moved
+     * on. A memoised callback cannot name itself.
+     */
+    function attemptPlay(attempt: number) {
+      const player = playerRef.current;
+      if (!player) {
+        // Held, not dropped. The press is honoured the moment the player
+        // lands, replayed from onReady.
+        pendingPlay.current = true;
+        setStatus("loading");
+        return;
+      }
+
+      player.playVideo();
+      clearPlayConfirm();
+
+      playConfirm.current = window.setTimeout(() => {
+        playConfirm.current = null;
+        const state = playerRef.current?.getPlayerState();
+        if (state === undefined) return;
+        if (playOutcome(state) === "started") return;
+
+        /*
+         * The press did nothing. Ask again before concluding anything: a
+         * player whose video module is still waking up drops the first press
+         * silently, and that is indistinguishable from a refusal except that
+         * it does not happen twice.
+         */
+        if (nextPlayAttempt(attempt) === "retry") {
+          attemptPlay(attempt + 1);
+          return;
+        }
+
+        // Asked twice, ignored twice. Not an error about the record.
+        setStatus("paused");
+        setError(describeBlockedPlay());
+      }, PLAY_CONFIRM_MS);
     }
 
-    player.playVideo();
-    clearPlayConfirm();
-    playConfirm.current = window.setTimeout(() => {
-      playConfirm.current = null;
-      const state = playerRef.current?.getPlayerState();
-      if (state === undefined) return;
-      if (playOutcome(state) === "started") return;
-
-      // Not an error about the record — an instruction the person can act on.
-      setStatus("paused");
-      setError(describeBlockedPlay());
-    }, PLAY_CONFIRM_MS);
+    attemptPlay(0);
   }, [clearPlayConfirm]);
 
   /*
