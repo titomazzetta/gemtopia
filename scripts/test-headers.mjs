@@ -62,8 +62,45 @@ check("microphone is granted to self — the Safari/Firefox fallback", () => {
   );
 });
 
-check("autoplay is granted to self — the player advances between tracks", () => {
-  assert.equal(permissions()["autoplay"], "(self)");
+/*
+ * The two tests below replace one that read:
+ *
+ *   check("autoplay is granted to self — the player advances between tracks",
+ *     () => assert.equal(permissions()["autoplay"], "(self)"));
+ *
+ * It passed for months and asserted a bug. `self` is already the default
+ * allowlist for autoplay, so that line granted nothing and denied the one
+ * frame that needed it. A test that pins the broken value is worse than no
+ * test: it makes the fix look like the regression.
+ */
+for (const feature of ["autoplay", "encrypted-media"]) {
+  check(`${feature} reaches the player's frame, not just ours`, () => {
+    const value = permissions()[feature];
+    assert.ok(value, `${feature} is missing from Permissions-Policy`);
+
+    for (const origin of [
+      "https://www.youtube-nocookie.com",
+      "https://www.youtube.com",
+    ]) {
+      assert.ok(
+        value.includes(`"${origin}"`),
+        `${feature}=${value} does not name ${origin}. The player runs in a ` +
+          `cross-origin iframe; "(self)" denies it. For autoplay the symptom ` +
+          `is a dead first tap that starts working only after the viewer ` +
+          `presses YouTube's own play button once.`,
+      );
+    }
+
+    assert.ok(
+      value.startsWith("(self "),
+      `${feature} must still grant this origin as well as the player's`,
+    );
+  });
+}
+
+check("autoplay is not opened to the whole web", () => {
+  // `*` would let any frame this page ever embeds start playing audio.
+  assert.ok(!permissions()["autoplay"].includes("*"));
 });
 
 /* -- the features it does not, which must stay shut ----------------------- */
@@ -93,13 +130,35 @@ check("no feature is granted to * ", () => {
   }
 });
 
-check("nothing grants a third-party origin", () => {
-  // (self) and () only. A named origin here would hand a capability to an
-  // embedded frame — notably the YouTube player, which must never get one.
+check("only the two playback features name a third-party origin", () => {
+  /*
+   * This used to require `()` or `(self)` for every feature, full stop, and
+   * the comment said the YouTube player "must never get one". That was the
+   * right instinct pointed at the wrong list: the player must never get the
+   * camera, the microphone or the screen, and it must get autoplay, or there
+   * is no product. The rule is now an allowlist of exceptions rather than a
+   * blanket ban, so adding a third exception is a visible decision.
+   */
+  const DELEGATED = new Set(["autoplay", "encrypted-media"]);
+
   for (const [feature, allowlist] of Object.entries(permissions())) {
+    if (DELEGATED.has(feature)) continue;
     assert.ok(
       allowlist === "()" || allowlist === "(self)",
       `${feature} has an unexpected allowlist: ${allowlist}`,
+    );
+  }
+});
+
+check("the sensitive features are still shut to the player", () => {
+  // The delegation above is narrow on purpose. If one of these ever grows an
+  // origin, the embedded frame can reach hardware, and that is a different
+  // product with a different threat model.
+  for (const feature of ["camera", "microphone", "display-capture"]) {
+    const allowlist = permissions()[feature];
+    assert.ok(
+      !allowlist.includes("youtube"),
+      `${feature} names a YouTube origin: ${allowlist}`,
     );
   }
 });
@@ -123,22 +182,16 @@ check("framing is denied", () => {
 
 check("referrers identify the origin, and nothing more", () => {
   /*
-   * NOT `no-referrer`, and this test exists to stop it going back.
-   *
-   * Under `no-referrer` the YouTube iframe gets no Referer header, so YouTube
-   * cannot identify the embedding site and refuses to play — error 153/154.
-   * Chrome tolerates it; Safari does not, on desktop or phone. It cost a day
-   * of chasing a browser bug that was ours.
-   *
    * `strict-origin-when-cross-origin` sends the origin only: no path, no
    * query. A share token lives in a path, so it still cannot leak.
+   *
+   * This assertion deliberately no longer claims that `no-referrer` breaks
+   * playback. It was written believing that, and the belief did not survive
+   * reading YouTube's widget API — see the note in next.config.ts. Keeping
+   * the claim in a test message would have taught the next reader something
+   * false with the authority of a passing test.
    */
   assert.equal(header("Referrer-Policy"), "strict-origin-when-cross-origin");
-  assert.notEqual(
-    header("Referrer-Policy"),
-    "no-referrer",
-    "no-referrer stops YouTube playing in Safari — see next.config.ts",
-  );
 });
 
 check("CSP is not set statically — it carries a per-request nonce", () => {

@@ -14,6 +14,17 @@ import type { NextConfig } from "next";
  * "audio capture not allowed" and no indication that the page's own response
  * headers were the cause.
  */
+/**
+ * The origins the embedded player actually runs on.
+ *
+ * `host: "https://www.youtube-nocookie.com"` is what `useYouTubePlayer`
+ * passes, so that is the frame's origin in practice; www.youtube.com is named
+ * too because the widget API falls back to it and a silent fallback must not
+ * become a silent outage.
+ */
+export const YOUTUBE_ORIGINS =
+  '"https://www.youtube-nocookie.com" "https://www.youtube.com"';
+
 export const securityHeaders = [
   // Force HTTPS for two years, including subdomains. Vercel terminates TLS.
   {
@@ -25,32 +36,31 @@ export const securityHeaders = [
   // Legacy clickjacking defence; CSP frame-ancestors is the modern control.
   { key: "X-Frame-Options", value: "DENY" },
   /*
-   * `strict-origin-when-cross-origin`, not `no-referrer`, and the difference
-   * is the whole reason audio plays.
+   * `strict-origin-when-cross-origin`, not `no-referrer`.
    *
-   * This was `no-referrer` — which meant the YouTube iframe received no
-   * `Referer` header at all, so YouTube could not identify the embedding site
-   * and refused with a player-configuration error (the 153/154 family).
-   * Chrome tolerates it. Safari does not, on desktop or on a phone, which is
-   * why this looked for a while like a browser bug or a dead upload rather
-   * than something we were doing to ourselves.
+   * Honest history, because the first version of this comment claimed more
+   * than it could prove. `no-referrer` was suspected of causing the YouTube
+   * 153/154 errors on Safari, on the theory that the player frame was loading
+   * with no `Referer` and YouTube could not identify the embedding site.
+   * Reading YouTube's shipped widget API afterwards showed it sets
+   * `referrerPolicy="strict-origin-when-cross-origin"` on its own iframe
+   * before assigning `src`, so that frame's document request was never
+   * governed by this header. The real cause was almost certainly the
+   * `autoplay` delegation below.
    *
-   * This is the second time a header that reads as pure hardening has
-   * silently removed a capability the product is built on — see the
-   * Permissions-Policy note below, which killed BPM detection the same way.
-   * The diff that breaks it looks exactly like the diff that secures it.
-   *
-   * What it actually gives away: on a cross-origin request the browser sends
-   * only the origin — `https://gemtopia.vercel.app` — never a path or query.
-   * A share token lives in a path, so it still cannot leak. Same-origin
-   * requests are unaffected, and downgrades to HTTP send nothing. The only
-   * cross-origin destination this app has is the YouTube player, and this is
-   * exactly the identification it asks for.
+   * The change stays, on its own merits rather than a borrowed one: the
+   * origin is what an embed host is entitled to see, several YouTube
+   * subresource requests do inherit this policy, and `no-referrer` buys
+   * nothing here that the policy below does not already buy. On a
+   * cross-origin request the browser sends only the origin —
+   * `https://gemtopia.vercel.app` — never a path or query. A share token
+   * lives in a path, so it still cannot leak. Same-origin requests are
+   * unaffected and downgrades to HTTP send nothing.
    */
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   /*
-   * Drop every powerful browser feature we do not use — and grant, to this
-   * origin only, the two we do.
+   * Drop every powerful browser feature we do not use — and grant each one we
+   * do to exactly the origin that needs it.
    *
    * `()` is an empty allowlist: it denies the feature to everyone, this page
    * included. That is right for a camera we never open. It was wrong for
@@ -58,20 +68,42 @@ export const securityHeaders = [
    * result was a headline feature that could not run on any deployment while
    * appearing, from the code, to be fully implemented.
    *
-   * `(self)` grants the feature to this origin and nothing else. The YouTube
-   * iframe is a separate origin and is not named here, so it inherits nothing:
-   * embedded third-party frames still cannot reach the screen, the microphone,
-   * or the camera.
+   * `(self)` grants the feature to this origin and nothing else — and that is
+   * the trap this header sets twice, because the player is NOT this origin.
+   * It runs in a cross-origin iframe on youtube-nocookie.com, and the default
+   * allowlist for `autoplay` is already `self`, so writing `autoplay=(self)`
+   * looks like granting the app what it needs while in fact denying the frame
+   * that does the playing. The symptom is not an error: the first tap on a
+   * track does nothing at all, the playhead sits at 0:00, and everything
+   * starts working the moment you press YouTube's own play button once —
+   * because a user gesture inside that frame is what lifts the block. See the
+   * `autoplay` entry below.
+   *
+   * The two YouTube origins are named for `autoplay` and `encrypted-media`
+   * only. Everything else stays `(self)` or `()`, so the embedded frame still
+   * cannot reach the screen, the microphone, the camera, or anything else.
    */
   {
     key: "Permissions-Policy",
     value: [
       "accelerometer=()",
-      "autoplay=(self)",
+      /*
+       * Delegated to the player's own origins, not just ours.
+       *
+       * The iframe asks for it — YouTube's widget API sets
+       * `allow="accelerometer; autoplay; clipboard-write; encrypted-media;
+       * gyroscope; picture-in-picture; web-share"` on the frame it builds.
+       * An `allow` attribute can only ask; the parent's header decides. With
+       * `autoplay=(self)` the answer was no, so `loadVideoById` — which
+       * autoplays — was refused for every track the app started itself.
+       */
+      `autoplay=(self ${YOUTUBE_ORIGINS})`,
       "camera=()",
       // Tab-audio capture — the primary BPM detection path (Chromium).
       "display-capture=(self)",
-      "encrypted-media=(self)",
+      // Same delegation, same reason: DRM-protected clips are decoded inside
+      // the player's frame, not ours.
+      `encrypted-media=(self ${YOUTUBE_ORIGINS})`,
       "fullscreen=(self)",
       "geolocation=()",
       "gyroscope=()",
