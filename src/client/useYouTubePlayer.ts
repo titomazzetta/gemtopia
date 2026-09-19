@@ -145,6 +145,26 @@ export function useYouTubePlayer(options: {
   const stallTimer = useRef<number | null>(null);
   const stallTitle = useRef<string>("");
 
+  /*
+   * A request that arrived before the player existed.
+   *
+   * Building the iframe means fetching YouTube's API script and waiting for
+   * `onReady`, which on a cold load is comfortably longer than it takes
+   * someone to click the first track they see. `load()` used to return
+   * silently in that window: no playback, no error, no change of status, just
+   * a track name that lit up and a playhead that stayed at 0:00 — and it
+   * cleared up on its own once the player finished arriving, which made it
+   * look like something the viewer had done rather than a race.
+   *
+   * Only the newest request is kept. If someone clicks three records while
+   * the player loads, they want the third one, not a burst of three.
+   */
+  const pendingLoad = useRef<{
+    videoId: string;
+    autoplay: boolean;
+    title: string;
+  } | null>(null);
+
   const clearStallTimer = useCallback(() => {
     if (stallTimer.current !== null) {
       window.clearTimeout(stallTimer.current);
@@ -165,6 +185,35 @@ export function useYouTubePlayer(options: {
 
   // A stall timer must never outlive the component.
   useEffect(() => clearStallTimer, [clearStallTimer]);
+
+  /*
+   * The part that needs a live player. Split out so `onReady` can replay a
+   * request that arrived too early without duplicating any of it.
+   *
+   * Declared above the player effect rather than beside `load`, because
+   * `onReady` closes over it: the React Compiler rejects a `useCallback`
+   * read before its own declaration, on the grounds that the earlier reader
+   * can never see a later version of it. It is right, and the ordering is
+   * the whole fix.
+   */
+  const startPlayback = useCallback(
+    (videoId: string, autoplay: boolean, title: string) => {
+      const player = playerRef.current;
+      if (!player) return;
+      stallTitle.current = title;
+
+      if (autoplay) {
+        player.loadVideoById(videoId);
+        // Armed only when playback was actually asked for. A cued clip is
+        // sitting there on purpose and is not stuck.
+        armStallTimer();
+      } else {
+        clearStallTimer();
+        player.cueVideoById(videoId);
+      }
+    },
+    [armStallTimer, clearStallTimer],
+  );
 
   useEffect(() => {
     let disposed = false;
@@ -192,6 +241,15 @@ export function useYouTubePlayer(options: {
               if (disposed) return;
               setReady(true);
               playerRef.current?.setVolume(volume);
+
+              const queued = pendingLoad.current;
+              pendingLoad.current = null;
+              if (!queued) return;
+
+              // Deliberately still autoplays. The gesture that asked for this
+              // happened seconds ago and has not been withdrawn; honouring it
+              // late is what the viewer is waiting for.
+              startPlayback(queued.videoId, queued.autoplay, queued.title);
             },
             onStateChange: (event: { data: number }) => {
               if (disposed) return;
@@ -283,25 +341,21 @@ export function useYouTubePlayer(options: {
 
   const load = useCallback(
     (videoId: string, autoplay: boolean, title = "") => {
-      const player = playerRef.current;
-      if (!player) return;
       setError(null);
       setCurrentTime(0);
       setDuration(0);
       setStatus("loading");
-      stallTitle.current = title;
 
-      if (autoplay) {
-        player.loadVideoById(videoId);
-        // Armed only when playback was actually asked for. A cued clip is
-        // sitting there on purpose and is not stuck.
-        armStallTimer();
-      } else {
-        clearStallTimer();
-        player.cueVideoById(videoId);
+      if (!playerRef.current) {
+        // Queue it and show "loading" rather than doing nothing at all. The
+        // status is honest: the clip really is on its way.
+        pendingLoad.current = { videoId, autoplay, title };
+        return;
       }
+
+      startPlayback(videoId, autoplay, title);
     },
-    [armStallTimer, clearStallTimer],
+    [startPlayback],
   );
 
   const play = useCallback(() => playerRef.current?.playVideo(), []);
