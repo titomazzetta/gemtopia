@@ -238,6 +238,25 @@ export function CrateApp({
   const [insightsError, setInsightsError] = useState<string | null>(null);
 
   /* ---------------- playback ---------------- */
+  /*
+   * The queue starts empty, and that is the whole reason opening Gemtopia is
+   * silent.
+   *
+   * `current` is derived from it, and the effect that calls `api.load(...,
+   * autoplay)` does nothing while `current` is null — so the only things that
+   * ever start audio are the five user actions that fill this queue: shuffle,
+   * play a list, play a row, preview a search result, and the BPM sweep.
+   * There is no restore-last-session path on purpose.
+   *
+   * Worth knowing before changing this line: delegating `autoplay` to the
+   * player's origin in next.config.ts does NOT make the page play on load.
+   * Permissions Policy uses "autoplay" to mean "may this frame start audio
+   * without a gesture *inside that frame*" — and since every press of our own
+   * transport is a gesture on this page rather than in the iframe, every play
+   * the app performs is "autoplay" by that definition. The grant is what lets
+   * the buttons work at all. Starting on load would be this line, not that
+   * header.
+   */
   const [queue, setQueue] = useState<Playable[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
   const [shuffleOn, setShuffleOn] = useState(true);
