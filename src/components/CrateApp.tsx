@@ -70,6 +70,7 @@ import {
   Filters,
   type FilterState,
 } from "./Filters";
+import { Mark } from "@/components/Mark";
 import {
   analyseSequence,
   setLength,
@@ -96,7 +97,7 @@ import {
 } from "@/client/adopt";
 import { DiscogsSearch } from "./DiscogsSearch";
 import type { SearchHit } from "@/lib/discogs";
-import { Compass, Disc, Metronome, Refresh, Search, Shuffle } from "./Icons";
+import { Compass, Metronome, Refresh, Search, Shuffle } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights" | "search";
 
@@ -1505,7 +1506,12 @@ export function CrateApp({
   return (
     <div className="flex h-full flex-col">
       <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 py-2.5">
-        <Disc className="h-5 w-5 shrink-0 text-accent" />
+        {/*
+          20px lands in the text cut, which is the drawing meant for this size.
+          On a phone the wordmark is hidden and the mark stands alone, so it
+          takes the accessible name here and only here.
+        */}
+        <Mark size={20} title="Gemtopia" className="shrink-0 text-accent" />
         <span className="hidden text-sm font-semibold tracking-tight text-neutral-100 sm:block">
           Gemtopia
         </span>

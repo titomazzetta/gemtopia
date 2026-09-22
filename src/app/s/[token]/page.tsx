@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPlaylistByShareToken } from "@/lib/repo";
-import { Disc } from "@/components/Icons";
 import { SharedPlayer } from "@/components/SharedPlayer";
+import { Mark } from "@/components/Mark";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,7 +63,7 @@ export default async function SharedPlaylistPage({
     <main className="mx-auto min-h-full max-w-2xl px-6 py-12">
       <header className="mb-8">
         <div className="mb-5 flex items-center gap-2 text-neutral-600">
-          <Disc className="h-4 w-4" />
+          <Mark size={16} />
           <span className="text-[11px] uppercase tracking-wider">Gemtopia</span>
         </div>
 

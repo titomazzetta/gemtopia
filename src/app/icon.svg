@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- The micro cut, because this file is rendered at 16-32px.
+       apple-icon.png is the TEXT cut instead: it renders at 180, where the
+       knockouts of this drawing turn chunky and there is room for strokes.
+       The cut follows the rendered size, never the word "icon".
+
+       The micro cut. Solid stone, facets and spindle knocked out with a mask
+       so the shape is genuinely transparent rather than filled with the app's
+       background: this same file is the favicon, the tab icon and whatever a
+       browser decides to composite it onto. -->
+  <mask id="m">
+    <polygon points="23,13 41,13 58,30 32,62 6,30" fill="#fff"/>
+    <g stroke="#000" fill="none" stroke-width="2.6">
+      <line x1="6" y1="30" x2="58" y2="30"/>
+      <line x1="23" y1="13" x2="27" y2="30"/>
+      <line x1="41" y1="13" x2="37" y2="30"/>
+      <line x1="27" y1="30" x2="32" y2="62"/>
+      <line x1="37" y1="30" x2="32" y2="62"/>
+    </g>
+    <circle cx="32" cy="30" r="4.6" fill="#000"/>
+  </mask>
+  <rect width="64" height="64" fill="#5ef08a" mask="url(#m)"/>
+</svg>
