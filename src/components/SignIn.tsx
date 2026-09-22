@@ -1,4 +1,4 @@
-import { Disc } from "./Icons";
+import { Mark } from "@/components/Mark";
 
 const FEATURES = [
   ["Shuffle the crate", "Fisher–Yates across every clip Discogs has for your collection, spread so the same release never lands back to back."],
@@ -13,7 +13,10 @@ export function SignIn({ error }: { error: string | null }) {
   return (
     <main className="mx-auto flex min-h-full max-w-2xl flex-col justify-center px-6 py-16">
       <div className="mb-8 flex items-center gap-3">
-        <Disc className="h-8 w-8 text-accent" />
+        {/* Forced to the display cut: 64 would pick it anyway, and stating it
+            here means a later size tweak cannot silently downgrade the one
+            screen with room for the nine-facet drawing. */}
+        <Mark size={64} cut="display" className="text-accent" />
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-neutral-100">
             Gemtopia

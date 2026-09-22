@@ -4,19 +4,35 @@ export default {
   content: ["./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
+      /*
+       * Phosphor.
+       *
+       * The ink ramp is tinted green rather than neutral, which is the whole
+       * difference between "a dark UI" and a room with a colour in it. Seven
+       * steps, same structure as before — only the hue moved, so every
+       * `bg-ink-850` and `text-neutral-500` in the app carried over untouched.
+       *
+       * Chosen for legibility as much as for looks: on a green-black ground
+       * both accents clear AAA rather than scraping AA, which matters when the
+       * screen is being read at arm's length in a dark booth. The amber is the
+       * second voice — BPM readouts, "in collection" badges — and green-on-
+       * amber is the one pairing here with real history behind it, because it
+       * is what monochrome terminals actually did.
+       */
       colors: {
         ink: {
-          950: "#0a0a0b",
-          900: "#101012",
-          850: "#16161a",
-          800: "#1c1c21",
-          700: "#2a2a31",
-          600: "#3a3a44",
-          500: "#5c5c68",
+          950: "#050806",
+          900: "#0a100c",
+          850: "#0d140f",
+          800: "#131d16",
+          700: "#1b2a1f",
+          600: "#2a4231",
+          500: "#6f8a78",
         },
         accent: {
-          DEFAULT: "#4ade80",
-          dim: "#22c55e",
+          DEFAULT: "#5ef08a",
+          dim: "#3fc76b",
+          alt: "#ffb000",
         },
       },
       fontFamily: {
