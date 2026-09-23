@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, type RefObject } from "react";
+import { useCallback, useState, type RefObject } from "react";
 import type { ScaleFactor } from "@/client/bpmScaling";
 import type { BpmSource, Playable } from "@/lib/types";
 import type { PlayerApi } from "@/client/useYouTubePlayer";
-import type { DetectorStatus } from "@/client/useTempoDetector";
+import type { DetectorStatus, OnsetSample } from "@/client/useTempoDetector";
+import { BeatMeter } from "./BeatMeter";
 import { formatBpm } from "@/lib/mixing";
 import {
   Compass,
@@ -44,12 +45,75 @@ export interface TempoPanelProps {
   detectorStatus: DetectorStatus;
   detectorError: string | null;
   tapCount: number;
-  onTap: () => void;
+  /**
+   * `at` is the input event's own timestamp. Passing it is the difference
+   * between timing the tap and timing whenever JavaScript got round to it.
+   */
+  onTap: (at?: number) => void;
   onStartDetector: (source: "tab" | "mic") => void;
   onStopDetector: () => void;
   /** Halve or double the stored reading — the DnB octave escape hatch. */
   onScaleBpm: (factor: ScaleFactor) => void;
   onClearBpm: () => void;
+  /** The detector's live onset signal, for the beat meter. */
+  peek: () => { samples: readonly OnsetSample[]; now: number } | null;
+  /** A reading has held steady and been saved for this track. */
+  locked: boolean;
+  /** The octave window in use: the record's genre pocket, or your range. */
+  fold: { low: number; high: number; pocket: string | null };
+  range: { low: number; high: number };
+  onRangeChange: (low: number, high: number) => void;
+}
+
+/**
+ * Two numbers and nothing else. Commits on blur or Enter rather than on every
+ * keystroke, because typing "1", "15", "150" would otherwise briefly set the
+ * range to 1–160 and refuse it.
+ */
+function RangeEditor({
+  range,
+  onChange,
+}: {
+  range: { low: number; high: number };
+  onChange: (low: number, high: number) => void;
+}) {
+  const [low, setLow] = useState(String(range.low));
+  const [high, setHigh] = useState(String(range.high));
+  const commit = () => onChange(Number(low), Number(high));
+
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 rounded border border-ink-800 bg-ink-900/60 px-2 py-1.5 text-[10px] text-neutral-500">
+      <label className="flex items-center gap-1">
+        from
+        <input
+          id="bpm-range-low"
+          type="number"
+          inputMode="numeric"
+          value={low}
+          onChange={(e) => setLow(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && commit()}
+          className="w-11 rounded border border-ink-700 bg-ink-850 px-1 py-0.5 font-mono text-neutral-200"
+        />
+      </label>
+      <label className="flex items-center gap-1">
+        to
+        <input
+          id="bpm-range-high"
+          type="number"
+          inputMode="numeric"
+          value={high}
+          onChange={(e) => setHigh(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => e.key === "Enter" && commit()}
+          className="w-11 rounded border border-ink-700 bg-ink-850 px-1 py-0.5 font-mono text-neutral-200"
+        />
+      </label>
+      <span className="ml-auto leading-tight">
+        records tagged with a style use its own range
+      </span>
+    </div>
+  );
 }
 
 function TempoPanel({
@@ -65,9 +129,15 @@ function TempoPanel({
   onStopDetector,
   onScaleBpm,
   onClearBpm,
+  peek,
+  locked,
+  fold,
+  range,
+  onRangeChange,
   disabled,
 }: TempoPanelProps & { disabled: boolean }) {
   const listening = detectorStatus === "listening";
+  const [editingRange, setEditingRange] = useState(false);
 
   const sourceLabel: Record<BpmSource, string> = {
     tap: "tapped",
@@ -93,8 +163,10 @@ function TempoPanel({
             </div>
           ) : (
             <span className="text-[11px] text-neutral-600">
-              {listening && liveBpm !== null
-                ? `listening… ~${formatBpm(liveBpm)}`
+              {listening
+                ? liveBpm !== null
+                  ? `listening… ~${formatBpm(liveBpm)}`
+                  : "listening…"
                 : "no BPM yet"}
             </span>
           )}
@@ -130,30 +202,76 @@ function TempoPanel({
         )}
       </div>
 
-      {/* Live confidence meter while the detector runs. */}
-      {listening && liveBpm !== null && (
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <div className="h-0.5 flex-1 overflow-hidden rounded-full bg-ink-700">
-            <div
-              className="h-full rounded-full bg-accent transition-[width]"
-              style={{ width: `${Math.round(liveConfidence * 100)}%` }}
-            />
+      {/*
+        The meter appears the moment listening starts, not when the first
+        estimate lands. The estimator needs eight seconds of audio before it
+        will even try, and for those eight seconds the old panel showed
+        nothing — which read, reasonably, as broken.
+      */}
+      {listening && (
+        <>
+          <BeatMeter
+            peek={peek}
+            liveBpm={liveBpm}
+            liveConfidence={liveConfidence}
+            locked={locked}
+          />
+          <div className="mt-1 flex items-center gap-1 text-[9px] text-neutral-600">
+            {fold.pocket ? (
+              <span title="Counted the way this style is usually counted, from the record's Discogs styles">
+                counting as <span className="text-neutral-400">{fold.pocket}</span>{" "}
+                <span className="font-mono">
+                  {fold.low}–{fold.high}
+                </span>
+              </span>
+            ) : (
+              <span title="Detected tempos are reported in this range, halving or doubling as needed">
+                your range{" "}
+                <span className="font-mono text-neutral-400">
+                  {range.low}–{range.high}
+                </span>
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setEditingRange((open) => !open)}
+              className="ml-auto rounded px-1 text-neutral-600 hover:text-neutral-300"
+              aria-expanded={editingRange}
+            >
+              {editingRange ? "done" : "range"}
+            </button>
           </div>
-          <span className="font-mono text-[9px] text-neutral-600">
-            {Math.round(liveConfidence * 100)}%
-          </span>
-        </div>
+          {editingRange && (
+            <RangeEditor range={range} onChange={onRangeChange} />
+          )}
+        </>
       )}
 
       <div className="mt-2 flex items-center gap-1">
+        {/*
+          Fires on press, not release. A click lands when the finger comes
+          back up, 80–150 ms after the beat and not by a constant amount, and
+          that variance is exactly the noise tap tempo is trying to average
+          out. `onClick` stays for keyboard activation only (detail 0), so a
+          mouse press is never counted twice.
+        */}
         <button
           type="button"
-          onClick={onTap}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            onTap(event.timeStamp);
+          }}
+          onClick={(event) => {
+            if (event.detail === 0) onTap(event.timeStamp);
+          }}
           disabled={disabled}
-          title="Tap in time with the beat (T)"
-          className="flex flex-1 items-center justify-center gap-1 rounded border border-ink-700 py-1 text-[10px] font-medium text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40"
+          title="Tap in time with the beat — or press T"
+          className="flex flex-1 touch-manipulation select-none items-center justify-center gap-1.5 rounded border border-ink-700 py-1 text-[10px] font-medium text-neutral-300 hover:border-ink-600 hover:text-white active:bg-ink-800 disabled:opacity-40"
         >
           TAP
+          <kbd className="rounded border border-ink-600 px-1 font-mono text-[9px] leading-tight text-neutral-500">
+            T
+          </kbd>
           {tapCount > 0 && (
             <span className="font-mono text-neutral-600">{tapCount}</span>
           )}
@@ -237,6 +355,8 @@ export function NowPlaying({
   onNext,
   onAddToPlaylist,
   onDig,
+  detour,
+  onBackToShuffle,
 }: {
   containerRef: RefObject<HTMLDivElement | null>;
   api: PlayerApi;
@@ -253,6 +373,9 @@ export function NowPlaying({
   onNext: () => void;
   onAddToPlaylist: () => void;
   onDig: () => void;
+  /** Set while exploring a record away from the shuffle. */
+  detour: { label: string } | null;
+  onBackToShuffle: () => void;
 }) {
   const progress = api.duration > 0 ? (api.currentTime / api.duration) * 100 : 0;
 
@@ -328,12 +451,46 @@ export function NowPlaying({
                   {current.matchKind === "track" ? "track" : "release"}
                 </span>
               </div>
-              <p className="truncate text-xs text-neutral-400">{current.artist}</p>
-              <p className="truncate text-[11px] text-neutral-600">
+              {/*
+                The artist and the record are buttons: the natural thing to
+                reach for when a track grabs you is its name, and it opens the
+                whole record in running order. The Dig button and D still do
+                the same — three ways in, because nobody should have to learn
+                which one is right.
+              */}
+              <button
+                type="button"
+                onClick={onDig}
+                title="Open the whole record (D)"
+                className="block max-w-full truncate text-left text-xs text-neutral-400 underline-offset-2 hover:text-neutral-100 hover:underline"
+              >
+                {current.artist}
+              </button>
+              <button
+                type="button"
+                onClick={onDig}
+                title="Open the whole record (D)"
+                className="block max-w-full truncate text-left text-[11px] text-neutral-600 underline-offset-2 hover:text-neutral-300 hover:underline"
+              >
                 {current.releaseTitle}
                 {current.year ? ` · ${current.year}` : ""}
                 {current.labels[0] ? ` · ${current.labels[0]}` : ""}
-              </p>
+              </button>
+              {detour && (
+                <div className="mt-1.5 flex items-center gap-2 rounded border border-accent/30 bg-accent/5 px-2 py-1 text-[10px]">
+                  <span className="min-w-0 flex-1 truncate text-neutral-400">
+                    Exploring <span className="text-neutral-200">{detour.label}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onBackToShuffle}
+                    title="Back to where you were in the shuffle (B)"
+                    className="shrink-0 rounded px-1.5 py-0.5 font-medium text-accent hover:bg-accent/10"
+                  >
+                    ← Back to shuffle
+                  </button>
+                </div>
+              )}
             </>
           ) : (
             <p className="text-xs text-neutral-600">

@@ -48,6 +48,8 @@ export function MobileBar({
   onSeek,
   onAddToPlaylist,
   onTap,
+  detour = null,
+  onBackToShuffle,
   onToggle,
   onPrev,
   onNext,
@@ -61,7 +63,15 @@ export function MobileBar({
   duration: number;
   onSeek: (seconds: number) => void;
   onAddToPlaylist: () => void;
-  onTap: () => void;
+  /**
+   * `at` is the pointer event's own timestamp. Typed to take it on purpose:
+   * this was `() => void`, which let the click event itself slip through at
+   * runtime as the "timestamp" once the handler started accepting one.
+   */
+  onTap: (at?: number) => void;
+  /** Set while exploring a record away from the shuffle. */
+  detour?: { label: string } | null;
+  onBackToShuffle?: () => void;
   onToggle: () => void;
   onPrev: () => void;
   onNext: () => void;
@@ -95,6 +105,23 @@ export function MobileBar({
 
   return (
     <div className="shrink-0 border-t border-ink-800 bg-ink-900/95 backdrop-blur lg:hidden">
+      {/*
+        There is no B key on a phone, so the way back from a record lives in
+        the one bar that is always on screen. Full width and 36px tall: this is
+        the control you reach for mid-set with one thumb.
+      */}
+      {detour && onBackToShuffle && (
+        <button
+          type="button"
+          onClick={onBackToShuffle}
+          className="flex min-h-[36px] w-full items-center gap-2 border-b border-accent/20 bg-accent/5 px-3 text-left text-[11px]"
+        >
+          <span className="min-w-0 flex-1 truncate text-neutral-400">
+            Exploring <span className="text-neutral-200">{detour.label}</span>
+          </span>
+          <span className="shrink-0 font-medium text-accent">← Back to shuffle</span>
+        </button>
+      )}
       {/*
         Position expressed in thousandths rather than seconds. A range whose max
         is the track length gives one step per second — coarse enough that on a
@@ -222,10 +249,17 @@ export function MobileBar({
           */}
           <button
             type="button"
-            onClick={onTap}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              onTap(event.timeStamp);
+            }}
+            onClick={(event) => {
+              // Keyboard activation only; a pointer press already counted.
+              if (event.detail === 0) onTap(event.timeStamp);
+            }}
             disabled={!current}
             aria-label="Tap tempo"
-            className={`ml-0.5 flex h-11 w-11 items-center justify-center rounded-lg border text-center font-mono text-[11px] tabular-nums transition-colors disabled:opacity-30 ${
+            className={`ml-0.5 flex h-11 w-11 touch-manipulation select-none items-center justify-center rounded-lg border text-center font-mono text-[11px] tabular-nums transition-colors disabled:opacity-30 ${
               bpm !== null
                 ? "border-accent/40 bg-accent/10 text-accent"
                 : "border-ink-700 text-neutral-400 active:bg-ink-800"

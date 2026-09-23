@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { estimateTempo, type TempoEstimate } from "./tempo";
+import { estimateTempo, DEFAULT_FOLD, type FoldWindow, type TempoEstimate } from "./tempo";
 
 /**
  * Live BPM detection from the audio the browser is already playing.
@@ -32,6 +32,22 @@ const ESTIMATE_INTERVAL_MS = 2_000;
 const STABLE_REQUIRED = 3;
 const STABLE_TOLERANCE_BPM = 1.5;
 
+/**
+ * Seconds of audio needed before the first estimate is even attempted.
+ *
+ * Exported because the beat meter shows progress towards it. It used to be a
+ * bare `8` inside `runEstimate`, which is why the UI had no way to say "give
+ * it five more seconds" — it did not know the number existed, so it showed
+ * nothing at all until a reading landed, and listening looked broken.
+ */
+export const WARMUP_SECONDS = 8;
+
+/** One onset-strength sample, on the AudioContext clock. */
+export interface OnsetSample {
+  t: number;
+  v: number;
+}
+
 export type CaptureSource = "tab" | "mic";
 
 export type DetectorStatus =
@@ -54,6 +70,14 @@ export interface TempoDetector {
   stop(): void;
   /** Drop accumulated audio. Called on track change. */
   reset(): void;
+  /**
+   * The live onset signal, for drawing. Returns the detector's own buffer and
+   * clock rather than a copy: the meter reads it every animation frame, and
+   * routing 60 frames a second through React state would re-render the whole
+   * transport to move a few lines. Read-only by contract — mutating it would
+   * corrupt the estimate.
+   */
+  peek(): { samples: readonly OnsetSample[]; now: number } | null;
 }
 
 function supportsTabCapture(): boolean {
@@ -101,6 +125,12 @@ function blockedByPolicy(kind: "tab" | "mic"): boolean {
 export function useTempoDetector(options: {
   /** Fires once per track when a reading stabilises. */
   onCommit: (estimate: TempoEstimate) => void;
+  /**
+   * Which octave to report in — the record's genre pocket, or your range.
+   * Read through a ref at estimate time, so a track change updates it without
+   * tearing down the capture stream.
+   */
+  fold?: FoldWindow;
 }): TempoDetector {
   // Capability is known at first render — deciding it in an effect would
   // render "idle" for a frame and then correct itself.
@@ -113,9 +143,11 @@ export function useTempoDetector(options: {
   const [source, setSource] = useState<CaptureSource | null>(null);
 
   const onCommitRef = useRef(options.onCommit);
+  const foldRef = useRef<FoldWindow>(options.fold ?? DEFAULT_FOLD);
   useEffect(() => {
     onCommitRef.current = options.onCommit;
-  }, [options.onCommit]);
+    foldRef.current = options.fold ?? DEFAULT_FOLD;
+  }, [options.onCommit, options.fold]);
 
   const streamRef = useRef<MediaStream | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
@@ -124,7 +156,7 @@ export function useTempoDetector(options: {
   const estimateTimerRef = useRef<number | null>(null);
 
   // Timestamped flux samples, drained into a uniform grid at analysis time.
-  const rawRef = useRef<Array<{ t: number; v: number }>>([]);
+  const rawRef = useRef<OnsetSample[]>([]);
   const previousSpectrumRef = useRef<Float32Array | null>(null);
   const stableRef = useRef<{ bpm: number; hits: number }>({ bpm: 0, hits: 0 });
 
@@ -209,7 +241,7 @@ export function useTempoDetector(options: {
     const endTime = raw[raw.length - 1]!.t;
     const startTime = Math.max(raw[0]!.t, endTime - WINDOW_SECONDS);
     const span = endTime - startTime;
-    if (span < 8) return;
+    if (span < WARMUP_SECONDS) return;
 
     const length = Math.min(WINDOW_SAMPLES, Math.floor(span * GRID_HZ));
     const grid = new Float32Array(length);
@@ -228,7 +260,7 @@ export function useTempoDetector(options: {
       grid[i] = dt <= 0 ? a.v : a.v + ((b.v - a.v) * (t - a.t)) / dt;
     }
 
-    const estimate = estimateTempo(grid, HOP_SECONDS);
+    const estimate = estimateTempo(grid, HOP_SECONDS, foldRef.current);
     if (!estimate) return;
 
     setLive(estimate);
@@ -367,5 +399,11 @@ export function useTempoDetector(options: {
     setLive(null);
   }, [teardown]);
 
-  return { status, live, committed, error, source, start, stop, reset };
+  const peek = useCallback(() => {
+    const context = contextRef.current;
+    if (!context) return null;
+    return { samples: rawRef.current, now: context.currentTime };
+  }, []);
+
+  return { status, live, committed, error, source, start, stop, reset, peek };
 }

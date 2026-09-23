@@ -57,18 +57,13 @@ export function digWithinCollection(
     });
   }
 
-  /* ---- same release (the rest of the record) ---- */
-  const sameRelease = pool.filter(
-    (p) => p.releaseId === seed.releaseId && p.key !== seed.key,
-  );
-  if (sameRelease.length > 0) {
-    lanes.push({
-      key: "release",
-      label: "Rest of",
-      pivot: seed.releaseTitle,
-      results: sameRelease.slice(0, MAX_PER_LANE),
-    });
-  }
+  /*
+   * No "rest of the record" lane. It used to live here, and the dig drawer now
+   * shows the whole record above every lane instead — in tracklist order,
+   * including the playing track and tracks with no clip, and played as a
+   * detour you can return from. See client/recordOrder.ts. Keeping this lane
+   * as well would list the same tracks twice, once in the wrong order.
+   */
 
   /* ---- same label ---- */
   for (const label of seed.labels.slice(0, 2)) {
