@@ -5,7 +5,7 @@
 **A crate-digging app for vinyl DJs, built by one.**
 
 [![CI](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml/badge.svg)](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml)
-[![Threat model](https://img.shields.io/badge/threat%20model-documented-4ade80)](./THREAT_MODEL.md)
+[![Threat model](https://img.shields.io/badge/threat%20model-documented-5ef08a)](./THREAT_MODEL.md)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
 </div>
@@ -91,10 +91,11 @@ first — it says what's defended, how, and what deliberately isn't.
 | **Filter on real metadata** | Style, genre, label, artist, format, country, decade, year and tempo — every option counted from *your* synced collection. Multi-select is **any** or **all**, so you can ask for Techno *or* Deep House, or for the shelf tagged both. |
 | **Works on a phone** | Sheets rather than stacked panels: source and playlists in one, filters in another, the player in a third. Transport and TAP sit in a sticky bottom bar at thumb height. |
 | **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
+| **Hear the whole record** | Something grabs you on shuffle: tap the artist or the record and the whole release opens in running order — every track, the one playing marked, the ones with no audio still listed. Play it through, then drop straight back into your shuffle where you left it. |
 | **Dig from anything** | Hit `D` on whatever's playing and pivot on any field. Two lanes: what else you own, and what exists beyond it. |
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. |
-| **BPM catalogue** | Detect tempo from the audio as it plays, or tap it in. **Measure** plays through everything on screen and measures it unattended, skipping what is already done. Filter by range, or by what mixes with what's playing. |
-| **Set prep** | Every transition in a playlist checked against your decks' pitch range. Flags the ones that won't beatmatch before you pack the bag. |
+| **BPM catalogue** | Detect tempo from the audio as it plays — with a live beat meter showing exactly what it hears — or tap it in with `T`. Genre-aware: a record Discogs tags as drum & bass is counted at 174, not 87. **Measure** plays through everything on screen unattended, skipping what is already done. |
+| **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **won't reach**. Flags the hard ones before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
 | **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
@@ -109,8 +110,9 @@ first — it says what's defended, how, and what deliberately isn't.
 | <kbd>Space</kbd> | Play / pause | | <kbd>T</kbd> | Tap tempo |
 | <kbd>←</kbd> <kbd>→</kbd> | Previous / next | | <kbd>D</kbd> | Dig from this record |
 | <kbd>J</kbd> <kbd>L</kbd> | Back / forward 10s | | <kbd>A</kbd> | Add to a playlist |
-| <kbd>S</kbd> | Shuffle what's on screen | | <kbd>/</kbd> | Search |
-| <kbd>R</kbd> | Repeat | | <kbd>Esc</kbd> | Close |
+| <kbd>S</kbd> | Shuffle what's on screen | | <kbd>B</kbd> | Back to shuffle, after exploring a record |
+| <kbd>R</kbd> | Repeat | | <kbd>/</kbd> | Search |
+| <kbd>?</kbd> | Every shortcut, on screen | | <kbd>Esc</kbd> | Close |
 
 ---
 
@@ -309,8 +311,19 @@ afterwards gets analysed: spectral-flux onset detection → whitening →
 autocorrelation → comb filtering across four harmonics → a stability gate that
 waits for the reading to hold for ~6 seconds before storing anything.
 
+While it listens, a **beat meter** draws the onset signal the estimate is being
+computed from — the same numbers, not a separate visualiser — so a steady row of
+kicks means it's about to lock, and a flat line means it's guessing. A countdown
+covers the eight seconds of audio it needs before the first reading, which used
+to look like nothing happening at all.
+
 Nothing is downloaded, stored, or re-transmitted. The only thing that leaves the
-module is an integer.
+module is a number.
+
+**Tap tempo** is on <kbd>T</kbd> as well as the button, and both are timed on the
+press, from the input event's own timestamp — not when the finger lifts, and not
+whenever JavaScript gets round to it. That variance is exactly the noise tap
+tempo exists to average out.
 
 **Three sources, with precedence enforced in SQL, not in the browser:**
 
@@ -330,9 +343,15 @@ Six test cases pin that behaviour.
   Safari fall back to microphone capture off your speakers, or tap tempo.
 - You must tick **"Share tab audio"** in the picker or no audio track arrives —
   the app will tell you.
-- **Jungle and DnB read at half tempo** about as often as not. A 174 BPM track
-  with a half-time snare genuinely describes 87, and every estimator splits on
-  which to report. There's a one-click **÷2 / ×2**, and a tap always wins.
+- **Which octave is a convention, not a measurement.** A 174 BPM track with a
+  half-time snare genuinely describes 87 too; the estimator hears the pulse, not
+  how DJs count it. So readings fold into **70–160** by default (you can change
+  it) — unless the record's Discogs styles name its genre, in which case it's
+  counted the way that genre is: drum & bass at 160–180, dubstep at 135–145,
+  nineteen styles in all. Tagged DnB now reads 174. **Untagged** DnB still reads
+  87, and untagged dubstep reads 70 — the measured cost of a default that
+  favours slow music, pinned in tests. **÷2 / ×2** settles either in one press,
+  and a tap always wins.
 
 **The tempo filter** defaults to **75–180 BPM** — wide enough for hip hop through
 jungle — but the inputs accept 40–260, so nothing is fenced in. `÷2` and `×2`
@@ -356,13 +375,20 @@ beatmatch, at what tempo, and how far each fader has to move:
   Basement Cut · Moodymann                                      124
 ↳ Mixes         Meet at 125 · ±0.8% each                              ← green
   Chrome Cut · Theo Parrish                                     126
-↳ Mixes         Meet at 128.5 · ±1.9% each
+↳ Mixes         Meet at 128.5 · ±1.9% each                            ← green
   Sunset Cut · Larry Heard                                      131
-↳ Out of range  Needs ±15.4% — wider than your ±8%                    ← amber
+↳ Out of range  Needs ±15.4% — wider than your ±8%                    ← red
   Nocturne Cut · Omar-S                                          96
-↳ Half-time     Meet at 91.3 at half-time · ±4.9% each                ← blue
+↳ Half-time     Meet at 91.3 at half-time · ±4.9% each — near the edge ← amber
   Midnight Cut · Moodymann                                      174
 ```
+
+**The colour says how hard the faders work; the words say how the records
+meet.** ±8% is a ceiling, not a working range — records live in the middle of
+the fader, and a blend run with both decks near their limits is one you hear.
+So a transition is **green** when neither deck passes half its range, **amber**
+when it fits but has to go further, and **red** when it doesn't fit at all. A
+double-time blend at ±0.6% is green; a straight 1:1 at ±7% each is amber.
 
 A summary bar above shows the shape of the set at a glance — *"2 of 6 won't
 beatmatch"* — and **Smooth order** reorders the playlist so they do.
@@ -385,9 +411,10 @@ which solves to `x = |B − A| / (A + B)`, and they meet at `2AB/(A + B)` — th
 harmonic mean. So the whole test is one subtraction and one division.
 
 This is not a detail. **124 → 140** needs 11.4% if only the incoming record
-moves, which is off the end of a 1200. Meeting in the middle it needs 6.1% —
-comfortably inside. A one-sided check would tell you to leave that record at
-home for no reason.
+moves, which is off the end of a 1200. Meeting in the middle it needs 6.1% each —
+it fits, so a one-sided check would have told you to leave that record at home
+for no reason. It is also past half the fader on both decks, so it shows amber:
+doable, and you'll hear it.
 
 **Half and double time count.** An 87 BPM record and a 174 BPM record share a
 beat grid at 2:1 with no pitch change at all. Every pair is tested at 1:1, 2:1
@@ -402,8 +429,10 @@ setting is stored against your account and drives the playlist checks, the
 "mixes with" filter, and the tempo lane in the dig drawer.
 
 The mixable window shown in the filter is *not* `bpm ± range` — with both decks
-pitching, ±8% around 124 BPM reaches **105.6–145.7**, which is a good deal more
-of your crate than the 114–134 a naive reading suggests.
+pitching, ±8% around 124 BPM reaches **105.6–145.7**, a good deal more of your
+crate than the 114–134 a naive reading suggests. The filter offers the
+comfortable part first — **114.5–134.3**, neither deck past ±4% — and the full
+reach second, marked as audible.
 
 ---
 
@@ -526,28 +555,15 @@ in [THREAT_MODEL.md §6](./THREAT_MODEL.md).
 ## Deploy it
 
 **Full walkthrough: [DEPLOYING.md](./DEPLOYING.md)** — eleven sequenced steps, a
-first-run test checklist, and troubleshooting. What follows is the summary; the
-ordering in that file matters and this one glosses over it.
+first-run test checklist, and troubleshooting.
 
-### The short version
-
-1. **Neon** — create a project for development and copy the **pooled**
-   connection string (the host containing `-pooler`).
-2. **`npm run keygen`** — your `SESSION_SECRET`.
-3. **A Discogs app** pointed at `http://localhost:3000/api/auth/callback`.
-4. **Run it locally** — `cp .env.example .env.local`, fill it in,
-   `npm run db:migrate`, `npm run dev`.
-5. **Push to GitHub**, then import to Vercel.
-6. **A second Neon project** for production, in the region your functions run
-   in — Vercel defaults to `iad1`, so `us-east-1`. Sharing one database between
-   development and production means a stray migration or a test run reaches
-   real users' rows.
-7. **A second Discogs app** pointed at your real Vercel URL, and a **second**
-   `SESSION_SECRET`. Both halves matter: that secret mints sessions, so a
-   shared one lets a laptop impersonate any production user.
-8. **Set the environment in Vercel**, scoped to **Production only**, redeploy,
-   and run the migration against the production database
-   (`npm run verify:db -- --migrate`).
+In outline: a Neon Postgres database, a Discogs application, and a Vercel
+project — **two of each** for development and production, because sharing a
+database means a stray migration reaches real users' rows, and sharing a
+session secret lets a laptop mint sessions for any production user. The steps,
+their order, and the checks that prove each one worked are all in
+[DEPLOYING.md](./DEPLOYING.md); they used to be summarised here too, and the
+summary drifted out of date, which is the argument for having one copy.
 
 ### The trap, since it catches everyone
 
@@ -559,45 +575,6 @@ Hence two Discogs applications, and hence the first Vercel deploy being expected
 to **fail**: it runs without configuration purely so Vercel will tell you the URL.
 The failure is [`src/lib/env.ts`](./src/lib/env.ts) validating at build time, which
 is what stops a misconfigured deploy from 500ing at users later instead.
-
-### Environment variables
-
-| Variable | Required | Notes |
-|---|---|---|
-| `DISCOGS_CONSUMER_KEY` | yes | |
-| `DISCOGS_CONSUMER_SECRET` | yes | Never leaves the server |
-| `SESSION_SECRET` | yes | 32 bytes base64url — `npm run keygen` |
-| `APP_ORIGIN` | yes | No trailing slash |
-| `DATABASE_URL` | yes | Neon **pooled** string |
-| `DISCOGS_CONTACT` | advised | Discogs requires a contact in the User-Agent |
-| `ANTHROPIC_API_KEY` | optional | Enables the written playlist analysis |
-
-### Local
-
-Node 22 or newer (`.nvmrc` pins it) — the two pure-logic test suites use Node's
-built-in TypeScript stripping. The app itself is not fussy.
-
-Pointing local development at the same Neon database avoids installing Postgres:
-
-```bash
-cp .env.example .env.local     # npm run keygen for SESSION_SECRET
-npm install
-npm run db:migrate
-npm run dev
-```
-
-Two checks exist because neither failure announces itself:
-
-```bash
-npm run verify:discogs   # does Discogs accept your signature?
-npm run verify:db        # does that connection string resolve, connect, and
-                         # have tables?  --migrate applies the schema,
-                         # --copy returns it with sslmode=verify-full
-```
-
-`next build` never opens a database connection, so a wrong `DATABASE_URL`
-deploys green and surfaces as a confusing error at the first sign-in. Neither
-script prints a secret — the password is reported only as a length.
 
 ### The first sync takes ten minutes, and that's Discogs' fault
 
@@ -626,7 +603,7 @@ push, no force-push, nothing merges red.
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
 `npm audit --audit-level=high`, 467 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 80 API tests against a running server. CodeQL
+reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
