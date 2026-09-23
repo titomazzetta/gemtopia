@@ -56,8 +56,54 @@ export type MixVerdict =
   /** One or both tempos aren't catalogued yet. */
   | "unknown";
 
+/**
+ * How hard the faders have to work — the second question after "does it fit".
+ *
+ * ±8% is a ceiling, not a working range. The closed form above assumes both
+ * decks can be pushed all the way, one flat out and the other fully down, and
+ * in a real booth that almost never happens: records live in roughly the
+ * middle third of the fader, and a transition run at the extremes of both is
+ * one you will hear. So a pair that technically fits at ±7.6% each is not the
+ * same kind of "mixes" as one that needs ±1.5%, and treating them as one
+ * green light made the check read far more permissive than DJs actually are.
+ *
+ *   easy     each deck moves at most half its range. Green.
+ *   pushed   fits, but past half — doable, audible. Amber.
+ *   out      beyond your range entirely. Red.
+ *
+ * Kept as its own field rather than folded into `verdict`, because the two
+ * answer different questions: verdict says *how* the records meet (1:1,
+ * double-time, half-time) and strain says *how much it costs*. A double-time
+ * blend can be easy; a straight 1:1 can be pushed.
+ */
+export type MixStrain = "easy" | "pushed" | "out" | "unknown";
+
+/**
+ * Where "easy" ends, as a fraction of the pitch range.
+ *
+ * Half, because that is where the comfortable middle of a pitch fader runs
+ * out in practice — on a 1200 it keeps both decks within ±4%, which is the
+ * range most blends actually live in. A named constant so it can be tuned
+ * against real sets without hunting for a bare 0.5.
+ */
+export const COMFORT_FRACTION = 0.5;
+
+export function strainFor(
+  requiredPercent: number | null,
+  pitchPercent: number = DEFAULT_PITCH_PERCENT,
+): MixStrain {
+  if (requiredPercent === null || !Number.isFinite(requiredPercent)) return "unknown";
+  // The same epsilon checkMix uses, so a pair on the boundary lands in the
+  // same tier here as it does in the verdict.
+  if (requiredPercent <= pitchPercent * COMFORT_FRACTION + 0.0001) return "easy";
+  if (requiredPercent <= pitchPercent + 0.0001) return "pushed";
+  return "out";
+}
+
 export interface MixCheck {
   verdict: MixVerdict;
+  /** How hard both faders have to work. See `MixStrain`. */
+  strain: MixStrain;
   /** Multiplier applied to the incoming record's BPM to make the comparison. */
   ratio: 1 | 2 | 0.5;
   /** Tempo both records can meet at — the harmonic mean. */
@@ -136,6 +182,7 @@ export function checkMix(
 ): MixCheck {
   const unknown: MixCheck = {
     verdict: "unknown",
+    strain: "unknown",
     ratio: 1,
     meetBpm: null,
     outgoingPitch: null,
@@ -191,6 +238,8 @@ export function checkMix(
       ? "stretch"
       : "impossible";
 
+  const strain = strainFor(bestRequired, pitchPercent);
+
   const ratioNote =
     best.ratio === 2
       ? " at double-time"
@@ -207,10 +256,11 @@ export function checkMix(
             Math.abs(outgoingPitch) < 0.05
               ? "no pitch needed"
               : `±${round1(Math.abs(outgoingPitch))}% each`
-          }`;
+          }${strain === "pushed" ? " — near the edge of the fader" : ""}`;
 
   return {
     verdict,
+    strain,
     ratio: best.ratio,
     meetBpm: round1(meet),
     outgoingPitch: round1(outgoingPitch),
@@ -244,6 +294,17 @@ export function mixableWindow(
     low: round1((bpm * (1 - p)) / (1 + p)),
     high: round1((bpm * (1 + p)) / (1 - p)),
   };
+}
+
+/**
+ * The easy part of `mixableWindow`: tempos you can meet without either fader
+ * going past half its travel. Same asymmetric formula, half the range.
+ */
+export function comfortableWindow(
+  bpm: number,
+  pitchPercent: number = DEFAULT_PITCH_PERCENT,
+): { low: number; high: number } {
+  return mixableWindow(bpm, pitchPercent * COMFORT_FRACTION);
 }
 
 export interface SequenceStep {
@@ -374,6 +435,21 @@ export function smoothOrder(
 /* ------------------------------------------------------------------ */
 /* Presentation                                                        */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Colour follows strain, not verdict. Verdict still supplies the words
+ * ("Double-time", "Won't mix") — the colour answers the question a DJ scans
+ * for first, which is whether this is going to be comfortable.
+ */
+export const STRAIN_META: Record<
+  MixStrain,
+  { label: string; tone: "good" | "warn" | "bad" | "muted" }
+> = {
+  easy: { label: "Comfortable", tone: "good" },
+  pushed: { label: "Pushing it", tone: "warn" },
+  out: { label: "Out of range", tone: "bad" },
+  unknown: { label: "No BPM", tone: "muted" },
+};
 
 export const VERDICT_META: Record<
   MixVerdict,

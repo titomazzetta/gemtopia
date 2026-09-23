@@ -24,6 +24,10 @@ import {
   formatBpm,
   MIN_PITCH_PERCENT,
   MAX_PITCH_PERCENT,
+  strainFor,
+  comfortableWindow,
+  COMFORT_FRACTION,
+  STRAIN_META,
 } from "../src/lib/mixing.ts";
 
 let failures = 0;
@@ -485,6 +489,119 @@ check("display rounding never feeds the mixing maths", () => {
     requiredPitchPercent(b, 130),
     "...and must not be treated as the same by the maths",
   );
+});
+
+console.log("\nhow hard the faders work");
+/*
+ * ±8% is a ceiling, not a working range: records live in the middle of the
+ * fader, and a blend run with both decks at their extremes is one you hear.
+ * Green is half the range, amber is the rest of it, red is beyond. Every case
+ * below is worked by hand from |B − A| / (A + B).
+ */
+
+check("a close pair is comfortable", () => {
+  // 124 and 128: 4 / 252 = 1.59% each, well inside half of ±8.
+  assert.equal(checkMix(124, 128).strain, "easy");
+});
+
+check("a pair that fits but strains the faders is amber, not green", () => {
+  // 124 and 140: 16 / 264 = 6.06%. The old check called this a plain
+  // "Mixes" — true, and a blend nobody would call comfortable.
+  const result = checkMix(124, 140);
+  assert.equal(result.verdict, "direct", "it still fits");
+  assert.equal(result.strain, "pushed");
+  assert.match(result.summary, /near the edge/);
+});
+
+check("beyond the range is red, even where a wider deck would reach", () => {
+  // 124 and 150: 26 / 274 = 9.49%. Verdict stays "stretch" — worth knowing a
+  // ±10 deck would do it — but it does not fit these decks, so it is red.
+  const result = checkMix(124, 150);
+  assert.equal(result.verdict, "stretch");
+  assert.equal(result.strain, "out");
+});
+
+check("exactly half the range is still comfortable", () => {
+  // 120 and 130: 10 / 250 = 4.000% exactly.
+  assert.equal(checkMix(120, 130).strain, "easy");
+});
+
+check("a hair past half tips into amber", () => {
+  // 120 and 130.1: 10.1 / 250.1 = 4.038%.
+  assert.equal(checkMix(120, 130.1).strain, "pushed");
+});
+
+check("exactly the full range still fits", () => {
+  // 92 and 108: 16 / 200 = 8.000% exactly.
+  assert.equal(checkMix(92, 108).strain, "pushed");
+});
+
+check("a hair past the full range is out", () => {
+  // 92 and 108.1: 16.1 / 200.1 = 8.046%.
+  assert.equal(checkMix(92, 108.1).strain, "out");
+});
+
+check("the tiers follow the decks, not a fixed number", () => {
+  // 124 and 132: 8 / 256 = 3.125%. Comfortable on a 1200's ±8 (half is 4),
+  // pushing it on a CDJ's ±6 (half is 3).
+  assert.equal(checkMix(124, 132, 8).strain, "easy");
+  assert.equal(checkMix(124, 132, 6).strain, "pushed");
+});
+
+check("double-time can be comfortable", () => {
+  // 172 against 87: counted at 174, 2 / 346 = 0.58%. How the records meet
+  // and how much it costs are separate questions.
+  const result = checkMix(172, 87);
+  assert.equal(result.verdict, "double-time");
+  assert.equal(result.strain, "easy");
+});
+
+check("no tempo means no tier", () => {
+  assert.equal(checkMix(null, 128).strain, "unknown");
+  assert.equal(strainFor(null), "unknown");
+  assert.equal(strainFor(Infinity), "unknown");
+});
+
+check("strain never contradicts the verdict", () => {
+  // Every pair that fits is easy or pushed; every pair that does not is out.
+  // Swept across the whole useful range rather than spot-checked, because a
+  // disagreement here is a record shown green that will not reach.
+  for (let a = 70; a <= 180; a += 3.7) {
+    for (let b = 70; b <= 180; b += 4.3) {
+      for (const pitch of [6, 8, 10, 16]) {
+        const r = checkMix(a, b, pitch);
+        const fits = ["direct", "double-time", "half-time"].includes(r.verdict);
+        assert.equal(
+          fits,
+          r.strain === "easy" || r.strain === "pushed",
+          `${a.toFixed(1)} → ${b.toFixed(1)} at ±${pitch}: verdict ${r.verdict}, strain ${r.strain}`,
+        );
+      }
+    }
+  }
+});
+
+check("the comfortable window is the mixable window at half the range", () => {
+  // 124 × 0.96 / 1.04 = 114.46; 124 × 1.04 / 0.96 = 134.33.
+  const w = comfortableWindow(124, 8);
+  near(w.low, 114.5, 0.05, "low");
+  near(w.high, 134.3, 0.05, "high");
+  assert.equal(COMFORT_FRACTION, 0.5);
+});
+
+check("the comfortable window sits inside the mixable one", () => {
+  for (const bpm of [80, 110, 124, 140, 174]) {
+    const easy = comfortableWindow(bpm);
+    const any = mixableWindow(bpm);
+    assert.ok(easy.low >= any.low && easy.high <= any.high, `${bpm}`);
+  }
+});
+
+check("every strain has a colour, and the colours mean what they say", () => {
+  assert.equal(STRAIN_META.easy.tone, "good");
+  assert.equal(STRAIN_META.pushed.tone, "warn");
+  assert.equal(STRAIN_META.out.tone, "bad");
+  assert.equal(STRAIN_META.unknown.tone, "muted");
 });
 
 console.log(

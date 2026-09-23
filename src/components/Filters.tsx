@@ -8,6 +8,7 @@ import {
   MAX_PITCH_PERCENT,
   MIN_PITCH_PERCENT,
   mixableWindow,
+  comfortableWindow,
 } from "@/lib/mixing";
 import { Search } from "./Icons";
 
@@ -546,6 +547,10 @@ export function Filters({
   // Not bpm ± n. A pitch fader is a percentage and both decks have one, so the
   // window is asymmetric and wider than it looks. See lib/mixing.ts.
   const window = currentBpm !== null ? mixableWindow(currentBpm, pitchPercent) : null;
+  // The part of that window where neither fader passes half its travel —
+  // where most real blends live. Offered first because it is the useful one.
+  const easyWindow =
+    currentBpm !== null ? comfortableWindow(currentBpm, pitchPercent) : null;
   const toggle = (key: FacetKey) => (value: string) => {
     const current = filters[key];
     onChange({
@@ -668,18 +673,31 @@ export function Filters({
           </button>
         </div>
 
-        {currentBpm !== null && window && (
+        {currentBpm !== null && window && easyWindow && (
           <>
+            <button
+              type="button"
+              onClick={() =>
+                onChange({ ...filters, bpmFrom: easyWindow.low, bpmTo: easyWindow.high })
+              }
+              className="mt-2 w-full rounded-full border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent"
+              title={`Neither deck past ±${pitchPercent / 2}% — the comfortable middle of the fader`}
+            >
+              Mixes easily with {currentBpm}
+              <span className="ml-1 font-mono text-accent/70">
+                {easyWindow.low}–{easyWindow.high}
+              </span>
+            </button>
             <button
               type="button"
               onClick={() =>
                 onChange({ ...filters, bpmFrom: window.low, bpmTo: window.high })
               }
-              className="mt-2 w-full rounded-full border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent"
-              title={`Both decks at ±${pitchPercent}% can meet anywhere from ${window.low} to ${window.high}`}
+              className="mt-1 w-full rounded-full border border-amber-400/30 px-2 py-0.5 text-[10px] text-amber-300/80 hover:bg-amber-400/5"
+              title={`Both decks at the full ±${pitchPercent}% can meet anywhere from ${window.low} to ${window.high} — reachable, but you will hear it`}
             >
-              Mixes with {currentBpm}
-              <span className="ml-1 font-mono text-accent/70">
+              Reachable at full pitch
+              <span className="ml-1 font-mono opacity-70">
                 {window.low}–{window.high}
               </span>
             </button>
