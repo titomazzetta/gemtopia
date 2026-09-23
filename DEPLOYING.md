@@ -272,17 +272,21 @@ Three separate jobs, and only one of them is "storing the code".
 |---|---|
 | **Source** | The commit history lives here. |
 | **Trigger** | Vercel subscribes to the repo. Push to `main` → production redeploys, no CLI needed. Any other branch or PR → a **preview deployment** on its own URL. |
-| **Scrutiny** | Actions runs CI on every push: typecheck, lint, `npm audit`, 246 tests against a throwaway Postgres, a production build, and a grep proving no server-only secret reached the client bundle. CodeQL weekly, Dependabot for dependency PRs. |
+| **Scrutiny** | Actions runs CI on every push: typecheck, lint, `npm audit`, the offline and API test suites against a throwaway Postgres, a production build, and a grep proving no server-only secret reached the client bundle. CodeQL on every pull request and weekly; Dependabot for dependency PRs. Current test counts live in the README, in one place, so this line cannot fall behind them again. |
 
-### ⚠ CI does not gate the deploy
+### CI gates the deploy — because main is protected
 
-GitHub Actions and Vercel's build are separate pipelines watching the same push. A
-red CI run will **not** stop Vercel shipping — you'll get a green deploy and a
-failing checkmark side by side.
+GitHub Actions and Vercel's build are separate pipelines watching the same push,
+and Vercel will ship a push to `main` whatever CI says. What stops a red build
+reaching production is that nothing reaches `main` except through a pull request
+that has already passed.
 
-To make CI actually block: **Settings → Branches → Add rule** on `main`, require
-status checks, tick `verify`. Worth doing even solo, because otherwise a broken
-test is just a notification you'll learn to ignore.
+This repository does that with a ruleset, `protect-main`: changes arrive by pull
+request only, `verify` and `CodeQL` must both pass before a merge, and
+force-pushes and branch deletion are refused. If you fork it, recreate that —
+**Settings → Rules → Rulesets → New branch ruleset** on `main` — because without
+it a broken test is just a notification you learn to ignore, and a red check can
+sit beside a green deploy.
 
 ### ⚠ Sign-in won't work on preview deployments
 
