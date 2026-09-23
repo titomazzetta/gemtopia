@@ -19,12 +19,33 @@ const MIN_BPM = 60;
 const MAX_BPM = 200;
 
 /**
- * Preferred range for the *reported* tempo. Dance music sits here, and comb
- * scoring is ambiguous between a tempo and its double, so ties are resolved
- * into this window.
+ * Where an octave-ambiguous reading gets folded, and how much evidence the
+ * fold needs.
+ *
+ * Comb scoring cannot tell a tempo from its double — 87 and 174 describe the
+ * same pulse grid — so the estimator reports its strongest peak and then
+ * offers to move it by an exact octave into this window.
+ *
+ * `minScoreRatio` is the evidence bar for that move: the octave has to score
+ * at least this fraction of the winning peak. 0.85 when the window is only a
+ * general preference, because then a clearly stronger reading should win.
+ * Lower when the window comes from the record's genre: choosing between 87
+ * and 174 is then a question of *convention*, not of evidence, and a Discogs
+ * "Drum n Bass" tag is better evidence of the convention than the comb score
+ * is — which is exactly why DnB used to land on 87 half the time.
  */
-const PREFERRED_LOW = 82;
-const PREFERRED_HIGH = 176;
+export interface FoldWindow {
+  low: number;
+  high: number;
+  minScoreRatio: number;
+}
+
+/**
+ * Used when a caller states no preference. Dance music sits here. Kept at its
+ * original values so every existing reading, and the tests pinning them, mean
+ * what they always meant — the app passes its own window explicitly.
+ */
+export const DEFAULT_FOLD: FoldWindow = { low: 82, high: 176, minScoreRatio: 0.85 };
 
 /**
  * Half-wave rectified difference against a local moving average.
@@ -128,6 +149,7 @@ const BPM_STEP = 0.2;
 export function estimateTempo(
   envelope: Float32Array,
   hopSeconds: number,
+  fold: FoldWindow = DEFAULT_FOLD,
 ): TempoEstimate | null {
   if (hopSeconds <= 0) return null;
 
@@ -196,14 +218,13 @@ export function estimateTempo(
   };
 
   let chosen = bestBpm;
-  const inPreferred = (bpm: number) =>
-    bpm >= PREFERRED_LOW && bpm <= PREFERRED_HIGH;
+  const inPreferred = (bpm: number) => bpm >= fold.low && bpm <= fold.high;
 
   if (!inPreferred(chosen)) {
     for (const factor of [2, 0.5, 4, 0.25]) {
       const candidate = bestBpm * factor;
       if (!inPreferred(candidate)) continue;
-      if (scoreAt(candidate) >= best * 0.85) {
+      if (scoreAt(candidate) >= best * fold.minScoreRatio) {
         chosen = candidate;
         break;
       }

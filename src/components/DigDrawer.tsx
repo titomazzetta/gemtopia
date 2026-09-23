@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { DigResult, Playable, ReleaseDetail } from "@/lib/types";
 import { digWithinCollection, type LocalLane } from "@/client/digLocal";
+import { recordQueue, runningOrder, type RunningOrder } from "@/client/recordOrder";
 import { ApiError, digApi, releasesApi, wantlistApi } from "@/client/api";
 import { formatTime } from "./NowPlaying";
 import { Disc, Heart, Play, Plus, Search, Shuffle, Sparkle } from "./Icons";
@@ -248,6 +249,144 @@ function Lane({ title, subtitle, children }: { title: string; subtitle?: string;
   );
 }
 
+/**
+ * The whole record, in the order it was pressed. See client/recordOrder.ts.
+ *
+ * Tracks Discogs has no clip for are listed anyway, dimmed. Hiding them would
+ * make a four-track EP look like a two-track single, which is the opposite of
+ * what someone opening "the whole record" wants to know.
+ */
+function RecordSection({
+  order,
+  releaseTitle,
+  year,
+  onPlay,
+  onPlayExtra,
+}: {
+  order: RunningOrder;
+  releaseTitle: string;
+  year: number | null;
+  /** Index into the playable tracks, in running order. */
+  onPlay: (index: number) => void;
+  onPlayExtra: (item: Playable) => void;
+}) {
+  const playable = order.rows.filter((row) => row.playable !== null);
+  if (order.rows.length === 0 && order.extras.length === 0) return null;
+
+  // Map each row to its index in the playable queue, so a click starts the
+  // record from that track rather than from the top.
+  let cursor = 0;
+  const queueIndex = order.rows.map((row) => (row.playable ? cursor++ : -1));
+
+  return (
+    <section className="mx-4 mb-4 rounded-md border border-ink-800 bg-ink-850/50">
+      <header className="flex items-center gap-2 border-b border-ink-800 px-3 py-2">
+        <Disc className="h-3.5 w-3.5 shrink-0 text-accent" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold text-neutral-100">
+            {releaseTitle || "This record"}
+            {year ? <span className="font-normal text-neutral-600"> · {year}</span> : null}
+          </p>
+          <p className="text-[10px] text-neutral-600">
+            {order.rows.length > 0
+              ? `${order.rows.length} tracks · ${playable.length} with audio`
+              : "Clips on YouTube for this release"}
+          </p>
+        </div>
+        {playable.length > 1 && (
+          <button
+            type="button"
+            onClick={() => onPlay(0)}
+            className="flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-[11px] font-semibold text-ink-950"
+            title="Play the record in order, then return to your shuffle"
+          >
+            <Play className="h-3 w-3" />
+            Play the record
+          </button>
+        )}
+      </header>
+
+      {order.rows.length > 0 && (
+        <ol className="max-h-72 overflow-y-auto py-1">
+          {order.rows.map((row, index) => {
+            const at = queueIndex[index]!;
+            const content = (
+              <>
+                <span className="w-7 shrink-0 font-mono text-[10px] text-neutral-600">
+                  {row.position}
+                </span>
+                <span
+                  className={`min-w-0 flex-1 truncate ${
+                    row.current
+                      ? "font-medium text-accent"
+                      : row.playable
+                        ? "text-neutral-200"
+                        : "text-neutral-600"
+                  }`}
+                >
+                  {row.title}
+                </span>
+                {row.current ? (
+                  <span className="shrink-0 text-[9px] uppercase tracking-wider text-accent">
+                    playing
+                  </span>
+                ) : !row.playable ? (
+                  <span className="shrink-0 text-[9px] text-neutral-700">no clip</span>
+                ) : null}
+                {row.duration && (
+                  <span className="w-9 shrink-0 text-right font-mono text-[10px] text-neutral-600">
+                    {row.duration}
+                  </span>
+                )}
+              </>
+            );
+
+            return (
+              <li key={`${row.position}:${index}`}>
+                {row.playable ? (
+                  <button
+                    type="button"
+                    onClick={() => onPlay(at)}
+                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-ink-800 ${
+                      row.current ? "bg-accent/5" : ""
+                    }`}
+                    title="Play from here, then return to your shuffle"
+                    aria-current={row.current ? "true" : undefined}
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2 px-3 py-1.5 text-xs">{content}</div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+
+      {order.extras.length > 0 && (
+        <div className="border-t border-ink-800 px-3 py-2">
+          <p className="mb-1 text-[10px] text-neutral-600">
+            Also on YouTube for this release — full sides, rips and mixes
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {order.extras.slice(0, 6).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => onPlayExtra(item)}
+                className="max-w-full truncate rounded-full border border-ink-700 px-2 py-0.5 text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+              >
+                {item.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function DigDrawer({
   seed,
   seedDetail,
@@ -257,6 +396,7 @@ export function DigDrawer({
   pitchPercent,
   onClose,
   onPlayLocal,
+  onPlayRecord,
   onAddToPlaylist,
   onPivot,
   onPreviewExternal,
@@ -272,6 +412,8 @@ export function DigDrawer({
   pitchPercent: number;
   onClose: () => void;
   onPlayLocal: (items: Playable[], index: number) => void;
+  /** Play the record in running order as a detour from the shuffle. */
+  onPlayRecord: (items: Playable[], index: number, label: string) => void;
   onAddToPlaylist: (item: Playable) => void;
   /** Apply a facet to the main crate filter and close the drawer. */
   onPivot: (facet: "artists" | "labels" | "styles" | "genres" | "countries", value: string) => void;
@@ -309,6 +451,11 @@ export function DigDrawer({
   const localLanes: LocalLane[] = useMemo(
     () => digWithinCollection(seed, pool, { pitchPercent }),
     [seed, pool, pitchPercent],
+  );
+
+  const record: RunningOrder = useMemo(
+    () => runningOrder(seed, seedDetail, pool),
+    [seed, seedDetail, pool],
   );
 
   const buildSeed = useCallback(
@@ -575,6 +722,22 @@ export function DigDrawer({
 
       {/* ---- body ---- */}
       <div className="min-h-0 flex-1 overflow-y-auto py-3">
+        {/*
+          The record comes first, on both halves: when something grabs you on
+          shuffle, the first thing you want is the rest of it. Everything
+          below — more by the artist, the label, what mixes with it — is the
+          second thing.
+        */}
+        <RecordSection
+          order={record}
+          releaseTitle={seed.releaseTitle}
+          year={seed.year}
+          onPlay={(index) =>
+            onPlayRecord(recordQueue(record), index, seed.releaseTitle || "this record")
+          }
+          onPlayExtra={(item) => onPlayRecord([item], 0, seed.releaseTitle || "this record")}
+        />
+
         {half === "crate" ? (
           localLanes.length === 0 ? (
             <p className="p-8 text-center text-xs text-neutral-600">

@@ -62,6 +62,16 @@ import {
   type SweepState,
 } from "@/client/bpmSweep";
 import { useTempoDetector } from "@/client/useTempoDetector";
+import { beginDetour, detourEnds, resumePoint, type Detour } from "@/client/detour";
+import { Shortcuts } from "./Shortcuts";
+import {
+  DEFAULT_RANGE,
+  RANGE_CEILING,
+  RANGE_FLOOR,
+  foldWindow,
+  normaliseRange,
+  pocketFor,
+} from "@/client/bpmRange";
 import { useYouTubePlayer } from "@/client/useYouTubePlayer";
 import {
   applyFilters,
@@ -260,6 +270,12 @@ export function CrateApp({
    */
   const [queue, setQueue] = useState<Playable[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
+  /**
+   * Set while you are exploring a record away from the shuffle. Holds where
+   * you left so the shuffle can pick up again — see client/detour.ts.
+   */
+  const [detour, setDetour] = useState<Detour<Playable> | null>(null);
+  const [showKeys, setShowKeys] = useState(false);
   const [shuffleOn, setShuffleOn] = useState(true);
   const [repeatOn, setRepeatOn] = useState(true);
 
@@ -459,11 +475,17 @@ export function CrateApp({
   const tapper = useRef(new TapTempo());
   const [tapCount, setTapCount] = useState(0);
 
-  const handleTap = useCallback(() => {
+  /**
+   * `at` is the input event's own timestamp, on the same clock as
+   * performance.now(). Without it every tap is timed when the handler runs,
+   * which drifts with whatever else the page is doing that frame — rendering
+   * a list, garbage collection — and that jitter lands straight in the tempo.
+   */
+  const handleTap = useCallback((at?: number) => {
     const item = currentRef.current;
     if (!item) return;
 
-    const estimate = tapper.current.tap();
+    const estimate = tapper.current.tap(at);
     setTapCount(tapper.current.count);
     if (!estimate) return;
 
@@ -504,7 +526,43 @@ export function CrateApp({
     [saveMeta, advanceSweepTo],
   );
 
-  const detector = useTempoDetector({ onCommit: onDetectorCommit });
+  /*
+   * Which octave detection reports in.
+   *
+   * Your range lives in this browser like the blend length does: it is a
+   * listening preference, not data about the set. The record's genre pocket,
+   * when Discogs tags one, takes precedence — see client/bpmRange.ts for why,
+   * and for what the 70–160 default costs on untagged DnB and dubstep.
+   */
+  const [rangeLow, setRangeLow] = useLocalNumber("gemtopia:bpm-low", DEFAULT_RANGE.low, {
+    min: RANGE_FLOOR,
+    max: RANGE_CEILING,
+  });
+  const [rangeHigh, setRangeHigh] = useLocalNumber("gemtopia:bpm-high", DEFAULT_RANGE.high, {
+    min: RANGE_FLOOR,
+    max: RANGE_CEILING,
+  });
+  const tempoRange = useMemo(
+    () => normaliseRange(rangeLow, rangeHigh) ?? DEFAULT_RANGE,
+    [rangeLow, rangeHigh],
+  );
+  const changeTempoRange = useCallback(
+    (low: number, high: number) => {
+      // Refused ranges keep the last good one rather than writing garbage.
+      const next = normaliseRange(low, high);
+      if (!next) return;
+      setRangeLow(next.low);
+      setRangeHigh(next.high);
+    },
+    [setRangeLow, setRangeHigh],
+  );
+  const tempoPocket = useMemo(
+    () => (current ? pocketFor(current.styles, current.genres) : null),
+    [current],
+  );
+  const fold = useMemo(() => foldWindow(tempoRange, tempoPocket), [tempoRange, tempoPocket]);
+
+  const detector = useTempoDetector({ onCommit: onDetectorCommit, fold });
 
   const scaleBpm = useCallback(
     (factor: ScaleFactor) => {
@@ -829,6 +887,10 @@ export function CrateApp({
       `Measuring ${plan.keys.length} track${plan.keys.length === 1 ? "" : "s"}` +
         (plan.skipped > 0 ? ` · skipping ${plan.skipped} already done` : ""),
     );
+    // A sweep drives the queue itself, one track at a time. Left in place, a
+    // detour would see each one-track queue "end" and pull you back to the
+    // shuffle mid-sweep.
+    setDetour(null);
     advanceSweepTo(plan);
   }, [advanceSweepTo, detector.status, say, stopSweep, visible]);
 
@@ -859,8 +921,31 @@ export function CrateApp({
 
   /* ================= player ================= */
 
+  /** Key of the clip last handed to the player, so a re-render never reloads it. */
+  const lastLoaded = useRef<string | null>(null);
+
+  /**
+   * Back to the shuffle from a record you were exploring. Picks up at the
+   * track after the one you left — see resumePoint for why not the same one.
+   */
+  const endDetour = useCallback(() => {
+    if (!detour) return;
+    const resume = resumePoint(detour, repeatOn);
+    setDetour(null);
+    if (!resume) return;
+    setQueue(resume.queue);
+    setQueueIndex(resume.index);
+    lastLoaded.current = null;
+  }, [detour, repeatOn]);
+
   const advance = useCallback(
     (delta: number) => {
+      // Running off the end of a record you went to explore means you have
+      // heard it: go back to the shuffle rather than wrapping round the EP.
+      if (detour && detourEnds(queueIndex, delta, queue.length)) {
+        endDetour();
+        return;
+      }
       setQueueIndex((index) => {
         const next = index + delta;
         if (next < 0) return repeatOn && queue.length > 0 ? queue.length - 1 : 0;
@@ -868,7 +953,7 @@ export function CrateApp({
         return next;
       });
     },
-    [queue.length, repeatOn],
+    [queue.length, queueIndex, repeatOn, detour, endDetour],
   );
 
   const { containerRef, api } = useYouTubePlayer({
@@ -876,7 +961,6 @@ export function CrateApp({
     onUnplayable: () => window.setTimeout(() => advance(1), 900),
   });
 
-  const lastLoaded = useRef<string | null>(null);
 
   // The sweep pauses through a ref, because it is defined before the player.
   useEffect(() => {
@@ -906,9 +990,14 @@ export function CrateApp({
    * than at each call site, and the index is re-derived because a position in
    * the list on screen is not a position in the queue once rows are dropped.
    */
-  const playFrom = useCallback(
-    (items: Playable[], index: number) => {
-      if (items.length === 0) return;
+  /**
+   * Put a queue on the decks. Returns false when nothing in it can play, having
+   * already said why. Shared by the two ways in: choosing something new, and
+   * exploring a record.
+   */
+  const loadQueue = useCallback(
+    (items: Playable[], index: number): boolean => {
+      if (items.length === 0) return false;
 
       const plan = queueFrom(items, index);
       if (plan === null) {
@@ -920,14 +1009,42 @@ export function CrateApp({
               ? `Discogs has no audio for ${target.title}.`
               : "Nothing here can be played.",
         );
-        return;
+        return false;
       }
 
       setQueue(plan.queue);
       setQueueIndex(plan.index);
       lastLoaded.current = null;
+      return true;
     },
     [say],
+  );
+
+  /**
+   * The only door into the queue for *choosing something new* — a row, a
+   * playlist, a shuffle. Choosing something new ends any detour: you have left
+   * the shuffle on purpose, and "back" would take you somewhere you no longer
+   * want to be.
+   */
+  const playFrom = useCallback(
+    (items: Playable[], index: number) => {
+      if (loadQueue(items, index)) setDetour(null);
+    },
+    [loadQueue],
+  );
+
+  /**
+   * Explore a record without losing your place. Saves where the shuffle was,
+   * plays the record in running order, and returns when it ends or on Back.
+   */
+  const playRecord = useCallback(
+    (items: Playable[], index: number, label: string) => {
+      const saved = { queue, index: queueIndex };
+      if (!loadQueue(items, index)) return;
+      setDetour((existing) => beginDetour(existing, saved.queue, saved.index, label));
+      say(`Exploring ${label} — B or Back to shuffle returns you`);
+    },
+    [loadQueue, queue, queueIndex, say],
   );
 
   const shuffleNow = useCallback(() => {
@@ -1414,8 +1531,12 @@ export function CrateApp({
           setRepeatOn((v) => !v);
           break;
         case "t":
+        case "T":
           event.preventDefault();
-          handleTap();
+          // Holding T would otherwise fire thirty taps a second from the
+          // keyboard's auto-repeat, and reset the tapper every time.
+          if (event.repeat) break;
+          handleTap(event.timeStamp);
           break;
         case "d":
           event.preventDefault();
@@ -1425,13 +1546,23 @@ export function CrateApp({
           event.preventDefault();
           queueForPlaylist(currentRef.current);
           break;
+        case "b":
+        case "B":
+          event.preventDefault();
+          endDetour();
+          break;
         case "/":
           event.preventDefault();
           setRail("filters");
           document.getElementById("dig-search")?.focus();
           break;
+        case "?":
+          event.preventDefault();
+          setShowKeys((open) => !open);
+          break;
         case "Escape":
           setPicker(null);
+          setShowKeys(false);
           break;
         default:
           break;
@@ -1440,7 +1571,7 @@ export function CrateApp({
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [api, advance, shuffleNow, queueForPlaylist, handleTap]);
+  }, [api, advance, shuffleNow, queueForPlaylist, handleTap, endDetour]);
 
   /* ================= playlist actions ================= */
 
@@ -1505,6 +1636,7 @@ export function CrateApp({
     sync?.status === "paused";
   return (
     <div className="flex h-full flex-col">
+      {showKeys && <Shortcuts onClose={() => setShowKeys(false)} />}
       <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 py-2.5">
         {/*
           20px lands in the text cut, which is the drawing meant for this size.
@@ -1515,6 +1647,16 @@ export function CrateApp({
         <span className="hidden text-sm font-semibold tracking-tight text-neutral-100 sm:block">
           Gemtopia
         </span>
+        {/* Keyboard users find "?"; everyone else needs something to click. */}
+        <button
+          type="button"
+          onClick={() => setShowKeys(true)}
+          title="Keyboard shortcuts (?)"
+          aria-label="Keyboard shortcuts"
+          className="hidden h-6 w-6 shrink-0 items-center justify-center rounded border border-ink-700 font-mono text-[11px] text-neutral-500 hover:text-neutral-200 lg:flex"
+        >
+          ?
+        </button>
 
         {/*
           Desktop only: on a phone the source lives in the "Play from" sheet,
@@ -1912,6 +2054,7 @@ export function CrateApp({
                 pitchPercent={pitchPercent}
                 onClose={() => setDigTarget(null)}
                 onPlayLocal={playFrom}
+                onPlayRecord={playRecord}
                 onAddToPlaylist={queueForPlaylist}
                 onPivot={pivotFilter}
                 onPreviewExternal={previewExternal}
@@ -1995,6 +2138,11 @@ export function CrateApp({
             onStartDetector: (kind) => void detector.start(kind),
             onStopDetector: detector.stop,
             onScaleBpm: scaleBpm,
+            peek: detector.peek,
+            locked: detector.committed !== null,
+            fold: { low: fold.low, high: fold.high, pocket: tempoPocket?.name ?? null },
+            range: tempoRange,
+            onRangeChange: changeTempoRange,
             onClearBpm: clearBpm,
           }}
           onToggleShuffle={shuffleNow}
@@ -2003,6 +2151,8 @@ export function CrateApp({
           onNext={() => advance(1)}
           onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
           onDig={() => setDigTarget(current)}
+          detour={detour ? { label: detour.label } : null}
+          onBackToShuffle={endDetour}
           digging={Boolean(digTarget)}
         />
       </div>
@@ -2018,6 +2168,8 @@ export function CrateApp({
         onSeek={api.seek}
         onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
         onTap={handleTap}
+        detour={detour ? { label: detour.label } : null}
+        onBackToShuffle={endDetour}
         onToggle={api.toggle}
         onPrev={() => (api.currentTime > 4 ? api.seek(0) : advance(-1))}
         onNext={() => advance(1)}
@@ -2182,10 +2334,19 @@ export function CrateApp({
               </div>
 
               <div className="mt-3 flex items-center gap-2">
+                {/* Same press-not-release timing as the desktop button, and it
+                    matters more here: a finger lifting off glass lands later
+                    and less consistently than a mouse button coming up. */}
                 <button
                   type="button"
-                  onClick={handleTap}
-                  className="flex-1 rounded-lg border border-accent/40 bg-accent/10 py-2.5 text-xs font-semibold text-accent"
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    handleTap(event.timeStamp);
+                  }}
+                  onClick={(event) => {
+                    if (event.detail === 0) handleTap(event.timeStamp);
+                  }}
+                  className="flex-1 touch-manipulation select-none rounded-lg border border-accent/40 bg-accent/10 py-2.5 text-xs font-semibold text-accent active:bg-accent/20"
                 >
                   TAP {tapCount > 0 ? tapCount : ""}
                 </button>
