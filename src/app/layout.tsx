@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Gemtopia",
   description:
-    "Shuffle and build playlists from your Discogs collection and wantlist.",
+    "Dig through your Discogs collection, hear every record, and plan sets that tell a story. For the storytelling DJ — built by a DJ who loves records.",
   robots: { index: false, follow: false },
   applicationName: "Gemtopia",
 };

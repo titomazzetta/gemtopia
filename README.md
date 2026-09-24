@@ -7,7 +7,9 @@
 
 # Gemtopia
 
-**A crate-digging app for vinyl DJs, built by one.**
+**For the storytelling DJ.**
+
+Dig your records, shape the set, tell the story. Built by a DJ who loves records.
 
 [gemtopia.vercel.app](https://gemtopia.vercel.app) · sign in with your Discogs account
 

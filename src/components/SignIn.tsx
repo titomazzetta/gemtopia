@@ -22,7 +22,7 @@ export function SignIn({ error }: { error: string | null }) {
             Gemtopia
           </h1>
           <p className="text-xs text-neutral-500">
-            A Bandcamp-style player for your Discogs crate.
+            For the storytelling DJ. Dig your records, shape the set, tell the story.
           </p>
         </div>
       </div>
