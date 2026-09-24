@@ -1,8 +1,15 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/mark-dark.svg">
+  <img src=".github/mark-light.svg" width="72" height="72" alt="">
+</picture>
+
 # Gemtopia
 
 **A crate-digging app for vinyl DJs, built by one.**
+
+[gemtopia.vercel.app](https://gemtopia.vercel.app) · sign in with your Discogs account
 
 [![CI](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml/badge.svg)](https://github.com/titomazzetta/gemtopia/actions/workflows/ci.yml)
 [![Threat model](https://img.shields.io/badge/threat%20model-documented-5ef08a)](./THREAT_MODEL.md)
