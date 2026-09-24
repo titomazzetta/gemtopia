@@ -28,6 +28,8 @@ import {
   comfortableWindow,
   COMFORT_FRACTION,
   STRAIN_META,
+  VERDICT_META,
+  transitionWords,
 } from "../src/lib/mixing.ts";
 
 let failures = 0;
@@ -510,7 +512,8 @@ check("a pair that fits but strains the faders is amber, not green", () => {
   const result = checkMix(124, 140);
   assert.equal(result.verdict, "direct", "it still fits");
   assert.equal(result.strain, "pushed");
-  assert.match(result.summary, /near the edge/);
+  // Said in words, not only in amber: see "no two tiers read the same" below.
+  assert.equal(transitionWords(result).tier, "Pushing it");
 });
 
 check("beyond the range is red, even where a wider deck would reach", () => {
@@ -602,6 +605,96 @@ check("every strain has a colour, and the colours mean what they say", () => {
   assert.equal(STRAIN_META.pushed.tone, "warn");
   assert.equal(STRAIN_META.out.tone, "bad");
   assert.equal(STRAIN_META.unknown.tone, "muted");
+});
+
+/* ---- parallel words: every colour has a word, and the words differ ---- */
+
+check("each tier has its own word, and the three are different", () => {
+  const words = ["easy", "pushed", "out"].map((k) => STRAIN_META[k].label);
+  assert.deepEqual(words, ["Comfortable", "Pushing it", "Out of range"]);
+  assert.equal(new Set(words).size, 3);
+});
+
+check("the tier word is shown where the verdict does not already say it", () => {
+  assert.equal(transitionWords(checkMix(124, 128)).tier, "Comfortable");
+  assert.equal(transitionWords(checkMix(124, 140)).tier, "Pushing it");
+  // Out of range and no-BPM are already named by the verdict; repeating the
+  // tier would read "Out of range · Out of range".
+  assert.equal(transitionWords(checkMix(124, 150)).tier, null);
+  assert.equal(transitionWords(checkMix(124, 150)).verdict, "Out of range");
+  assert.equal(transitionWords(checkMix(null, 128)).tier, null);
+});
+
+check("no two tiers ever read as the same words", () => {
+  /*
+   * The rule this whole feature depends on, tested directly. Phosphor's green
+   * and amber are 1.16:1 in luminance, so to a red-green colour-blind DJ the
+   * colour says almost nothing — the words have to. Before this test, a
+   * 1:1 blend at ±1.5% and one at ±7% both read "Mixes" and differed only in
+   * colour and in a suffix that truncation removed first.
+   *
+   * Swept across real tempos and four common deck ranges: collect the words
+   * each tier produces, and require that no wording belongs to two tiers.
+   */
+  const seen = new Map(); // wording -> strain
+  for (const pitch of [6, 8, 10, 16]) {
+    for (let a = 70; a <= 180; a += 1) {
+      for (let b = 70; b <= 180; b += 3) {
+        const result = checkMix(a, b, pitch);
+        const w = transitionWords(result);
+        const wording = [w.verdict, w.tier].filter(Boolean).join(" · ");
+        const prior = seen.get(wording);
+        assert.ok(
+          prior === undefined || prior === result.strain,
+          `"${wording}" is used for both ${prior} and ${result.strain} (${a}→${b} at ±${pitch}%)`,
+        );
+        seen.set(wording, result.strain);
+      }
+    }
+  }
+});
+
+check("every transition shows at least one word", () => {
+  for (const [a, b] of [[124, 128], [124, 140], [124, 150], [90, 180], [null, 120]]) {
+    const w = transitionWords(checkMix(a, b));
+    assert.ok(w.verdict.length > 0, `${a}→${b} has no verdict word`);
+  }
+  for (const k of Object.keys(VERDICT_META)) assert.ok(VERDICT_META[k].label);
+});
+
+/* ---- the set-prep bar and the strip count the same thing ---- */
+
+check("the report counts tiers exactly as the strip colours them", () => {
+  /*
+   * The bug this pins: the strip coloured by tier while the set-prep bar
+   * counted by verdict, so a playlist of ±7% blends was amber row by row and
+   * "all transitions beatmatch" in green above them. Now the bar reads
+   * report.easy / pushed / out, and those must equal the strip's own tally.
+   */
+  const bpms = [124, 128, 140, 150, null, 126, 252, 130];
+  const report = analyseSequence(bpms);
+  const tally = { easy: 0, pushed: 0, out: 0, unknown: 0 };
+  for (const step of report.steps) tally[step.check.strain] += 1;
+  assert.equal(report.easy, tally.easy);
+  assert.equal(report.pushed, tally.pushed);
+  assert.equal(report.out, tally.out);
+  assert.equal(report.unknown, tally.unknown);
+  assert.equal(report.easy + report.pushed + report.out + report.unknown, report.steps.length);
+});
+
+check("a set of pushed blends is not reported as all comfortable", () => {
+  // 124 → 140 → 124 → 140: every blend fits at ±6.1% each, none comfortably.
+  const report = analyseSequence([124, 140, 124, 140]);
+  assert.equal(report.direct, 3, "every blend still fits");
+  assert.equal(report.pushed, 3);
+  assert.equal(report.easy, 0, "the old bar would have shown three green");
+});
+
+check("stretch counts as out of range, matching its red in the strip", () => {
+  const report = analyseSequence([124, 150]);
+  assert.equal(report.stretch, 1);
+  assert.equal(report.out, 1);
+  assert.equal(STRAIN_META.out.tone, "bad");
 });
 
 console.log(

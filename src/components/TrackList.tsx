@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Playable } from "@/lib/types";
-import { STRAIN_META, VERDICT_META, type MixCheck } from "@/lib/mixing";
+import { STRAIN_META, transitionWords, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { formatBpm } from "@/lib/mixing";
 import { NoPreview, Play, Plus, Trash } from "./Icons";
@@ -52,19 +52,26 @@ const TONE_CLASS: Record<string, string> = {
  * that tells you whether to swap the record or swap the deck.
  */
 function TransitionStrip({ check }: { check: MixCheck }) {
-  const meta = VERDICT_META[check.verdict];
   // Colour answers "is this comfortable", which is what you scan for; the
-  // label still says how the records meet. A double-time blend that needs
-  // ±1% is green, and a straight 1:1 at ±7% each is amber, which is the
-  // distinction the old one-colour-per-verdict scheme could not make.
+  // verdict says how the records meet. A double-time blend that needs ±1% is
+  // green, and a straight 1:1 at ±7% each is amber.
+  //
+  // The tier is also said in words, and before the summary, never after it.
+  // It used to ride as a suffix on the summary, which `truncate` cuts from the
+  // end — so on a phone the one word separating green from amber was the
+  // first thing to go, leaving a colour-blind DJ two identical rows.
   const tone = STRAIN_META[check.strain].tone;
+  const words = transitionWords(check);
   return (
     <div
       className={`flex h-[22px] items-center gap-1.5 border-l-2 px-3 text-[10px] ${TONE_CLASS[tone]}`}
       title={check.summary}
     >
       <span className="font-mono opacity-70">↳</span>
-      <span className="font-medium">{meta.label}</span>
+      <span className="shrink-0 font-medium">{words.verdict}</span>
+      {words.tier && (
+        <span className="shrink-0 font-semibold">· {words.tier}</span>
+      )}
       <span className="truncate opacity-80">{check.summary}</span>
     </div>
   );

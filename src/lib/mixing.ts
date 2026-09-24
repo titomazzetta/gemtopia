@@ -256,7 +256,7 @@ export function checkMix(
             Math.abs(outgoingPitch) < 0.05
               ? "no pitch needed"
               : `±${round1(Math.abs(outgoingPitch))}% each`
-          }${strain === "pushed" ? " — near the edge of the fader" : ""}`;
+          }`;
 
   return {
     verdict,
@@ -320,6 +320,18 @@ export interface SequenceReport {
   stretch: number;
   impossible: number;
   unknown: number;
+  /**
+   * The same transitions counted by tier, which is what the colours show.
+   *
+   * Added because the set-prep bar kept counting by verdict after the strip
+   * between records moved to tiers, so a set of ±7% blends read as amber row
+   * by row and "All 10 transitions beatmatch" in solid green in the summary.
+   * Two readouts of one playlist contradicting each other. Both now count
+   * the same thing.
+   */
+  easy: number;
+  pushed: number;
+  out: number;
   /** Indices whose transition from the previous track will not work. */
   problemIndices: number[];
 }
@@ -335,11 +347,13 @@ export function analyseSequence(
   let stretch = 0;
   let impossible = 0;
   let unknown = 0;
+  const tiers = { easy: 0, pushed: 0, out: 0 };
   const problemIndices: number[] = [];
 
   for (let i = 1; i < bpms.length; i++) {
     const check = checkMix(bpms[i - 1] ?? null, bpms[i] ?? null, pitchPercent);
     steps.push({ index: i, check });
+    if (check.strain !== "unknown") tiers[check.strain] += 1;
 
     switch (check.verdict) {
       case "direct":
@@ -362,7 +376,16 @@ export function analyseSequence(
     }
   }
 
-  return { steps, direct, timeShifted, stretch, impossible, unknown, problemIndices };
+  return {
+    steps,
+    direct,
+    timeShifted,
+    stretch,
+    impossible,
+    unknown,
+    ...tiers,
+    problemIndices,
+  };
 }
 
 /**
@@ -450,6 +473,31 @@ export const STRAIN_META: Record<
   out: { label: "Out of range", tone: "bad" },
   unknown: { label: "No BPM", tone: "muted" },
 };
+
+/**
+ * The words a transition shows, beside its colour.
+ *
+ * Colour alone is not allowed to carry the tier. Phosphor's green and amber
+ * sit at 1.16:1 in luminance — with hue removed they are nearly the same
+ * colour — so for a red-green colour-blind DJ, "Comfortable" and "Pushing it"
+ * rendered as two colours and one shared word ("Mixes") are the same row.
+ *
+ * `tier` is null exactly where the verdict already names it: "Out of range",
+ * "Won't mix", "No BPM". Repeating it would read "Out of range · Out of
+ * range". Where the verdict is "Mixes" or "Double-time", which say nothing
+ * about how hard the faders work, the tier word is what tells rows apart.
+ */
+export function transitionWords(check: MixCheck): {
+  verdict: string;
+  tier: string | null;
+} {
+  const verdict = VERDICT_META[check.verdict].label;
+  const tier =
+    check.strain === "easy" || check.strain === "pushed"
+      ? STRAIN_META[check.strain].label
+      : null;
+  return { verdict, tier };
+}
 
 export const VERDICT_META: Record<
   MixVerdict,
