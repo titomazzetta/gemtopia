@@ -17,7 +17,7 @@
     "db:migrate": "node scripts/migrate.mjs",
     "verify:discogs": "node scripts/verify-discogs.mjs",
     "verify:db": "node scripts/verify-db.mjs",
-    "test": "npm run test:env && npm run test:headers && npm run test:playables && npm run test:sorting && npm run test:share && npm run test:scrub && npm run test:ownership && npm run test:recent && npm run test:adopt && npm run test:search && npm run test:writes && npm run test:playback && npm run test:watchdog && npm run test:freshness && npm run test:tempo && npm run test:mixing && npm run test:bpm-range && npm run test:beat-meter && npm run test:record && npm run test:mark && npm run test:api && npm run test:bpm-scale && npm run test:order",
+    "test": "npm run test:env && npm run test:headers && npm run test:playables && npm run test:sorting && npm run test:share && npm run test:scrub && npm run test:ownership && npm run test:recent && npm run test:adopt && npm run test:search && npm run test:writes && npm run test:playback && npm run test:watchdog && npm run test:freshness && npm run test:tempo && npm run test:mixing && npm run test:bpm-range && npm run test:beat-meter && npm run test:record && npm run test:mark && npm run test:api && npm run test:bpm-scale && npm run test:order && npm run test:views",
     "test:env": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-env.mjs",
     "test:headers": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-headers.mjs",
     "test:playables": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playables.mjs",
@@ -40,7 +40,8 @@
     "test:mark": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-mark.mjs",
     "test:bpm-range": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-bpm-range.mjs",
     "test:beat-meter": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-beat-meter.mjs",
-    "test:record": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-record.mjs"
+    "test:record": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-record.mjs",
+    "test:views": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playlist-view.mjs"
   },
   "dependencies": {
     "next": "16.3.6",

@@ -48,7 +48,7 @@ export const SORT_LABELS: Record<SortKey, string> = {
 /** Case- and accent-insensitive, and "The Orb" files under O, not T. */
 const ARTICLE = /^(the|a|an)\s+/i;
 
-function textKey(value: string | null | undefined): string | null {
+export function textKey(value: string | null | undefined): string | null {
   if (!value) return null;
   const stripped = value.replace(ARTICLE, "").trim();
   if (!stripped) return null;

@@ -36,6 +36,17 @@ import type { FacetKey } from "./Filters";
 import { needsSync } from "@/client/crateFreshness";
 import { scaleReading, type ScaleFactor } from "@/client/bpmScaling";
 import { moveEntry } from "@/client/playlistOrder";
+import {
+  YOUR_ORDER,
+  adoptView,
+  canRestore,
+  entryIndexAt,
+  nextView,
+  viewName,
+  viewPermutation,
+  type PlaylistView,
+  type PlaylistViewState,
+} from "@/client/playlistView";
 import { useCrateCache } from "@/client/useCrateCache";
 import {
   buildPlayables,
@@ -94,6 +105,7 @@ import { useLocalNumber } from "@/client/useLocalPreference";
 import { DigDrawer } from "./DigDrawer";
 import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
+import { PlaylistViewBar } from "./PlaylistViewBar";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
@@ -191,6 +203,26 @@ export function CrateApp({
   const [rail, setRail] = useState<Rail>("filters");
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  /*
+   * How the open playlist is being *looked at* — never how it is stored.
+   * Remembered against the playlist it was chosen for, so opening any other
+   * playlist (or coming back later) lands on "Your order" without an effect
+   * having to reset anything.
+   */
+  const [viewChoice, setViewChoice] = useState<{
+    playlistId: string;
+    state: PlaylistViewState;
+  } | null>(null);
+  /**
+   * The order from just before the last "Keep this order" or "Smooth order",
+   * for one step of undo. Only ever restored as a pure reorder — see
+   * `canRestore` in client/playlistView.ts.
+   */
+  const [lastOrder, setLastOrder] = useState<{
+    playlistId: string;
+    entries: NewEntry[];
+    label: string;
+  } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [picker, setPicker] = useState<Playable | null>(null);
 
@@ -789,10 +821,24 @@ export function CrateApp({
     });
   }, [activePlaylist, byKey, bpmByClip]);
 
+  const playlistView: PlaylistViewState =
+    activePlaylist && viewChoice?.playlistId === activePlaylist.id
+      ? viewChoice.state
+      : YOUR_ORDER;
+  const inYourOrder = playlistView.view === "yours";
+
+  /** Indices into the stored entries, in the order they are shown. */
+  const viewOrder = useMemo(
+    () => viewPermutation(playlistItems, playlistView),
+    [playlistItems, playlistView],
+  );
+
   /*
    * A playlist keeps its own order — that order is the set, and the transition
    * checks between consecutive rows only mean anything while the displayed
-   * order is the stored one. So sorting applies to the crate only.
+   * order is the stored one. So the crate's column sort never applies here;
+   * playlists get views instead (client/playlistView.ts), which change what
+   * is shown and never what is stored.
    */
   /*
    * How many filters are actually narrowing the crate. Drives the badge on the
@@ -824,10 +870,16 @@ export function CrateApp({
   const visible = useMemo(
     () =>
       activePlaylist
-        ? // A playlist has a real order that means something. Never re-sort it.
-          playlistItems
+        ? /*
+           * A playlist's stored order is never re-sorted. A view only changes
+           * what is shown, through `viewOrder`, and "Your order" is the
+           * identity.
+           */
+          viewOrder
+            .map((index) => playlistItems[index])
+            .filter((item): item is Playable => Boolean(item))
         : sortItems(filtered, sort ?? DEFAULT_SORT),
-    [activePlaylist, playlistItems, filtered, sort],
+    [activePlaylist, playlistItems, viewOrder, filtered, sort],
   );
 
   /*
@@ -1154,6 +1206,9 @@ export function CrateApp({
       // can reach it. Remove-then-insert shifts everything after `from`, so
       // the version that looks right dragging down is off by one going up.
       const entries = moveEntry(activePlaylist.entries.map(reEntry), from, to);
+      // A hand edit supersedes the last Keep / Smooth: undoing past it would
+      // silently throw the drag away too.
+      setLastOrder(null);
       void mutateEntries(activePlaylist, entries);
     },
     [activePlaylist, mutateEntries],
@@ -1320,9 +1375,65 @@ export function CrateApp({
       return;
     }
 
+    setLastOrder({
+      playlistId: activePlaylist.id,
+      entries: activePlaylist.entries.map(reEntry),
+      label: "Undo smooth order",
+    });
+    setViewChoice(null);
     void mutateEntries(activePlaylist, reordered.map(reEntry));
     say("Reordered so the tempos climb.");
   }, [activePlaylist, playlistItems, pitchPercent, mutateEntries, say]);
+
+  const changePlaylistView = useCallback(
+    (view: PlaylistView) => {
+      if (!activePlaylist) return;
+      setViewChoice({
+        playlistId: activePlaylist.id,
+        state: nextView(playlistView, view),
+      });
+    },
+    [activePlaylist, playlistView],
+  );
+
+  /**
+   * Adopt the view as the stored order. Explicit, undoable, and refused
+   * outright unless the view is a true permutation of the entries — so it can
+   * reorder a set and can never lose, clone or invent a record.
+   */
+  const keepPlaylistView = useCallback(() => {
+    if (!activePlaylist || inYourOrder) return;
+    const adopted = adoptView(activePlaylist.entries, viewOrder);
+    if (!adopted) {
+      say("Could not reorder that playlist safely.");
+      return;
+    }
+    setLastOrder({
+      playlistId: activePlaylist.id,
+      entries: activePlaylist.entries.map(reEntry),
+      label: "Undo reorder",
+    });
+    setViewChoice(null);
+    void mutateEntries(activePlaylist, adopted.map(reEntry));
+    say(`Your order is now by ${viewName(playlistView.view)}.`);
+  }, [activePlaylist, inYourOrder, viewOrder, playlistView, mutateEntries, say]);
+
+  const undoAvailable = Boolean(
+    activePlaylist &&
+      lastOrder &&
+      lastOrder.playlistId === activePlaylist.id &&
+      canRestore(
+        lastOrder.entries.map((entry) => entry.clipKey),
+        activePlaylist.entries.map((entry) => entry.clipKey),
+      ),
+  );
+
+  const undoReorder = useCallback(() => {
+    if (!activePlaylist || !lastOrder || !undoAvailable) return;
+    setLastOrder(null);
+    void mutateEntries(activePlaylist, lastOrder.entries);
+    say("Put your order back.");
+  }, [activePlaylist, lastOrder, undoAvailable, mutateEntries, say]);
 
   /* ================= digging ================= */
 
@@ -2042,6 +2153,17 @@ export function CrateApp({
             />
           )}
 
+          {activePlaylist && !digTarget && activePlaylist.entries.length > 1 && (
+            <PlaylistViewBar
+              state={playlistView}
+              onChange={changePlaylistView}
+              onKeep={keepPlaylistView}
+              onUndo={undoAvailable ? undoReorder : undefined}
+              undoLabel={lastOrder?.label}
+              busy={loading}
+            />
+          )}
+
           <div className="min-h-0 flex-1">
             {digTarget ? (
               <DigDrawer
@@ -2072,11 +2194,19 @@ export function CrateApp({
                 onPlay={(index) => playFrom(visible, index)}
                 onAdd={activePlaylist ? undefined : (item) => queueForPlaylist(item)}
                 onRemove={
-                  activePlaylist ? (_item, index) => removeFromPlaylist(index) : undefined
+                  activePlaylist
+                    ? (_item, index) => {
+                        // In a sorted view the third row is not the third entry.
+                        const entry = entryIndexAt(viewOrder, index);
+                        if (entry !== null) removeFromPlaylist(entry);
+                      }
+                    : undefined
                 }
-                reorderable={Boolean(activePlaylist)}
+                // Dragging and the transition checks belong to your order:
+                // they only mean something between records played in sequence.
+                reorderable={Boolean(activePlaylist) && inYourOrder}
                 onReorder={reorderPlaylist}
-                transitions={activePlaylist ? transitions : undefined}
+                transitions={activePlaylist && inYourOrder ? transitions : undefined}
                 sort={activePlaylist ? null : sort}
                 onSort={
                   activePlaylist
