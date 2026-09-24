@@ -125,10 +125,16 @@ jobs:
 
       - name: Assert no secret reached the client bundle
         run: |
-          if grep -rl "ci-placeholder-secret" .next/static/ 2>/dev/null; then
-            echo "::error::A server-only secret was inlined into the client bundle"
-            exit 1
-          fi
+          # Both server-only secrets, not just the Discogs one. SESSION_SECRET
+          # is the key that seals every session cookie; leaking it into the
+          # bundle would let anyone forge a login, which is worse than leaking
+          # the consumer secret, and it was the one this step did not check.
+          for secret in "ci-placeholder-secret" "$SESSION_SECRET"; do
+            if grep -rlF -- "$secret" .next/static/ 2>/dev/null; then
+              echo "::error::A server-only secret was inlined into the client bundle"
+              exit 1
+            fi
+          done
           echo "Client bundle is clean."
 
       - name: API integration tests
