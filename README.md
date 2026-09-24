@@ -102,7 +102,7 @@ first — it says what's defended, how, and what deliberately isn't.
 | **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
 | **Hear the whole record** | Something grabs you on shuffle: tap the artist or the record and the whole release opens in running order — every track, the one playing marked, the ones with no audio still listed. Play it through, then drop straight back into your shuffle where you left it. |
 | **Dig from anything** | Hit `D` on whatever's playing and pivot on any field. Two lanes: what else you own, and what exists beyond it. |
-| **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. |
+| **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. View by artist, genre, BPM or year without losing the order you built. |
 | **BPM catalogue** | Detect tempo from the audio as it plays — with a live beat meter showing exactly what it hears — or tap it in with `T`. Genre-aware: a record Discogs tags as drum & bass is counted at 174, not 87. **Measure** plays through everything on screen unattended, skipping what is already done. |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **won't reach**. Flags the hard ones before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
@@ -410,6 +410,17 @@ A summary bar above shows the shape of the set at a glance — *"4 comfortable �
 1 pushing it · 1 out of range"*, counted exactly the way the strip colours
 them — and **Smooth order** reorders the playlist so they fit.
 
+**Your order stays the set.** A row of chips above the list — *Your order ·
+Artist · Genre · BPM · Year* — lets you look at a playlist the way rekordbox
+or iTunes would, to find the Moodymann or everything over 128. A view is only
+a lens: it never touches the stored order, ties keep your order, and records
+with no tempo or year sink to the bottom either way. Dragging and the
+transition checks live in *Your order* only, because they only mean something
+between records you will actually play back to back. **Keep this order**
+adopts a view when you want it as a starting point, with one step of undo —
+and it is refused unless the new order holds exactly the same records, so it
+can reorder a set but never drop or duplicate one.
+
 ### The maths, because it is easy to get wrong
 
 **A pitch fader is a percentage, not a BPM offset.** ±8% on a Technics is ±7.2
@@ -618,7 +629,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 474 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 490 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
