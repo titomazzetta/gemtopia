@@ -9,6 +9,7 @@ import {
   MIN_PITCH_PERCENT,
   mixableWindow,
   comfortableWindow,
+  STRAIN_META,
 } from "@/lib/mixing";
 import { Search } from "./Icons";
 
@@ -683,7 +684,9 @@ export function Filters({
               className="mt-2 w-full rounded-full border border-accent/50 bg-accent/10 px-2 py-1 text-[11px] text-accent"
               title={`Neither deck past ±${pitchPercent / 2}% — the comfortable middle of the fader`}
             >
-              Mixes easily with {currentBpm}
+              {/* Same words as the strip and the set-prep bar, from the same
+                  source, so one playlist never uses two vocabularies. */}
+              {STRAIN_META.easy.label} with {currentBpm}
               <span className="ml-1 font-mono text-accent/70">
                 {easyWindow.low}–{easyWindow.high}
               </span>
@@ -696,7 +699,7 @@ export function Filters({
               className="mt-1 w-full rounded-full border border-amber-400/30 px-2 py-0.5 text-[10px] text-amber-300/80 hover:bg-amber-400/5"
               title={`Both decks at the full ±${pitchPercent}% can meet anywhere from ${window.low} to ${window.high} — reachable, but you will hear it`}
             >
-              Reachable at full pitch
+              Up to {STRAIN_META.pushed.label.toLowerCase()}
               <span className="ml-1 font-mono opacity-70">
                 {window.low}–{window.high}
               </span>

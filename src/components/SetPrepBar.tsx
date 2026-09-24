@@ -7,6 +7,7 @@ import {
   TRANSITION_RANGE,
   formatSetLength,
   pitchQuip,
+  STRAIN_META,
   type SequenceReport,
   type SetLength,
 } from "@/lib/mixing";
@@ -49,17 +50,29 @@ export function SetPrepBar({
     );
   }
 
-  const problems = report.stretch + report.impossible;
   const quip = pitchQuip(pitchPercent);
   const preset = DECK_PRESETS.find((d) => d.percent === pitchPercent);
 
-  const segments = [
-    { count: report.direct, label: "mix", className: "bg-accent" },
-    { count: report.timeShifted, label: "×2 / ÷2", className: "bg-sky-400" },
-    { count: report.stretch, label: "out of range", className: "bg-amber-400" },
-    { count: report.impossible, label: "won't mix", className: "bg-red-400" },
-    { count: report.unknown, label: "no BPM", className: "bg-ink-600" },
-  ].filter((segment) => segment.count > 0);
+  /*
+   * Counted by tier, the same way the strip between records colours them.
+   *
+   * This bar used to count by verdict while the strip counted by tier, so the
+   * two disagreed about the same playlist: a set of ±7% blends showed amber
+   * row by row and a solid green "all transitions beatmatch" up here.
+   *
+   * The words come from STRAIN_META, the same source as the strip, so the
+   * vocabulary cannot drift apart again. Each colour in the bar has its word
+   * in the line beside it — colour is never the only signal, because green
+   * and amber are close to indistinguishable without hue.
+   */
+  const tiers = [
+    { key: "easy", count: report.easy, text: "text-accent", bar: "bg-accent" },
+    { key: "pushed", count: report.pushed, text: "text-amber-300", bar: "bg-amber-400" },
+    { key: "out", count: report.out, text: "text-red-400", bar: "bg-red-400" },
+    { key: "unknown", count: report.unknown, text: "text-neutral-600", bar: "bg-ink-600" },
+  ] as const;
+  const shown = tiers.filter((tier) => tier.count > 0);
+  const allComfortable = report.easy === total;
 
   return (
     <div className="border-b border-ink-800 bg-ink-900 px-4 py-2">
@@ -116,32 +129,36 @@ export function SetPrepBar({
 
         {/* Proportional bar: the shape of the set at a glance. */}
         <div className="flex h-1.5 min-w-[120px] flex-1 overflow-hidden rounded-full bg-ink-800">
-          {segments.map((segment) => (
+          {shown.map((tier) => (
             <div
-              key={segment.label}
-              className={segment.className}
-              style={{ width: `${(segment.count / total) * 100}%` }}
-              title={`${segment.count} ${segment.label}`}
+              key={tier.key}
+              className={tier.bar}
+              style={{ width: `${(tier.count / total) * 100}%` }}
+              title={`${tier.count} ${STRAIN_META[tier.key].label.toLowerCase()}`}
             />
           ))}
         </div>
 
         <span className="shrink-0 text-[11px] text-neutral-400">
-          {problems === 0 ? (
+          {allComfortable ? (
             <span className="text-accent">
-              All {total} transition{total === 1 ? "" : "s"} beatmatch
+              All {total} transition{total === 1 ? "" : "s"}{" "}
+              {STRAIN_META.easy.label.toLowerCase()}
             </span>
           ) : (
-            <>
-              <span className="font-semibold text-amber-300">{problems}</span>
-              <span className="text-neutral-500">
-                {" "}
-                of {total} won&rsquo;t beatmatch
+            shown.map((tier, i) => (
+              <span key={tier.key}>
+                {i > 0 && <span className="text-neutral-600"> · </span>}
+                <span className={`font-semibold ${tier.text}`}>{tier.count}</span>
+                <span className={tier.text}>
+                  {" "}
+                  {STRAIN_META[tier.key].label.toLowerCase()}
+                </span>
               </span>
-            </>
+            ))
           )}
-          {report.unknown > 0 && (
-            <span className="text-neutral-600"> · {report.unknown} no BPM</span>
+          {report.timeShifted > 0 && (
+            <span className="text-neutral-600"> · {report.timeShifted} at ×2 / ÷2</span>
           )}
         </span>
 

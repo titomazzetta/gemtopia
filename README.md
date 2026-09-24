@@ -381,26 +381,34 @@ decks you play on. The strip between two records tells you whether they
 beatmatch, at what tempo, and how far each fader has to move:
 
 ```
-  Basement Cut · Moodymann                                      124
-↳ Mixes         Meet at 125 · ±0.8% each                              ← green
-  Chrome Cut · Theo Parrish                                     126
-↳ Mixes         Meet at 128.5 · ±1.9% each                            ← green
-  Sunset Cut · Larry Heard                                      131
-↳ Out of range  Needs ±15.4% — wider than your ±8%                    ← red
-  Nocturne Cut · Omar-S                                          96
-↳ Half-time     Meet at 91.3 at half-time · ±4.9% each — near the edge ← amber
-  Midnight Cut · Moodymann                                      174
+  Basement Cut · Moodymann                                            124
+↳ Mixes · Comfortable      Meet at 125 · ±0.8% each                    ← green
+  Chrome Cut · Theo Parrish                                           126
+↳ Mixes · Comfortable      Meet at 128.5 · ±1.9% each                  ← green
+  Sunset Cut · Larry Heard                                            131
+↳ Out of range             Needs ±15.4% — wider than your ±8%          ← red
+  Nocturne Cut · Omar-S                                                96
+↳ Half-time · Pushing it   Meet at 91.3 at half-time · ±4.9% each      ← amber
+  Midnight Cut · Moodymann                                            174
 ```
 
 **The colour says how hard the faders work; the words say how the records
 meet.** ±8% is a ceiling, not a working range — records live in the middle of
 the fader, and a blend run with both decks near their limits is one you hear.
-So a transition is **green** when neither deck passes half its range, **amber**
-when it fits but has to go further, and **red** when it doesn't fit at all. A
-double-time blend at ±0.6% is green; a straight 1:1 at ±7% each is amber.
+So a transition is **Comfortable** (green) when neither deck passes half its
+range, **Pushing it** (amber) when it fits but has to go further, and **Out of
+range** (red) when it doesn't fit at all. A double-time blend at ±0.6% is
+Comfortable; a straight 1:1 at ±7% each is Pushing it.
 
-A summary bar above shows the shape of the set at a glance — *"2 of 6 won't
-beatmatch"* — and **Smooth order** reorders the playlist so they do.
+**Every colour carries its word.** Phosphor's green and amber are 1.16:1 in
+luminance — without hue, close to the same colour — so for a red-green
+colour-blind DJ the words are the signal. The strip, the summary bar and the
+filter panel all use the same three words from one source, and a test sweeps
+real tempos across four deck ranges to prove no two tiers ever read the same.
+
+A summary bar above shows the shape of the set at a glance — *"4 comfortable ·
+1 pushing it · 1 out of range"*, counted exactly the way the strip colours
+them — and **Smooth order** reorders the playlist so they fit.
 
 ### The maths, because it is easy to get wrong
 
@@ -610,7 +618,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 467 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 474 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
