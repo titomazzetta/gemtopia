@@ -1,6 +1,7 @@
 import "server-only";
 import { z } from "zod";
 import { buildAuthHeader, parseTokenResponse } from "./oauth1";
+import type { Credit, MasterVersion } from "./digLinks";
 import { env, USER_AGENT } from "./env";
 import type {
   CollectionPage,
@@ -820,12 +821,22 @@ function safePage(page: number): number {
   return Number.isInteger(page) && page >= 1 ? Math.min(page, 50) : 1;
 }
 
+/**
+ * Which discography rows count. "main": records they released. "credits":
+ * those plus the records they remixed or produced for someone else — the
+ * whole point of following a remixer.
+ */
+const MAIN_ROLES = new Set(["Main", "TrackAppearance"]);
+const CREDIT_ROLES = new Set(["Main", "TrackAppearance", "Remix", "Producer", "Co-producer"]);
+
 export async function getArtistReleases(
   user: UserToken,
   artistId: number,
   perPage = 100,
   page = 1,
+  roles: "main" | "credits" = "main",
 ): Promise<RelatedRelease[]> {
+  const keep = roles === "credits" ? CREDIT_ROLES : MAIN_ROLES;
   const data = await getJson(
     `/artists/${artistId}/releases?per_page=${perPage}&page=${safePage(page)}&sort=year&sort_order=desc`,
     user,
@@ -833,8 +844,8 @@ export async function getArtistReleases(
   );
 
   return data.releases
-    // Skip credits (remixer, producer) — we want records they released.
-    .filter((r) => !r.role || r.role === "Main" || r.role === "TrackAppearance")
+    // By default skip credits (remixer, producer) — records they released.
+    .filter((r) => !r.role || keep.has(r.role))
     .map(toRelated)
     .filter((r): r is RelatedRelease => r !== null);
 }
@@ -872,5 +883,103 @@ export async function getLabelReleases(
     year: r.year && r.year > 0 ? r.year : null,
     thumb: r.thumb ?? "",
     label: null,
+  }));
+}
+
+/* ------------------------------------------------------------------ */
+/* Credits and versions — the links a DJ follows first                 */
+/* ------------------------------------------------------------------ */
+
+const creditSchema = z.object({
+  id: z.number().nullish(),
+  name: z.string(),
+  role: z.string().nullish(),
+});
+
+const releaseLinksSchema = z.object({
+  master_id: z.number().nullish(),
+  artists: z.array(z.object({ id: z.number().nullish(), name: z.string() })).nullish(),
+  labels: z.array(z.object({ id: z.number().nullish(), name: z.string() })).nullish(),
+  extraartists: z.array(creditSchema).nullish(),
+  tracklist: z
+    .array(z.object({ extraartists: z.array(creditSchema).nullish() }))
+    .nullish(),
+});
+
+export interface ReleaseLinks {
+  masterId: number | null;
+  /** Main artists and labels with their ids — a seed from a search card has neither. */
+  artists: Array<{ id: number; name: string }>;
+  labels: Array<{ id: number; name: string }>;
+  credits: Credit[];
+}
+
+/**
+ * The master a release belongs to, its artists and labels by id, and
+ * everyone credited on it — on the
+ * release and on each track, which is where remixers usually are. Parsed
+ * with its own narrow schema so it costs nothing to keep ReleaseDetail (and
+ * the IndexedDB cache built from it) unchanged.
+ */
+export async function getReleaseLinks(
+  user: UserToken,
+  releaseId: number,
+): Promise<ReleaseLinks> {
+  const data = await getJson(`/releases/${releaseId}`, user, releaseLinksSchema);
+  const raw = [
+    ...(data.extraartists ?? []),
+    ...(data.tracklist ?? []).flatMap((track) => track.extraartists ?? []),
+  ];
+  const named = (rows: Array<{ id?: number | null; name: string }> | null | undefined) =>
+    (rows ?? []).flatMap((row) =>
+      row.id && row.id > 0 ? [{ id: row.id, name: cleanArtistName(row.name) }] : [],
+    );
+  return {
+    masterId: data.master_id && data.master_id > 0 ? data.master_id : null,
+    artists: named(data.artists),
+    labels: named(data.labels),
+    credits: raw.flatMap((credit) =>
+      credit.id && credit.id > 0
+        ? [{ id: credit.id, name: credit.name, role: credit.role ?? "" }]
+        : [],
+    ),
+  };
+}
+
+const masterVersionsSchema = z.object({
+  pagination: paginationSchema,
+  versions: z.array(
+    z.object({
+      id: z.number(),
+      title: z.string(),
+      label: z.string().nullish(),
+      country: z.string().nullish(),
+      format: z.string().nullish(),
+      released: z.string().nullish(),
+      thumb: z.string().nullish(),
+    }),
+  ),
+});
+
+/** Every pressing, promo and remix package of one master. */
+export async function getMasterVersions(
+  user: UserToken,
+  masterId: number,
+  perPage = 50,
+  page = 1,
+): Promise<MasterVersion[]> {
+  const data = await getJson(
+    `/masters/${masterId}/versions?per_page=${perPage}&page=${safePage(page)}`,
+    user,
+    masterVersionsSchema,
+  );
+  return data.versions.map((v) => ({
+    id: v.id,
+    title: v.title,
+    label: v.label ? cleanArtistName(v.label) : null,
+    country: v.country?.trim() || null,
+    format: v.format?.trim() || null,
+    released: v.released?.trim() || null,
+    thumb: v.thumb ?? "",
   }));
 }

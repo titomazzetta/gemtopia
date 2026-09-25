@@ -156,16 +156,25 @@ Pressed in   US
 All of it computed from the local IndexedDB cache, so it appears the moment you
 press the key. Click anything to play it; `+` adds it to a playlist.
 
-### Beyond your crate — four Discogs lookups
+### Beyond your crate — six Discogs lanes
 
 Records you *don't* own, each tagged with the relationship that surfaced it:
 
 | Lane | How it's found |
 |---|---|
+| **Other versions** | Every other pressing of the same master — remix packages, promos, represses |
+| **Credits · *name*, remixer** | The first credit worth following (remixer, then producer, then writer) — their own records *and* what they remixed or produced for others |
 | **More by this artist** | The artist's discography, minus what you own |
 | **More on this label** | The label's catalogue |
 | **Same style** | Discogs search on the style, ranked by how many people want it |
 | **Same era** | Style + a ±3 year window + country of pressing |
+
+Credits skip the roles that don't shape the music — mastering, lacquer cut,
+artwork, photography — and never repeat the record's own artist. Digging from
+a record you found beyond the crate gets every lane too: its artists and labels
+are looked up by id first, so it isn't limited to style and era. A dig is at
+most seven Discogs calls, and the per-user limit (8 a minute) keeps even a
+fast digger under Discogs' 60-a-minute budget.
 
 Each result gives you three things: **preview** (plays the audio Discogs has
 linked, without owning the record), **♡** (writes to your actual Discogs
@@ -639,7 +648,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 498 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 506 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.

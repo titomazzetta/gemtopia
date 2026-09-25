@@ -53,9 +53,10 @@ export async function POST(request: NextRequest) {
   const auth = await requireUser(request, { mutating: true });
   if ("response" in auth) return auth.response;
 
-  // Four upstream calls per dig; 10/min keeps a user under a quarter of the
-  // Discogs budget even while hammering the button.
-  const limit = rateLimit(`dig:${auth.username}`, 10, 60_000);
+  // Up to seven upstream calls per dig (four lanes, the seed's credits and
+  // master, then versions and one credit's discography). 8/min caps a user at
+  // 56 of Discogs' 60 requests a minute even while hammering the button.
+  const limit = rateLimit(`dig:${auth.username}`, 8, 60_000);
   if (!limit.ok) {
     return fail("rate_limited", "Digging too fast — give it a few seconds.", 429, {
       retryAfter: limit.resetSeconds,

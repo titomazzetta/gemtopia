@@ -76,6 +76,8 @@ export interface ReleaseDetail extends ReleaseSummary {
 
 /** Which relationship produced a dig result. Drives the UI grouping. */
 export type DigLane =
+  | "other-versions"
+  | "credits"
   | "same-artist"
   | "same-label"
   | "same-style"
@@ -83,6 +85,8 @@ export type DigLane =
   | "similar-tempo";
 
 export const DIG_LANE_LABELS: Record<DigLane, string> = {
+  "other-versions": "Other versions",
+  credits: "Credits",
   "same-artist": "More by this artist",
   "same-label": "More on this label",
   "same-style": "Same style",

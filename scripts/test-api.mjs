@@ -657,6 +657,17 @@ await check("dig rejects an unknown property", async () => {
   assert.equal(res.status, 400);
 });
 
+// Three calls, not more: the dig limit is 8 a minute and counts these.
+await check("dig rejects a page outside 1–20 or not an integer", async () => {
+  for (const page of [0, 21, "2"]) {
+    const res = await alice.call("/api/dig", {
+      method: "POST",
+      body: { seed: { releaseId: 1 }, page },
+    });
+    assert.equal(res.status, 400, `page ${JSON.stringify(page)}`);
+  }
+});
+
 
 console.log("\ndeck preferences");
 

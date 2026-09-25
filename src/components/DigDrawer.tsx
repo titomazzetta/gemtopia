@@ -23,7 +23,7 @@ import { formatBpm } from "@/lib/mixing";
  *                     era, country, or mixable tempo. Everything here is
  *                     already yours and already playable.
  *
- *   BEYOND YOUR CRATE four Discogs lookups. Records you do not own, each
+ *   BEYOND YOUR CRATE six Discogs lanes. Records you do not own, each
  *                     tagged with the relationship that surfaced it. Preview
  *                     the audio, add to your wantlist, or dig again from it —
  *                     which is what makes it endless.
@@ -907,8 +907,8 @@ export function DigDrawer({
             {loading && beyondLanes.length === 0 && (
               <div className="px-4">
                 <p className="text-[11px] text-neutral-500">
-                  Four lookups against Discogs — this artist&rsquo;s other records, this
-                  label&rsquo;s catalogue, the style, and the same few years.
+                  Following this record&rsquo;s links on Discogs — other versions, the
+                  remixer or producer, the artist, the label, the style and the era.
                 </p>
                 <div className="mt-2 h-1 overflow-hidden rounded-full bg-ink-800">
                   <div className="h-full w-1/3 animate-pulse rounded-full bg-accent" />
