@@ -14,6 +14,7 @@ import {
   MAX_DIG_PAGE,
   addedCount,
   appendLanes,
+  finishedLanes,
   nextDigPage,
   revealMore,
   visibleCount,
@@ -74,6 +75,14 @@ check("an empty page adds nothing and says so", () => {
   assert.equal(addedCount(before, after), 0);
   assert.deepEqual(after.map((l) => l.lane), ["artist"], "no empty lanes appear");
   assert.equal(addedCount(before, appendLanes(before, [lane("era", [9])])), 1);
+});
+
+check("a lane a page added nothing to is finished; the others are not", () => {
+  const before = [lane("versions", [1]), lane("style", [2, 3])];
+  const after = appendLanes(before, [lane("versions", [1]), lane("style", [4, 5])]);
+  assert.deepEqual(finishedLanes(before, after), ["versions"]);
+  const brandNew = appendLanes(before, [lane("era", [9])]);
+  assert.deepEqual(finishedLanes(before, brandNew).sort(), ["style", "versions"], "a lane only just appearing is not finished");
 });
 
 check("pages walk forward and stop at the cap", () => {

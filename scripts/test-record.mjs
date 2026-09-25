@@ -80,6 +80,24 @@ check("the playing track is in the list, and marked", () => {
   assert.deepEqual(order.rows.map((r) => r.current), [false, true, false, false]);
 });
 
+check("the highlight follows what is playing, not the track you dug from", () => {
+  // Reported: dig from A1, tap B2 in the record list — A1 stayed green.
+  const order = runningOrder(A1, detail(TRACKS), [A1, A2, B2], B2.key);
+  assert.deepEqual(order.rows.map((r) => r.current), [false, false, false, true]);
+});
+
+check("nothing is highlighted when nothing on the record is playing", () => {
+  const order = runningOrder(A1, detail(TRACKS), [A1, A2, B2], null);
+  assert.ok(order.rows.every((r) => !r.current));
+  const elsewhere = runningOrder(A1, detail(TRACKS), [A1, A2, B2], ELSEWHERE.key);
+  assert.ok(elsewhere.rows.every((r) => !r.current));
+});
+
+check("with no tracklist, the highlight still follows the audio", () => {
+  const order = runningOrder(A1, null, [A1, A2, B2], A2.key);
+  assert.deepEqual(order.rows.map((r) => [r.position, r.current]), [["A1", false], ["A2", true], ["B2", false]]);
+});
+
 check("a track with no clip still appears, so you see what the record holds", () => {
   const order = runningOrder(A1, detail(TRACKS), [A1, A2, B2]);
   const b1 = order.rows.find((r) => r.position === "B1");

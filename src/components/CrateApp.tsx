@@ -2197,6 +2197,7 @@ export function CrateApp({
                 seedDetail={recordDetailById.get(digTarget.releaseId) ?? null}
                 pool={pool}
                 recordPool={allPlayables}
+                playingKey={current?.key ?? null}
                 collectionIds={sourceIds.collection}
                 wantlistIds={sourceIds.wantlist}
                 pitchPercent={pitchPercent}
