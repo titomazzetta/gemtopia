@@ -98,13 +98,13 @@ first — it says what's defended, how, and what deliberately isn't.
 |---|---|
 | **Shuffle the crate** | Fisher–Yates over every clip Discogs has for your collection, spread so the same release never lands twice in a row. |
 | **Filter on real metadata** | Style, genre, label, artist, format, country, decade, year and tempo — every option counted from *your* synced collection. Multi-select is **any** or **all**, so you can ask for Techno *or* Deep House, or for the shelf tagged both. |
-| **Works on a phone** | Sheets rather than stacked panels: source and playlists in one, filters in another, the player in a third. Transport and TAP sit in a sticky bottom bar at thumb height. |
+| **Works on a phone** | Sheets rather than stacked panels: source and playlists in one, filters in another, the player in a third. Transport and TAP sit in a sticky bottom bar at thumb height. Tap the playing track and the whole record is right there under it; Dig is one scroll with the crate/beyond switch pinned. |
 | **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
 | **Hear the whole record** | Something grabs you on shuffle: tap the artist or the record and the whole release opens in running order — every track, the one playing marked, the ones with no audio still listed. Play it through, then drop straight back into your shuffle where you left it. |
-| **Dig from anything** | Hit `D` on whatever's playing and pivot on any field. Two lanes: what else you own, and what exists beyond it. |
+| **Dig from anything** | Hit `D` (or **Dig from this** on a phone) on whatever's playing and pivot on any field. Two halves: what else you own, and what exists beyond it — other versions, the remixer or producer, the artist, the label, the style and the era. No lane dead-ends: each one ends in **More** or **Dig deeper**. |
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. View by artist, genre, BPM or year without losing the order you built. |
 | **BPM catalogue** | Detect tempo from the audio as it plays — with a live beat meter showing exactly what it hears — or tap it in with `T`. Genre-aware: a record Discogs tags as drum & bass is counted at 174, not 87. **Measure** plays through everything on screen unattended, skipping what is already done. |
-| **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **won't reach**. Flags the hard ones before you pack the bag. |
+| **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **out of range**. Flags the hard ones before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
 | **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
@@ -137,7 +137,9 @@ metadata, with **every field as a pivot** — artist, label, style, genre, count
 year, format, catalogue position, BPM, and how many people have and want it.
 Click any of them to re-cut the crate by that value.
 
-Below that, two lanes that differ on purpose:
+Below that comes the whole record in running order — every track, the one
+playing highlighted, ▶ on the ones with a preview and "no preview" on the rest —
+and then two halves that differ on purpose:
 
 ### In your crate — instant, no network
 
@@ -145,7 +147,6 @@ Everything you already own that connects to this record:
 
 ```
 More by      Moodymann
-Rest of      Midnight Lowdown EP
 On           Peacefrog
 More         Deep House
 From         1996–2000
@@ -154,7 +155,9 @@ Pressed in   US
 ```
 
 All of it computed from the local IndexedDB cache, so it appears the moment you
-press the key. Click anything to play it; `+` adds it to a playlist.
+press the key. Click anything to play it; `+` adds it to a playlist. Each lane
+shows the first 16 and ends in **More**, then **Beyond your crate →** once it
+has shown everything you own there.
 
 ### Beyond your crate — six Discogs lanes
 
@@ -319,6 +322,13 @@ then a Discogs lookup on what it read. The lookup half is what shipped here;
 parameters, which is precisely what a photo of a label or a sleeve barcode would
 produce. The remaining question is who pays for the vision call, and that is a
 product question rather than a technical one.
+
+**Discogs Lists** — only partly possible. The website shows, on every release,
+the user lists that include it; the API has no such lookup (only one user's
+lists, or one list by id), and Discogs' Terms forbid scraping the site, so
+"lists this record is on" can't be a dig lane. The API also can't *create* a
+list, so a playlist can't be written back as one. What would work, and may come
+later: a lane from your own lists, and following any public list by its link.
 
 **Browsing stores with recent finds** — not possible. The Discogs API exposes no
 way to enumerate sellers or their recent stock. What it *does* expose is per
@@ -648,7 +658,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 508 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 512 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -782,25 +792,32 @@ src/
 
 ```bash
 npm run test           # everything below
-npm run test:env       # 36 cases, no server needed
-npm run test:headers   # 20 cases, no server needed
-npm run test:playables # 29 cases, no server needed
-npm run test:sorting   # 24 cases, no server needed
-npm run test:share     # 28 cases, no server needed
-npm run test:scrub     # 12 cases, no server needed
-npm run test:ownership # 22 cases, no server needed
-npm run test:recent    # 12 cases, no server needed
-npm run test:adopt     # 15 cases, no server needed
-npm run test:search    # 11 cases, no server needed
-npm run test:writes    # 7 cases, no server needed
-npm run test:playback  # 10 cases, no server needed
-npm run test:watchdog  # 12 cases, no server needed
-npm run test:freshness # 8 cases, no server needed
-npm run test:bpm-scale # 10 cases, no server needed
-npm run test:order     # 10 cases, no server needed
-npm run test:tempo     # 37 cases, no server needed
-npm run test:mixing    # 61 cases, no server needed
-npm run test:api       # 80 cases, needs a running server + Postgres
+npm run test:env        # 36 cases, no server needed
+npm run test:headers    # 23
+npm run test:playables  # 31
+npm run test:sorting    # 24
+npm run test:share      # 28
+npm run test:scrub      # 12
+npm run test:ownership  # 22
+npm run test:recent     # 12
+npm run test:adopt      # 15
+npm run test:search     # 11
+npm run test:writes     # 7
+npm run test:playback   # 12
+npm run test:watchdog   # 24
+npm run test:freshness  # 8
+npm run test:bpm-scale  # 10
+npm run test:order      # 10
+npm run test:tempo      # 37
+npm run test:mixing     # 82
+npm run test:bpm-range  # 22
+npm run test:beat-meter # 15
+npm run test:record     # 24
+npm run test:mark       # 14
+npm run test:views      # 16
+npm run test:dig-feed   # 9
+npm run test:dig-links  # 8   — 512 offline in all
+npm run test:api        # 87 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci
