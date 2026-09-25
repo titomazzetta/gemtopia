@@ -44,6 +44,8 @@ const bodySchema = z
     /** Whether wantlist items should still be shown (they usually should). */
     includeWantlist: z.boolean().default(true),
     wantlistReleaseIds: z.array(z.number().int().positive()).max(20_000).default([]),
+    /** Which page of each lookup — "dig deeper" walks forward. Capped. */
+    page: z.number().int().min(1).max(20).default(1),
   })
   .strict();
 
@@ -77,6 +79,7 @@ export async function POST(request: NextRequest) {
       seed: body.seed,
       exclude,
       seen: new Set(body.seenReleaseIds),
+      page: body.page,
     });
 
     // Remember what was surfaced so the feed keeps moving between sessions.

@@ -202,6 +202,7 @@ export const digApi = {
     seenReleaseIds: number[];
     includeWantlist: boolean;
     wantlistReleaseIds: number[];
+    page?: number;
   }) =>
     request<DigResponse>("/api/dig", {
       method: "POST",
