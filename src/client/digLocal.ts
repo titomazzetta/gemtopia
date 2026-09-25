@@ -2,6 +2,7 @@
 
 import type { Playable } from "@/lib/types";
 import { checkMix, DEFAULT_PITCH_PERCENT } from "@/lib/mixing";
+import { distinct } from "./playables";
 
 /**
  * Digging *inside* your own crate. No network, no latency.
@@ -70,7 +71,9 @@ export function digWithinCollection(
    */
 
   /* ---- same label ---- */
-  for (const label of seed.labels.slice(0, 2)) {
+  // `distinct` again here, defensively: two lanes with one name would also
+  // be two React children with one key.
+  for (const label of distinct(seed.labels).slice(0, 2)) {
     const matches = pool.filter(
       (p) => p.labels.includes(label) && p.key !== seed.key,
     );
@@ -85,7 +88,7 @@ export function digWithinCollection(
   }
 
   /* ---- same style ---- */
-  for (const style of seed.styles.slice(0, 2)) {
+  for (const style of distinct(seed.styles).slice(0, 2)) {
     const matches = pool.filter(
       (p) => p.styles.includes(style) && p.key !== seed.key,
     );

@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import {
   buildPlayables,
   countSilence,
+  distinct,
   playableOnly,
   queueFrom,
 } from "../src/client/playables.ts";
@@ -468,6 +469,25 @@ check("releases do not collapse into each other", () => {
     release({ id: 2, tracks: [], videos: [video("Kinetic", 372)] }),
   ]);
   assert.equal(items.length, 2);
+});
+
+check("a label listed once per catalogue number appears once", () => {
+  // Discogs: "Network Records – NWKT 44" and "Network Records – NWKT 44X".
+  const [item] = buildPlayables([
+    release({
+      labels: ["Network Records", "Network Records"],
+      styles: ["Deep House", "deep house ", "House"],
+      genres: ["Electronic", "Electronic"],
+      videos: [video("Kinetic", 372)],
+    }),
+  ]);
+  assert.deepEqual(item.labels, ["Network Records"]);
+  assert.deepEqual(item.styles, ["Deep House", "House"]);
+  assert.deepEqual(item.genres, ["Electronic"]);
+});
+
+check("distinct keeps the first spelling and drops blanks", () => {
+  assert.deepEqual(distinct(["Svek", " svek", "", "  ", "Peacefrog"]), ["Svek", "Peacefrog"]);
 });
 
 /* ------------------------------------------------------------------------ */

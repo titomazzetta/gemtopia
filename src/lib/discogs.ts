@@ -343,6 +343,17 @@ const releaseSchema = z.object({
 /* Normalisation                                                       */
 /* ------------------------------------------------------------------ */
 
+/** Discogs lists a label once per catalogue number; keep each name once. */
+function uniqueNames(names: string[]): string[] {
+  const seen = new Set<string>();
+  return names.filter((name) => {
+    const key = name.trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /** Discogs disambiguates duplicate artist names as "Aphex Twin (2)". */
 function cleanArtistName(name: string): string {
   return name.replace(/\s\(\d+\)$/, "").trim();
@@ -437,7 +448,7 @@ function toSummary(
     year: info.year && info.year > 0 ? info.year : null,
     genres: info.genres ?? [],
     styles: info.styles ?? [],
-    labels: (info.labels ?? []).map((l) => cleanArtistName(l.name)),
+    labels: uniqueNames((info.labels ?? []).map((l) => cleanArtistName(l.name))),
     formats: flattenFormats(info.formats),
     country: info.country?.trim() || null,
     artistIds: ids(info.artists),
@@ -537,7 +548,7 @@ export async function getRelease(
     year: data.year && data.year > 0 ? data.year : null,
     genres: data.genres ?? [],
     styles: data.styles ?? [],
-    labels: (data.labels ?? []).map((l) => cleanArtistName(l.name)),
+    labels: uniqueNames((data.labels ?? []).map((l) => cleanArtistName(l.name))),
     formats: flattenFormats(data.formats),
     country: data.country?.trim() || null,
     artistIds: ids(data.artists),

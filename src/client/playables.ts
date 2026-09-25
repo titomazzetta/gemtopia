@@ -196,6 +196,26 @@ function clipScore(
  * you already catalogued against a clip that loses its group is carried over to
  * the winner rather than thrown away — you tapped that tempo, you keep it.
  */
+/**
+ * One entry per name, first spelling kept, compared without case or edge
+ * spaces. Discogs lists a label once per catalogue number, so a release on
+ * "Network Records – NWKT 44" and "Network Records – NWKT 44X" arrives with
+ * the label twice — which became two identical "On Network Records" dig
+ * lanes and two identical chips. Applied here, where every cached release
+ * becomes a playable, so releases already in IndexedDB are fixed too.
+ */
+export function distinct(values: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const value of values) {
+    const key = value.trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(value.trim());
+  }
+  return out;
+}
+
 export function buildPlayables(
   details: ReleaseDetail[],
   bpmByClip: Map<string, number> = new Map(),
@@ -238,9 +258,9 @@ export function buildPlayables(
         artist: release.artist,
         releaseTitle: release.title,
         year: release.year,
-        genres: release.genres,
-        styles: release.styles,
-        labels: release.labels,
+        genres: distinct(release.genres),
+        styles: distinct(release.styles),
+        labels: distinct(release.labels),
         thumb: release.thumb,
         country: release.country,
         formats: release.formats,
@@ -392,9 +412,9 @@ export function buildPlayables(
         artist,
         releaseTitle: release.title,
         year: release.year,
-        genres: release.genres,
-        styles: release.styles,
-        labels: release.labels,
+        genres: distinct(release.genres),
+        styles: distinct(release.styles),
+        labels: distinct(release.labels),
         thumb: release.thumb,
         country: release.country,
         formats: release.formats,
