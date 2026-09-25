@@ -770,6 +770,17 @@ export function CrateApp({
   }, [details]);
 
   /**
+   * Tracklists for any record you can hear, owned or previewed. Only for
+   * showing a record's running order — never for crate facts like counts or
+   * filters, which stay on `detailById` so a preview cannot leak into them.
+   */
+  const recordDetailById = useMemo(() => {
+    const map = new Map(detailById);
+    for (const detail of externalDetails) if (!map.has(detail.id)) map.set(detail.id, detail);
+    return map;
+  }, [detailById, externalDetails]);
+
+  /**
    * The record the current track is on, in running order — for the phone's
    * player sheet, where "what else is on this EP" should be one tap from the
    * track that is playing, not behind the dig drawer.
@@ -777,9 +788,9 @@ export function CrateApp({
   const currentRecord = useMemo(
     () =>
       current
-        ? runningOrder(current, detailById.get(current.releaseId) ?? null, allPlayables)
+        ? runningOrder(current, recordDetailById.get(current.releaseId) ?? null, allPlayables)
         : null,
-    [current, detailById, allPlayables],
+    [current, recordDetailById, allPlayables],
   );
 
   const pool = useMemo(
@@ -2183,8 +2194,9 @@ export function CrateApp({
               <DigDrawer
                 key={digTarget.key}
                 seed={digTarget}
-                seedDetail={detailById.get(digTarget.releaseId) ?? null}
+                seedDetail={recordDetailById.get(digTarget.releaseId) ?? null}
                 pool={pool}
+                recordPool={allPlayables}
                 collectionIds={sourceIds.collection}
                 wantlistIds={sourceIds.wantlist}
                 pitchPercent={pitchPercent}
