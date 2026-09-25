@@ -342,7 +342,9 @@ export function RecordSection({
           </p>
           <p className="text-[10px] text-neutral-600">
             {order.rows.length > 0
-              ? `${order.rows.length} tracks · ${playable.length} with audio`
+              ? playable.length === order.rows.length
+                ? `${order.rows.length} tracks · all with a preview`
+                : `${order.rows.length} tracks · ${playable.length} with a preview · ${order.rows.length - playable.length} without`
               : "Clips on YouTube for this release"}
           </p>
         </div>
@@ -384,8 +386,10 @@ export function RecordSection({
                     playing
                   </span>
                 ) : !row.playable ? (
-                  <span className="shrink-0 text-[9px] text-neutral-700">no clip</span>
-                ) : null}
+                  <span className="shrink-0 text-[9px] text-neutral-600">no preview</span>
+                ) : (
+                  <Play className="h-3 w-3 shrink-0 text-neutral-500" aria-hidden="true" />
+                )}
                 {row.duration && (
                   <span className="w-9 shrink-0 text-right font-mono text-[10px] text-neutral-600">
                     {row.duration}
@@ -444,6 +448,7 @@ export function DigDrawer({
   seed,
   seedDetail,
   pool,
+  recordPool,
   collectionIds,
   wantlistIds,
   pitchPercent,
@@ -459,6 +464,12 @@ export function DigDrawer({
   seed: Playable;
   seedDetail: ReleaseDetail | null;
   pool: Playable[];
+  /**
+   * Every playable clip the app knows, including records previewed from
+   * beyond the crate. The record section reads this, not `pool`: dig from a
+   * record you do not own and its other tracks must still be playable.
+   */
+  recordPool: Playable[];
   collectionIds: Set<number>;
   wantlistIds: Set<number>;
   /** Deck pitch range, so the "mixes with" lane reflects your actual gear. */
@@ -512,8 +523,8 @@ export function DigDrawer({
   );
 
   const record: RunningOrder = useMemo(
-    () => runningOrder(seed, seedDetail, pool),
-    [seed, seedDetail, pool],
+    () => runningOrder(seed, seedDetail, recordPool),
+    [seed, seedDetail, recordPool],
   );
 
   const buildSeed = useCallback(
