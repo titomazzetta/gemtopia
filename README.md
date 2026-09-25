@@ -57,10 +57,11 @@ label.
 Press `D` and it doesn't die. You get everything else **you already own** that
 connects to that record — same artist, same label, same style, same year, same
 mixable tempo — instantly, no network. And then, one click further, **everything
-that exists beyond your collection**: the rest of that artist's discography, the
-rest of that label's catalogue, records from the same scene and the same three
-years. Preview the audio without owning them. Heart the ones you want. Dig again
-from *those*, and keep going.
+that exists beyond your collection**: other versions of that very record, whatever
+its remixer or producer made, the rest of that artist's discography, the rest of
+that label's catalogue, records from the same scene and the same three years.
+Preview the audio without owning them. Heart the ones you want. Dig again from
+*those*, and keep going — no lane ever just stops.
 
 So a collection stops being a closed box. **The records you own become the map for
 finding the ones you don't** — which is what digging in a shop feels like, and what
@@ -75,9 +76,36 @@ first — it says what's defended, how, and what deliberately isn't.
 
 ---
 
+## What it's built around
+
+A few ideas every feature is held to. They're why the app looks the way it does.
+
+- **Does it help a DJ tell a story?** That's the filter for what gets built.
+  Other DJ tools are built around the mix; this one is built around the set, and
+  what it says.
+- **Your order is the set.** A playlist's hand-built order is never rewritten
+  behind your back. Sorting a playlist is a lens you look through; reordering it
+  is always your move, and it can be undone.
+- **Every result says why.** Nothing is "recommended". Each record in a dig is a
+  real Discogs release reached by a relationship named on its card — this
+  remixer, this label, this year.
+- **Nothing is hidden.** Records with no audio, tracks with no preview, releases
+  that haven't synced — all shown, dimmed and labelled, never silently missing.
+- **No dead ends.** Every lane ends in *more*, *deeper*, or where to go next. On
+  a phone as much as a laptop.
+- **Words, not just colours.** Green and amber are nearly identical to a
+  colour-blind eye, so every coloured state also says what it means.
+- **Clean over clever.** New ideas go into the screens that already exist — a
+  lane in Dig, an item in a menu — rather than new tabs and panels.
+- **Secure enough to show.** Least privilege, one documented exception, and a
+  threat model that says what isn't defended as plainly as what is.
+
+---
+
 ## Contents
 
 - [Who this is for](#who-this-is-for)
+- [What it's built around](#what-its-built-around)
 - [What it does](#what-it-does)
 - [The digging model](#the-digging-model)
 - [BPM, and how it actually works](#bpm-and-how-it-actually-works)
@@ -86,6 +114,7 @@ first — it says what's defended, how, and what deliberately isn't.
 - [Privacy](#privacy)
 - [Deploy it](#deploy-it) — full walkthrough in [DEPLOYING.md](./DEPLOYING.md)
 - [How a change reaches production](#how-a-change-reaches-production) — branch rules, CI gates, supply chain
+- [Tech stack](#tech-stack)
 - [Architecture](#architecture)
 - [Testing](#testing)
 - [Known limits](#known-limits)
@@ -104,6 +133,7 @@ first — it says what's defended, how, and what deliberately isn't.
 | **Dig from anything** | Hit `D` (or **Dig from this** on a phone) on whatever's playing and pivot on any field. Two halves: what else you own, and what exists beyond it — other versions, the remixer or producer, the artist, the label, the style and the era. No lane dead-ends: each one ends in **More** or **Dig deeper**. |
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. Drag to reorder, play in order or shuffled. View by artist, genre, BPM or year without losing the order you built. |
 | **BPM catalogue** | Detect tempo from the audio as it plays — with a live beat meter showing exactly what it hears — or tap it in with `T`. Genre-aware: a record Discogs tags as drum & bass is counted at 174, not 87. **Measure** plays through everything on screen unattended, skipping what is already done. |
+| **Share a set** | One tap mints a read-only link to a playlist that anyone can open and play — no account, no route back to yours. Turn sharing off and the link is dead, not dormant. See [the one exception](#the-one-exception-and-why-it-looks-like-one). |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **out of range**. Flags the hard ones before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
@@ -633,13 +663,20 @@ to **fail**: it runs without configuration purely so Vercel will tell you the UR
 The failure is [`src/lib/env.ts`](./src/lib/env.ts) validating at build time, which
 is what stops a misconfigured deploy from 500ing at users later instead.
 
-### The first sync takes ten minutes, and that's Discogs' fault
+### The first sync is slow, and that's Discogs' limit
 
-Discogs allows **60 authenticated requests per minute**. Listing 1,500 records is
-15 requests; fetching each one's tracklist and videos is 1,500 more. So the first
-sync runs about **10–12 minutes** in the background while you use whatever has
-already loaded. Progress saves after every batch — close the tab and it resumes.
-Later syncs only fetch what you've added.
+Discogs allows **60 authenticated requests per minute** per account, and its terms
+forbid getting around that with extra keys. Listing your collection takes one
+request per hundred records; fetching each record's tracklist and videos takes one
+request per record. So a first sync runs in the background for minutes on a small
+crate and closer to an hour on a few thousand records — while you browse, filter
+and play whatever has already loaded. Progress saves after every batch; close the
+tab and it resumes. Later syncs only fetch what you've added.
+
+The cache lives in the browser, so a new device or browser syncs from scratch.
+That's deliberate for now: Discogs' API terms don't allow keeping their data
+longer than the service needs or sharing it between users, which rules out a
+shared server-side cache.
 
 ### How a change reaches production
 
@@ -694,6 +731,24 @@ user.
 
 Also covered in [DEPLOYING.md](./DEPLOYING.md).
 
+## Tech stack
+
+| Layer | What | Why |
+|---|---|---|
+| Framework | **Next.js 16** (App Router, Turbopack), **React 19** | Server route handlers keep every credential off the client |
+| Language | **TypeScript 5.9**, `strict` + `noUncheckedIndexedAccess` | Staying on 5.x until the TS 7 (Go) toolchain settles |
+| Styling | **Tailwind CSS 3.4**, one token set (Phosphor) | Small, readable diffs; dark by design |
+| Validation | **Zod** at every boundary: env, request bodies, Discogs responses | An unexpected upstream shape is a 502, not a crash |
+| Auth | **Discogs OAuth 1.0a**, signed in-repo (~80 lines, HMAC-SHA1) | No npm package ever holds the consumer secret |
+| Sessions | Sealed **AES-256-GCM** `HttpOnly` cookie | Stateless; the Discogs token is never in a database |
+| Database | **Postgres** (Neon) via `pg`, parameterised queries only | Playlists, BPM catalogue, share tokens — every row scoped by user |
+| Browser storage | **IndexedDB** | Your collection index never leaves your device |
+| Playback | **YouTube IFrame API** (`youtube-nocookie.com`) | The audio Discogs links, shown as a visible player per YouTube's terms |
+| Tempo | **Web Audio** onset detection + autocorrelation, written in-repo | Tab or mic capture; no audio leaves the browser |
+| Optional AI | **Claude** (Anthropic API) for playlist write-ups | Off unless a key is set; output filtered to real Discogs ids |
+| Hosting | **Vercel** serverless functions | A preview deploy for every pull request |
+| CI / supply chain | **GitHub Actions** (typecheck, lint, tests, build, bundle secret scan), **CodeQL**, **Dependabot**, `npm audit` | The `protect-main` ruleset: no merge until `verify` and CodeQL are green |
+
 ## Architecture
 
 ```
@@ -719,7 +774,9 @@ Four properties worth calling out:
    `HttpOnly` cookie. Nothing to breach.
 3. **Nonce-based CSP.** Fresh nonce per request, `strict-dynamic`, `default-src 'none'`,
    zero `unsafe-inline` scripts.
-4. **Five runtime dependencies.** `next`, `react`, `react-dom`, `zod`, `pg`. OAuth 1.0a
+4. **Five runtime dependencies.** `next`, `react`, `react-dom`, `zod`, `pg` — plus
+   `server-only`, a zero-code build guard that fails the build if a server module is
+   imported into the browser. OAuth 1.0a
    signing is ~80 lines written in-repo rather than pulled from npm, so no third-party
    package ever holds the consumer secret.
 
@@ -728,25 +785,32 @@ db/schema.sql                  tables, constraints, ownership cascades
 scripts/
 ├── migrate.mjs                idempotent schema application
 ├── verify-discogs.mjs         real OAuth handshake, no deps, redacts on failure
-├── test-env.mjs               configuration contract (36 cases)
-├── test-headers.mjs           security headers, both directions (20 cases)
-├── test-playables.mjs         clip choice, silent records, queueing (29 cases)
-├── test-sorting.mjs           crate ordering, and where unknowns go (24 cases)
-├── test-share.mjs             what actually reaches the share sheet (28 cases)
-├── test-scrub.mjs             playhead position maths (12 cases)
-├── test-ownership.mjs         "do I own this?" without claiming absence (22 cases)
-├── test-recent-playlists.mjs  which playlist you probably mean (12 cases)
-├── test-adopt.mjs             add -> playable, and what to say (15 cases)
-├── test-search-fields.mjs     what actually leaves the browser (11 cases)
-├── test-write-surface.mjs     every write this app can send (7 cases)
-├── test-playback-errors.mjs   whose fault a failed clip is (10 cases)
-├── test-playback-watchdog.mjs a clip that never starts at all (12 cases)
-├── test-crate-freshness.mjs   when to look for new records (8 cases)
-├── test-bpm-scaling.mjs       the octave fix, and its limits (10 cases)
-├── test-playlist-order.mjs    drag-to-reorder, both directions (10 cases)
-├── test-tempo.mjs             estimator vs synthetic signals (37 cases)
-├── test-mixing.mjs            beatmatch maths and set length (61 cases)
-└── test-api.mjs               auth, CSRF, IDOR, sharing, privacy (80 cases)
+├── test-env.mjs               configuration contract
+├── test-headers.mjs           security headers, both directions
+├── test-playables.mjs         clip choice, silent records, one-of-each labels
+├── test-sorting.mjs           crate ordering, and where unknowns go
+├── test-share.mjs             what actually reaches the share sheet
+├── test-scrub.mjs             playhead position maths
+├── test-ownership.mjs         "do I own this?" without claiming absence
+├── test-recent-playlists.mjs  which playlist you probably mean
+├── test-adopt.mjs             add -> playable, and what to say
+├── test-search-fields.mjs     what actually leaves the browser
+├── test-write-surface.mjs     every write this app can send
+├── test-playback-errors.mjs   whose fault a failed clip is
+├── test-playback-watchdog.mjs a clip that never starts, and the first press
+├── test-crate-freshness.mjs   when to look for new records
+├── test-bpm-scaling.mjs       the octave fix, and its limits
+├── test-bpm-range.mjs         genre tempo pockets
+├── test-beat-meter.mjs        what the live meter shows, and when
+├── test-playlist-order.mjs    drag-to-reorder, both directions
+├── test-playlist-view.mjs     viewing a set without rewriting it
+├── test-record.mjs            running order, the highlight, the detour back
+├── test-dig-feed.mjs          lanes that never just stop
+├── test-dig-links.mjs         which credits are worth following
+├── test-mark.mjs              the logo's three cuts
+├── test-tempo.mjs             estimator vs synthetic signals
+├── test-mixing.mjs            beatmatch maths, tiers and set length
+└── test-api.mjs               auth, CSRF, IDOR, sharing, privacy, validation
 src/
 ├── proxy.ts                   per-request CSP + script nonce
 ├── lib/                       server-only
@@ -758,7 +822,8 @@ src/
 │   ├── db.ts                  pooled Postgres, parameterised queries only
 │   ├── repo.ts                data access — every query scoped by user_id
 │   ├── discogs.ts             signed client, graph traversal, search, writes
-│   ├── dig.ts                 four-lane dig from one seed release
+│   ├── dig.ts                 links-first dig: versions, credits, artist, label, style, era
+│   ├── digLinks.ts            which credits to follow, how a version reads
 │   ├── mixing.ts              beatmatch maths, deck presets, set sequencing
 │   ├── recommend.ts           playlist profiling and candidate scoring
 │   ├── llm.ts                 optional Claude pass + anti-hallucination filter
@@ -777,6 +842,13 @@ src/
 │   ├── crateFreshness.ts      when a finished sync stops being trusted
 │   ├── bpmScaling.ts          halve/double, and the range it refuses
 │   ├── playlistOrder.ts       moving a row, without an off-by-one
+│   ├── playlistView.ts        Your order · Artist · Genre · BPM · Year, as lenses
+│   ├── recordOrder.ts         a release in running order, highlight on what plays
+│   ├── detour.ts              explore a record, then back to the shuffle
+│   ├── digFeed.ts             More / Dig deeper / That's all here
+│   ├── bpmRange.ts            genre-aware tempo pockets
+│   ├── beatMeter.ts           the live beat meter's states
+│   ├── useYouTubePlayer.ts    the player, first-press playback, stall recovery
 │   ├── useCrateCache.ts       what you own, and its persistence
 │   ├── ownership.ts           what the app may claim about what you own
 │   ├── share.ts               exactly what crosses into the share sheet
