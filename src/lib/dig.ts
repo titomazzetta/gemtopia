@@ -3,11 +3,14 @@ import {
   DiscogsError,
   getArtistReleases,
   getLabelReleases,
+  getMasterVersions,
+  getReleaseLinks,
   searchReleases,
   type RelatedRelease,
   type SearchHit,
 } from "./discogs";
 import { DIG_LANE_LABELS, type DigLane, type DigResult } from "./types";
+import { pickCredits, roleWord, versionReason, type MasterVersion } from "./digLinks";
 
 /**
  * Off-the-cuff digging from a single record.
@@ -91,6 +94,26 @@ function fromHit(hit: SearchHit, lane: DigLane, reason: string): DigResult {
   };
 }
 
+function fromVersion(version: MasterVersion, artist: string): DigResult {
+  return {
+    releaseId: version.id,
+    title: version.title,
+    artist,
+    year: version.released ? Number(version.released.match(/\d{4}/)?.[0]) || null : null,
+    thumb: version.thumb,
+    labels: version.label ? [version.label] : [],
+    styles: [],
+    genres: [],
+    country: version.country,
+    lane: "other-versions",
+    reason: versionReason(version),
+    have: null,
+    want: null,
+    discogsUrl: releaseUrl(version.id),
+    marketplaceUrl: marketplaceUrl(version.id),
+  };
+}
+
 /** Never let one lookup failure sink the whole dig. */
 async function attempt<T>(run: () => Promise<T>, fallback: T): Promise<T> {
   try {
@@ -125,8 +148,23 @@ export async function digFromRelease(options: DigOptions): Promise<
   const page = options.page ?? 1;
   const perLane = options.perLane ?? 12;
 
-  const primaryArtist = seed.artistIds[0];
-  const primaryLabel = seed.labelIds[0];
+  /*
+   * Step one: the seed's own links — master, credits, and its artists and
+   * labels by id. A seed that came from a search card (digging from a record
+   * you do not own) arrives without artist or label ids; these fill them in,
+   * so every seed gets every lane, not just style and era.
+   */
+  const links = await attempt(() => getReleaseLinks(user, seed.releaseId), {
+    masterId: null,
+    artists: [],
+    labels: [],
+    credits: [],
+  });
+
+  const artistIds = seed.artistIds.length > 0 ? seed.artistIds : links.artists.map((a) => a.id);
+  const labelIds = seed.labelIds.length > 0 ? seed.labelIds : links.labels.map((l) => l.id);
+  const primaryArtist = artistIds[0];
+  const primaryLabel = labelIds[0];
   const primaryStyle = seed.styles[0] ?? seed.genres[0];
 
   // Era window. Wide enough to be interesting, narrow enough to stay in the
@@ -135,9 +173,17 @@ export async function digFromRelease(options: DigOptions): Promise<
     ? `${Math.max(1900, seed.year - 3)}-${Math.min(new Date().getFullYear(), seed.year + 3)}`
     : undefined;
 
-  // Four lanes, in parallel. Four upstream requests per dig — cheap enough to
-  // run every time the user hits "dig" on a new track.
-  const [artistRows, labelRows, styleHits, eraHits] = await Promise.all([
+  /*
+   * The first credit worth following — usually the remixer. One per dig
+   * keeps a dig at seven upstream calls; "dig deeper" pages through the same
+   * credit, and digging from one of their records moves on to that record's
+   * credits.
+   */
+  const credit =
+    pickCredits(links.credits, [...artistIds, ...links.artists.map((a) => a.id)], 1)[0] ?? null;
+
+  // Step two: six lookups in parallel.
+  const [artistRows, labelRows, styleHits, eraHits, versions, creditRows] = await Promise.all([
     primaryArtist
       ? attempt(() => getArtistReleases(user, primaryArtist, 60, page), [])
       : Promise.resolve([]),
@@ -173,13 +219,36 @@ export async function digFromRelease(options: DigOptions): Promise<
           [],
         )
       : Promise.resolve([]),
+
+    links.masterId
+      ? attempt(() => getMasterVersions(user, links.masterId as number, 50, page), [])
+      : Promise.resolve([]),
+
+    credit
+      ? attempt(() => getArtistReleases(user, credit.id, 60, page, "credits"), [])
+      : Promise.resolve([]),
   ]);
 
-  const artistName = seed.artistNames[0] ?? "this artist";
-  const labelName = seed.labelNames[0] ?? "this label";
+  const artistName = seed.artistNames[0] ?? links.artists[0]?.name ?? "this artist";
+  const labelName = seed.labelNames[0] ?? links.labels[0]?.name ?? "this label";
   const styleName = seed.styles[0] ?? seed.genres[0] ?? "this style";
 
-  const lanes: Array<{ lane: DigLane; results: DigResult[] }> = [
+  const lanes: Array<{ lane: DigLane; label?: string; results: DigResult[] }> = [
+    {
+      lane: "other-versions",
+      results: versions.map((version) => fromVersion(version, artistName)),
+    },
+    {
+      lane: "credits",
+      label: credit ? `Credits · ${credit.name}, ${roleWord(credit.role)}` : undefined,
+      results: creditRows.map((row) =>
+        fromRelated(
+          row,
+          "credits",
+          credit ? `${credit.name} — ${roleWord(credit.role)} on the record you dug from` : "Credited on this record",
+        ),
+      ),
+    },
     {
       lane: "same-artist",
       results: artistRows.map((row) =>
@@ -217,7 +286,7 @@ export async function digFromRelease(options: DigOptions): Promise<
   const claimed = new Set<number>([seed.releaseId]);
 
   return lanes
-    .map(({ lane, results }) => {
+    .map(({ lane, label, results }) => {
       const kept: DigResult[] = [];
 
       for (const result of results) {
@@ -236,7 +305,7 @@ export async function digFromRelease(options: DigOptions): Promise<
       // keep their upstream order, which is chronological.
       kept.sort((a, b) => (b.want ?? 0) - (a.want ?? 0));
 
-      return { lane, label: DIG_LANE_LABELS[lane], results: kept };
+      return { lane, label: label ?? DIG_LANE_LABELS[lane], results: kept };
     })
     .filter((lane) => lane.results.length > 0);
 }
