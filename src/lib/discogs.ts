@@ -811,13 +811,23 @@ function toRelated(
   };
 }
 
+/**
+ * A page number that is safe to put in an upstream path: a positive integer,
+ * capped. The route already validates it; this is the second lock, so nothing
+ * that reaches this module can turn a page into extra query parameters.
+ */
+function safePage(page: number): number {
+  return Number.isInteger(page) && page >= 1 ? Math.min(page, 50) : 1;
+}
+
 export async function getArtistReleases(
   user: UserToken,
   artistId: number,
   perPage = 100,
+  page = 1,
 ): Promise<RelatedRelease[]> {
   const data = await getJson(
-    `/artists/${artistId}/releases?per_page=${perPage}&page=1&sort=year&sort_order=desc`,
+    `/artists/${artistId}/releases?per_page=${perPage}&page=${safePage(page)}&sort=year&sort_order=desc`,
     user,
     relatedReleaseSchema,
   );
@@ -847,9 +857,10 @@ export async function getLabelReleases(
   user: UserToken,
   labelId: number,
   perPage = 100,
+  page = 1,
 ): Promise<RelatedRelease[]> {
   const data = await getJson(
-    `/labels/${labelId}/releases?per_page=${perPage}&page=1`,
+    `/labels/${labelId}/releases?per_page=${perPage}&page=${safePage(page)}`,
     user,
     labelReleaseSchema,
   );

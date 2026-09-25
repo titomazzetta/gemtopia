@@ -175,6 +175,16 @@ That last one is what makes it endless. Dig from a record you don't own, land on
 another, dig again. **"Dig again"** re-runs the same seed while excluding
 everything you've already been shown, so the feed always moves.
 
+No lane just stops. Every lane ends in a tile: in your crate it's **More**
+(then **Beyond your crate →** once it has shown everything you own there);
+beyond it's **Dig deeper →**, which reads the next page of the same four
+lookups and adds it to the lanes you're already looking at. When Discogs has
+nothing further for that seed, the lane says so and points at ⌕.
+
+On a phone, tap the track in the player bar and the whole record is right
+there under it — tap any track on the EP to hear it, and **← Back to shuffle**
+returns you to the track after the one you left.
+
 ### Why not a black-box recommender
 
 Spotify's radio is a learned embedding — it works, and it can't tell you why.
@@ -629,7 +639,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 490 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 498 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.

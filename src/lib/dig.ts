@@ -110,12 +110,19 @@ export interface DigOptions {
   /** Ids already shown in this session, so the feed keeps moving. */
   seen: Set<number>;
   perLane?: number;
+  /**
+   * Which page of each upstream lookup to read. "Dig deeper" walks forward
+   * through the artist's discography, the label's catalogue and the style
+   * search instead of re-reading page one and filtering it down to nothing.
+   */
+  page?: number;
 }
 
 export async function digFromRelease(options: DigOptions): Promise<
   Array<{ lane: DigLane; label: string; results: DigResult[] }>
 > {
   const { user, seed, exclude, seen } = options;
+  const page = options.page ?? 1;
   const perLane = options.perLane ?? 12;
 
   const primaryArtist = seed.artistIds[0];
@@ -132,11 +139,11 @@ export async function digFromRelease(options: DigOptions): Promise<
   // run every time the user hits "dig" on a new track.
   const [artistRows, labelRows, styleHits, eraHits] = await Promise.all([
     primaryArtist
-      ? attempt(() => getArtistReleases(user, primaryArtist, 60), [])
+      ? attempt(() => getArtistReleases(user, primaryArtist, 60, page), [])
       : Promise.resolve([]),
 
     primaryLabel
-      ? attempt(() => getLabelReleases(user, primaryLabel, 80), [])
+      ? attempt(() => getLabelReleases(user, primaryLabel, 80, page), [])
       : Promise.resolve([]),
 
     primaryStyle
@@ -146,6 +153,7 @@ export async function digFromRelease(options: DigOptions): Promise<
               style: seed.styles[0],
               genre: seed.styles[0] ? undefined : seed.genres[0],
               perPage: 60,
+              page,
             }),
           [],
         )
@@ -160,6 +168,7 @@ export async function digFromRelease(options: DigOptions): Promise<
               year: eraRange,
               country: seed.country ?? undefined,
               perPage: 60,
+              page,
             }),
           [],
         )

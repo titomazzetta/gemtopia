@@ -22,7 +22,11 @@ export interface LocalLane {
   results: Playable[];
 }
 
-const MAX_PER_LANE = 40;
+/*
+ * Generous, because it is all local: the drawer shows the first few and
+ * reveals more as you reach the end of a lane (see client/digFeed.ts).
+ */
+const MAX_PER_LANE = 240;
 
 function unique(items: Playable[], excludeKey: string): Playable[] {
   const seen = new Set<string>([excludeKey]);

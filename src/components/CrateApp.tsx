@@ -102,7 +102,8 @@ import {
   type MixCheck,
 } from "@/lib/mixing";
 import { useLocalNumber } from "@/client/useLocalPreference";
-import { DigDrawer } from "./DigDrawer";
+import { DigDrawer, RecordSection } from "./DigDrawer";
+import { recordQueue, runningOrder } from "@/client/recordOrder";
 import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
 import { PlaylistViewBar } from "./PlaylistViewBar";
@@ -767,6 +768,19 @@ export function CrateApp({
     for (const detail of details) map.set(detail.id, detail);
     return map;
   }, [details]);
+
+  /**
+   * The record the current track is on, in running order — for the phone's
+   * player sheet, where "what else is on this EP" should be one tap from the
+   * track that is playing, not behind the dig drawer.
+   */
+  const currentRecord = useMemo(
+    () =>
+      current
+        ? runningOrder(current, detailById.get(current.releaseId) ?? null, allPlayables)
+        : null,
+    [current, detailById, allPlayables],
+  );
 
   const pool = useMemo(
     () => allPlayables.filter((p) => sourceIds[source].has(p.releaseId)),
@@ -2462,6 +2476,32 @@ export function CrateApp({
                   Dig from this
                 </button>
               </div>
+
+              {/*
+                The rest of the record, right here. Tapping a track plays the
+                record from it as a detour — the sheet stays open so you can
+                flip through the EP, and Back to shuffle in the bar returns
+                you to the track after the one you left.
+              */}
+              {currentRecord && (
+                <div className="-mx-4 mt-4">
+                  <RecordSection
+                    order={currentRecord}
+                    releaseTitle={current.releaseTitle}
+                    year={current.year}
+                    onPlay={(index) =>
+                      playRecord(
+                        recordQueue(currentRecord),
+                        index,
+                        current.releaseTitle || "this record",
+                      )
+                    }
+                    onPlayExtra={(item) =>
+                      playRecord([item], 0, current.releaseTitle || "this record")
+                    }
+                  />
+                </div>
+              )}
 
               <div className="mt-3 flex items-center gap-2">
                 {/* Same press-not-release timing as the desktop button, and it

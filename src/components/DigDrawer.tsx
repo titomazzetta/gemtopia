@@ -5,6 +5,7 @@ import type { DigResult, Playable, ReleaseDetail } from "@/lib/types";
 import { digWithinCollection, type LocalLane } from "@/client/digLocal";
 import { recordQueue, runningOrder, type RunningOrder } from "@/client/recordOrder";
 import { ApiError, digApi, releasesApi, wantlistApi } from "@/client/api";
+import { addedCount, appendLanes, nextDigPage, revealMore, visibleCount } from "@/client/digFeed";
 import { formatTime } from "./NowPlaying";
 import { Disc, Heart, Play, Plus, Search, Shuffle, Sparkle } from "./Icons";
 import { formatBpm } from "@/lib/mixing";
@@ -237,15 +238,67 @@ function BeyondCard({
   );
 }
 
-function Lane({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Lane({
+  title,
+  subtitle,
+  count,
+  end,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  /** "16 of 58" — so a lane never looks like it simply stops. */
+  count?: string;
+  /** The last tile: more, deeper, or where to go next. Never a blank edge. */
+  end?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="min-w-0">
       <h4 className="mb-1.5 flex items-baseline gap-1.5 px-4 text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
         {title}
         {subtitle && <span className="normal-case tracking-normal text-accent/80">{subtitle}</span>}
+        {count && <span className="ml-auto font-normal normal-case tracking-normal text-neutral-600">{count}</span>}
       </h4>
-      <ul className="flex gap-2 overflow-x-auto px-4 pb-2">{children}</ul>
+      <ul className="flex gap-2 overflow-x-auto px-4 pb-2">
+        {children}
+        {end && <li className="flex w-40 shrink-0">{end}</li>}
+      </ul>
     </section>
+  );
+}
+
+/** The tile at the end of a lane. */
+function EndTile({
+  onClick,
+  disabled,
+  title,
+  detail,
+}: {
+  onClick?: () => void;
+  disabled?: boolean;
+  title: string;
+  detail?: string;
+}) {
+  const body = (
+    <>
+      <span className="text-xs font-semibold text-accent">{title}</span>
+      {detail && <span className="mt-1 text-[10px] leading-snug text-neutral-500">{detail}</span>}
+    </>
+  );
+  return onClick ? (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="flex min-h-[56px] w-full flex-col items-center justify-center rounded-md border border-dashed border-ink-700 p-2 text-center hover:border-accent/50 disabled:opacity-40"
+    >
+      {body}
+    </button>
+  ) : (
+    <div className="flex min-h-[56px] w-full flex-col items-center justify-center rounded-md border border-dashed border-ink-800 p-2 text-center">
+      {body}
+    </div>
   );
 }
 
@@ -256,7 +309,7 @@ function Lane({ title, subtitle, children }: { title: string; subtitle?: string;
  * make a four-track EP look like a two-track single, which is the opposite of
  * what someone opening "the whole record" wants to know.
  */
-function RecordSection({
+export function RecordSection({
   order,
   releaseTitle,
   year,
@@ -347,7 +400,7 @@ function RecordSection({
                   <button
                     type="button"
                     onClick={() => onPlay(at)}
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-ink-800 ${
+                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-ink-800 lg:py-1.5 ${
                       row.current ? "bg-accent/5" : ""
                     }`}
                     title="Play from here, then return to your shuffle"
@@ -356,7 +409,7 @@ function RecordSection({
                     {content}
                   </button>
                 ) : (
-                  <div className="flex items-center gap-2 px-3 py-1.5 text-xs">{content}</div>
+                  <div className="flex items-center gap-2 px-3 py-2.5 text-xs lg:py-1.5">{content}</div>
                 )}
               </li>
             );
@@ -432,6 +485,11 @@ export function DigDrawer({
   const [busyRelease, setBusyRelease] = useState<number | null>(null);
   const [previewStates, setPreviewStates] = useState<Record<number, "idle" | "loading" | "none">>({});
   const [marketByRelease, setMarketByRelease] = useState<Record<number, ReleaseDetail["market"]>>({});
+  /** Crate lanes: how many records each has revealed so far. */
+  const [revealed, setRevealed] = useState<Record<string, number>>({});
+  /** Beyond: the upstream page last read, and whether the corner is dug out. */
+  const [digPage, setDigPage] = useState(1);
+  const [dugOut, setDugOut] = useState(false);
 
   // Everything shown this session, so "dig again" keeps moving.
   const seenRef = useRef<Set<number>>(new Set());
@@ -478,7 +536,12 @@ export function DigDrawer({
   );
 
   const runDig = useCallback(
-    async (payloadSeed: NonNullable<ReturnType<typeof buildSeed>>) => {
+    async (
+      payloadSeed: NonNullable<ReturnType<typeof buildSeed>>,
+      options: { page?: number; append?: boolean } = {},
+    ) => {
+      const page = options.page ?? 1;
+      const append = options.append ?? false;
       setLoading(true);
       setError(null);
       try {
@@ -498,17 +561,29 @@ export function DigDrawer({
           seenReleaseIds: [...seenRef.current],
           includeWantlist: true,
           wantlistReleaseIds: [...wantlistIds],
+          page,
         });
 
         for (const lane of response.lanes) {
           for (const result of lane.results) seenRef.current.add(result.releaseId);
         }
 
-        setBeyondLanes(response.lanes);
-        setBeyond(response.lanes.flatMap((l) => l.results));
+        setDigPage(page);
 
-        if (response.lanes.length === 0) {
-          setError("Nothing new — you may already own most of this corner.");
+        if (append) {
+          const merged = appendLanes(beyondLanes, response.lanes);
+          // Nothing new on this page: the corner is dug out. The per-record
+          // dig button is how you move on from here.
+          setDugOut(addedCount(beyondLanes, merged) === 0);
+          setBeyondLanes(merged);
+          setBeyond(merged.flatMap((l) => l.results));
+        } else {
+          setBeyondLanes(response.lanes);
+          setBeyond(response.lanes.flatMap((l) => l.results));
+          setDugOut(false);
+          if (response.lanes.length === 0) {
+            setError("Nothing new — you may already own most of this corner.");
+          }
         }
       } catch (caught) {
         setError(
@@ -518,8 +593,19 @@ export function DigDrawer({
         setLoading(false);
       }
     },
-    [collectionIds, wantlistIds],
+    [collectionIds, wantlistIds, beyondLanes],
   );
+
+  /** Next page of the same lookups, appended to the lanes on screen. */
+  const digDeeper = useCallback(() => {
+    if (!digSeed || loading) return;
+    const next = nextDigPage(digPage);
+    if (next === null) {
+      setDugOut(true);
+      return;
+    }
+    void runDig(digSeed, { page: next, append: true });
+  }, [digSeed, loading, digPage, runDig]);
 
   const startBeyond = useCallback(() => {
     setHalf("beyond");
@@ -597,7 +683,7 @@ export function DigDrawer({
         display: `${result.artist} — ${result.title}`,
       };
       setDigSeed(next);
-      void runDig(next);
+      void runDig(next, { page: 1 });
     },
     [runDig],
   );
@@ -605,7 +691,14 @@ export function DigDrawer({
   const detail = seedDetail;
 
   return (
-    <div className="flex h-full flex-col bg-ink-950">
+    /*
+      On a phone the drawer shares the screen with the video and the player
+      bar, so a fixed header over a scrolling body left the body about zero
+      pixels tall — the lanes were there, just never visible. Below lg the
+      whole drawer is one scroll, with the crate/beyond switch pinned; from lg
+      up it is the original fixed header over a scrolling body.
+    */
+    <div className="flex h-full flex-col overflow-y-auto overscroll-contain bg-ink-950 lg:overflow-hidden">
       {/* ---- seed header ---- */}
       <header className="flex shrink-0 items-start gap-3 border-b border-ink-800 bg-ink-900 p-4">
         <span className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded bg-ink-800">
@@ -677,7 +770,7 @@ export function DigDrawer({
       </header>
 
       {/* ---- half switch ---- */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-ink-800 bg-ink-900 px-4 py-2">
+      <div className="sticky top-0 z-10 flex shrink-0 items-center gap-2 border-b border-ink-800 bg-ink-900 px-4 py-2 lg:static">
         <div className="flex rounded-md border border-ink-700 p-0.5">
           <button
             type="button"
@@ -703,7 +796,10 @@ export function DigDrawer({
         {half === "beyond" && beyond && (
           <button
             type="button"
-            onClick={() => digSeed && void runDig(digSeed)}
+            onClick={() => {
+              if (!digSeed) return;
+              void runDig(digSeed, { page: nextDigPage(digPage) ?? 1 });
+            }}
             disabled={loading}
             className="ml-auto flex items-center gap-1.5 rounded-md border border-ink-700 px-2.5 py-1 text-[11px] text-neutral-400 hover:text-neutral-100 disabled:opacity-40"
             title="Fresh results — nothing you have already been shown"
@@ -721,7 +817,7 @@ export function DigDrawer({
       </div>
 
       {/* ---- body ---- */}
-      <div className="min-h-0 flex-1 overflow-y-auto py-3">
+      <div className="shrink-0 py-3 lg:min-h-0 lg:flex-1 lg:shrink lg:overflow-y-auto">
         {/*
           The record comes first, on both halves: when something grabs you on
           shuffle, the first thing you want is the rest of it. Everything
@@ -749,9 +845,34 @@ export function DigDrawer({
             </p>
           ) : (
             <div className="space-y-4">
-              {localLanes.map((lane) => (
-                <Lane key={lane.key} title={lane.label} subtitle={lane.pivot}>
-                  {lane.results.map((item, index) => (
+              {localLanes.map((lane) => {
+                const shown = visibleCount(revealed[lane.key], lane.results.length);
+                const more = shown < lane.results.length;
+                return (
+                <Lane
+                  key={lane.key}
+                  title={lane.label}
+                  subtitle={lane.pivot}
+                  count={lane.results.length > 1 ? `${shown} of ${lane.results.length}` : undefined}
+                  end={
+                    more ? (
+                      <EndTile
+                        title="More"
+                        detail={`${lane.results.length - shown} more you own`}
+                        onClick={() =>
+                          setRevealed((r) => ({ ...r, [lane.key]: revealMore(shown, lane.results.length) }))
+                        }
+                      />
+                    ) : (
+                      <EndTile
+                        title="Beyond your crate →"
+                        detail="That's all you own here"
+                        onClick={startBeyond}
+                      />
+                    )
+                  }
+                >
+                  {lane.results.slice(0, shown).map((item, index) => (
                     <LocalRow
                       key={item.key}
                       item={item}
@@ -760,7 +881,8 @@ export function DigDrawer({
                     />
                   ))}
                 </Lane>
-              ))}
+                );
+              })}
             </div>
           )
         ) : (
@@ -771,7 +893,7 @@ export function DigDrawer({
               </p>
             )}
 
-            {loading && (
+            {loading && beyondLanes.length === 0 && (
               <div className="px-4">
                 <p className="text-[11px] text-neutral-500">
                   Four lookups against Discogs — this artist&rsquo;s other records, this
@@ -790,7 +912,25 @@ export function DigDrawer({
             )}
 
             {beyondLanes.map((lane) => (
-              <Lane key={lane.lane} title={lane.label}>
+              <Lane
+                key={lane.lane}
+                title={lane.label}
+                end={
+                  dugOut ? (
+                    <EndTile
+                      title="Dug out"
+                      detail="Tap the dig button on any record to start a new corner"
+                    />
+                  ) : (
+                    <EndTile
+                      title={loading ? "Digging…" : "Dig deeper →"}
+                      detail="Next page from Discogs"
+                      onClick={digDeeper}
+                      disabled={loading}
+                    />
+                  )
+                }
+              >
                 {lane.results.map((result) => (
                   <BeyondCard
                     key={`${lane.lane}:${result.releaseId}`}
@@ -815,7 +955,7 @@ export function DigDrawer({
         )}
       </div>
 
-      <footer className="shrink-0 border-t border-ink-800 px-4 py-2 text-[10px] leading-relaxed text-neutral-600">
+      <footer className="hidden shrink-0 border-t border-ink-800 px-4 py-2 text-[10px] leading-relaxed text-neutral-600 lg:block">
         Every chip above is Discogs metadata from this release, and every record
         beyond your crate is a real Discogs id reached by a real relationship —
         this artist, this label, this style, this era. Preview plays the audio
