@@ -3,9 +3,9 @@ import { Mark } from "@/components/Mark";
 const FEATURES = [
   ["Shuffle the crate", "Fisher–Yates across every clip Discogs has for your collection, spread so the same release never lands back to back."],
   ["Filter, then shuffle", "Style, label, artist, country, decade, tempo — every option counted from your own records. Cut the crate down, then shuffle what's left."],
-  ["Playlists on the fly", "Hit A while something is playing. Reorder by drag, play in order or shuffled. Private to your account."],
+  ["Playlists on the fly", "Tap + (or A) while something plays. Reorder by drag, view by artist, genre, BPM or year, play in order or shuffled. Private to your account."],
   ["Know it'll beatmatch", "Tap the BPM in as you listen, or let it detect. Every transition in a playlist checked against your decks' pitch range."],
-  ["Dig from anything", "Press D on a record for its full metadata, everything else you own that connects to it, and records you don't own yet."],
+  ["Dig from anything", "Dig from any record (D on a keyboard): the whole EP, everything you own that connects to it, and the versions, remixers and labels you don't own yet."],
   ["Both lists, both ways", "Shuffle the wantlist like a crate. Search Discogs for a record that just arrived and put it in your collection. Adding is the only thing this app writes."],
 ];
 
