@@ -207,7 +207,13 @@ export function startSync(options: {
             continue;
           }
 
-          if (err.code === "unauthenticated" || err.code === "discogs_unauthorized") {
+          // session_revoked: signed out everywhere from another device. Not
+          // transient — retrying every remaining batch would just fail each one.
+          if (
+            err.code === "unauthenticated" ||
+            err.code === "session_revoked" ||
+            err.code === "discogs_unauthorized"
+          ) {
             emit({
               detailed: done,
               total: summaries.length,

@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { getCollectionPage, getWantlistPage } from "@/lib/discogs";
-import { getSession } from "@/lib/session";
-import { fail, handleError, json, unauthorized } from "@/lib/api";
+import { requireUser } from "@/lib/auth";
+import { fail, handleError, json } from "@/lib/api";
 import { callerId, rateLimit } from "@/lib/ratelimit";
 
 export const runtime = "nodejs";
@@ -22,8 +22,13 @@ const querySchema = z.object({
  * collection through our credentials (IDOR).
  */
 export async function GET(request: NextRequest) {
-  const session = await getSession();
-  if (!session) return unauthorized();
+  // requireUser, not getSession: a cookie that decrypts is not enough. It
+  // must also match the user's current session_version, or "sign out
+  // everywhere" would leave this route — which spends the Discogs token
+  // sealed inside the cookie — still working for a revoked session.
+  const auth = await requireUser(request);
+  if ("response" in auth) return auth.response;
+  const { session } = auth;
 
   const limit = rateLimit(callerId(request, "discogs-collection", session.u), 40, 60_000);
   if (!limit.ok) {

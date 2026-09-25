@@ -778,6 +778,13 @@ await check("...as is a cookie held on another device", async () => {
   assert.equal(res.body?.error?.code, "session_revoked");
 });
 
+await check("the session probe says a revoked session is signed out", async () => {
+  const dead = actor(revoker.username, 1);
+  const res = await dead.call("/api/auth/me", { cookie: dead.cookie });
+  assert.equal(res.status, 200);
+  assert.equal(res.body?.authenticated, false);
+});
+
 await check("every route rejects a revoked session, not just playlists", async () => {
   const dead = actor(revoker.username, 1);
   const routes = [
@@ -787,6 +794,10 @@ await check("every route rejects a revoked session, not just playlists", async (
     ["/api/prefs", "PATCH", { pitchPercent: 10 }],
     ["/api/wantlist", "PUT", { releaseId: 1 }],
     ["/api/dig", "POST", { seed: { releaseId: 1 } }],
+    // These two spend the Discogs token sealed in the cookie, and used to
+    // check only that the cookie decrypted — not that it was still current.
+    ["/api/discogs/collection", "GET", undefined],
+    ["/api/discogs/releases?ids=1", "GET", undefined],
   ];
   for (const [path, method, body] of routes) {
     const res = await dead.call(path, { method, body, cookie: dead.cookie });
