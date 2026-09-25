@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { getSession, CSRF_COOKIE } from "@/lib/session";
+import { resolveSession } from "@/lib/repo";
 import { json } from "@/lib/api";
 
 export const runtime = "nodejs";
@@ -12,6 +13,11 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const session = await getSession();
   if (!session) return json({ authenticated: false as const });
+  // A revoked session is not a signed-in one, even though its cookie still
+  // decrypts. Saying so here sends the client back to sign in immediately.
+  if (!(await resolveSession(session.u, session.v))) {
+    return json({ authenticated: false as const });
+  }
 
   const jar = await cookies();
   return json({
