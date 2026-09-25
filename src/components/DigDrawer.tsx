@@ -5,7 +5,7 @@ import type { DigResult, Playable, ReleaseDetail } from "@/lib/types";
 import { digWithinCollection, type LocalLane } from "@/client/digLocal";
 import { recordQueue, runningOrder, type RunningOrder } from "@/client/recordOrder";
 import { ApiError, digApi, releasesApi, wantlistApi } from "@/client/api";
-import { addedCount, appendLanes, nextDigPage, revealMore, visibleCount } from "@/client/digFeed";
+import { addedCount, appendLanes, finishedLanes, nextDigPage, revealMore, visibleCount } from "@/client/digFeed";
 import { formatTime } from "./NowPlaying";
 import { Disc, Heart, Play, Plus, Search, Shuffle, Sparkle } from "./Icons";
 import { formatBpm } from "@/lib/mixing";
@@ -449,6 +449,7 @@ export function DigDrawer({
   seedDetail,
   pool,
   recordPool,
+  playingKey,
   collectionIds,
   wantlistIds,
   pitchPercent,
@@ -470,6 +471,8 @@ export function DigDrawer({
    * record you do not own and its other tracks must still be playable.
    */
   recordPool: Playable[];
+  /** The clip on the decks right now, so the record highlights what you hear. */
+  playingKey: string | null;
   collectionIds: Set<number>;
   wantlistIds: Set<number>;
   /** Deck pitch range, so the "mixes with" lane reflects your actual gear. */
@@ -501,6 +504,8 @@ export function DigDrawer({
   /** Beyond: the upstream page last read, and whether the corner is dug out. */
   const [digPage, setDigPage] = useState(1);
   const [dugOut, setDugOut] = useState(false);
+  /** Lanes a deeper page added nothing to: that corner is done, the rest may not be. */
+  const [lanesDone, setLanesDone] = useState<Set<string>>(new Set());
 
   // Everything shown this session, so "dig again" keeps moving.
   const seenRef = useRef<Set<number>>(new Set());
@@ -523,8 +528,8 @@ export function DigDrawer({
   );
 
   const record: RunningOrder = useMemo(
-    () => runningOrder(seed, seedDetail, recordPool),
-    [seed, seedDetail, recordPool],
+    () => runningOrder(seed, seedDetail, recordPool, playingKey),
+    [seed, seedDetail, recordPool, playingKey],
   );
 
   const buildSeed = useCallback(
@@ -586,12 +591,14 @@ export function DigDrawer({
           // Nothing new on this page: the corner is dug out. The per-record
           // dig button is how you move on from here.
           setDugOut(addedCount(beyondLanes, merged) === 0);
+          setLanesDone((done) => new Set([...done, ...finishedLanes(beyondLanes, merged)]));
           setBeyondLanes(merged);
           setBeyond(merged.flatMap((l) => l.results));
         } else {
           setBeyondLanes(response.lanes);
           setBeyond(response.lanes.flatMap((l) => l.results));
           setDugOut(false);
+          setLanesDone(new Set());
           if (response.lanes.length === 0) {
             setError("Nothing new — you may already own most of this corner.");
           }
@@ -927,9 +934,9 @@ export function DigDrawer({
                 key={lane.lane}
                 title={lane.label}
                 end={
-                  dugOut ? (
+                  dugOut || lanesDone.has(lane.lane) ? (
                     <EndTile
-                      title="Dug out"
+                      title={dugOut ? "Dug out" : "That's all here"}
                       detail="Tap the dig button on any record to start a new corner"
                     />
                   ) : (

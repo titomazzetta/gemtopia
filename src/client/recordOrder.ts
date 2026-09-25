@@ -50,17 +50,25 @@ export function comparePositions(a: string, b: string): number {
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 }
 
+/**
+ * `playingKey` is what is actually on the decks, which is not always the
+ * seed: dig from A1, then tap B2 in the record list, and B2 is playing while
+ * the drawer is still about A1. The highlight follows the audio. Pass null
+ * when nothing on this record is playing; omit it and the seed is assumed to
+ * be playing, which is true where the seed *is* the current track.
+ */
 export function runningOrder(
   seed: Playable,
   detail: ReleaseDetail | null,
   pool: readonly Playable[],
+  playingKey: string | null = seed.key,
 ): RunningOrder {
   const clips = pool.filter((p) => p.releaseId === seed.releaseId && p.videoId !== null);
   // A record previewed from outside the collection is not in the pool, but it
   // is still the thing you are exploring.
   if (seed.videoId !== null && !clips.some((c) => c.key === seed.key)) clips.unshift(seed);
 
-  const isCurrent = (p: Playable | null) => p !== null && p.key === seed.key;
+  const isCurrent = (p: Playable | null) => p !== null && playingKey !== null && p.key === playingKey;
 
   // Headings ("Side A", "Bonus") carry no position in Discogs tracklists. Drop
   // them — unless nothing has a position, in which case positions are simply

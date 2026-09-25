@@ -84,6 +84,21 @@ export function addedCount<R>(before: readonly FeedLane<R>[], after: readonly Fe
   return count(after) - count(before);
 }
 
+/**
+ * Lanes a page added nothing to. A small lane — a label with five records, a
+ * master with one other version — is finished after one "dig deeper", and
+ * offering the button again under it promises something it cannot deliver.
+ */
+export function finishedLanes<R>(
+  before: readonly FeedLane<R>[],
+  after: readonly FeedLane<R>[],
+): string[] {
+  const sizes = new Map(before.map((lane) => [lane.lane, lane.results.length]));
+  return after
+    .filter((lane) => sizes.has(lane.lane) && sizes.get(lane.lane) === lane.results.length)
+    .map((lane) => lane.lane);
+}
+
 /** The next page to ask for, or null once the cap is reached. */
 export function nextDigPage(page: number): number | null {
   const next = Math.max(1, Math.floor(page)) + 1;
