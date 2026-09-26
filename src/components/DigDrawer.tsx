@@ -6,6 +6,8 @@ import { digWithinCollection, type LocalLane } from "@/client/digLocal";
 import { recordQueue, runningOrder, type RunningOrder } from "@/client/recordOrder";
 import { ApiError, digApi, releasesApi, wantlistApi } from "@/client/api";
 import { addedCount, appendLanes, finishedLanes, nextDigPage, revealMore, visibleCount } from "@/client/digFeed";
+import { writeClipDrag } from "@/client/clipDrag";
+import { useFinePointer } from "@/client/useFinePointer";
 import { formatTime } from "./NowPlaying";
 import { Disc, Heart, Play, Plus, Search, Shuffle, Sparkle } from "./Icons";
 import { formatBpm } from "@/lib/mixing";
@@ -89,8 +91,13 @@ function LocalRow({
   onPlay: () => void;
   onAdd: () => void;
 }) {
+  const finePointer = useFinePointer();
   return (
-    <li className="group flex w-56 shrink-0 flex-col rounded-md border border-ink-800 bg-ink-850 p-2 hover:border-ink-600">
+    <li
+      draggable={finePointer && item.videoId !== null}
+      onDragStart={(event) => writeClipDrag(event.dataTransfer, item.key)}
+      className="group flex w-56 shrink-0 flex-col rounded-md border border-ink-800 bg-ink-850 p-2 hover:border-ink-600"
+    >
       <button type="button" onClick={onPlay} className="flex items-start gap-2 text-left">
         <span className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded bg-ink-800">
           {item.thumb ? (

@@ -105,6 +105,7 @@ import {
 import { useLocalNumber } from "@/client/useLocalPreference";
 import { DigDrawer, RecordSection } from "./DigDrawer";
 import { recordQueue, runningOrder } from "@/client/recordOrder";
+import { isClipDrag } from "@/client/clipDrag";
 import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
 import { PlaylistViewBar } from "./PlaylistViewBar";
@@ -2001,6 +2002,11 @@ export function CrateApp({
                 key={value}
                 type="button"
                 onClick={() => setRail(value)}
+                // Drag a record over the Playlists tab and it opens, so the
+                // drop targets are there without letting go first.
+                onDragEnter={(event) => {
+                  if (value === "playlists" && isClipDrag(event.dataTransfer)) setRail("playlists");
+                }}
                 className={`flex-1 py-2 text-[11px] font-medium uppercase tracking-wider transition-colors ${
                   rail === value
                     ? "border-b-2 border-accent text-accent"
@@ -2042,6 +2048,12 @@ export function CrateApp({
                 onShare={(id, shared) => void sharePlaylist(id, shared)}
                 sharedIds={sharedIds}
                 onImport={(file) => void importPlaylists(file)}
+                onDropClip={(playlistId, key) => {
+                  // The key only ever looks up a record already on this
+                  // device; an unknown one is ignored, never sent anywhere.
+                  const item = byKey.get(key);
+                  if (item) void addToPlaylist(playlistId, item);
+                }}
               />
             )}
 

@@ -8,6 +8,8 @@ import { formatBpm } from "@/lib/mixing";
 import { NoPreview, Play, Plus, Trash } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import type { SortKey, SortState } from "@/client/sorting";
+import { writeClipDrag } from "@/client/clipDrag";
+import { useFinePointer } from "@/client/useFinePointer";
 
 const BASE_ROW_HEIGHT = 56;
 
@@ -180,6 +182,7 @@ export function TrackList({
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(600);
   const dragIndex = useRef<number | null>(null);
+  const finePointer = useFinePointer();
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -299,8 +302,15 @@ export function TrackList({
               <li
                 key={`${item.key}:${index}`}
                 style={{ height: ROW_HEIGHT }}
-                draggable={reorderable}
-                onDragStart={() => (dragIndex.current = index)}
+                // Draggable for two reasons: reordering an open playlist, and
+                // dropping any playable row onto a playlist in the sidebar
+                // (desktop). A silent row has nothing to add, so it stays put.
+                draggable={reorderable || (finePointer && item.videoId !== null)}
+                onDragStart={(event) => {
+                  if (reorderable) dragIndex.current = index;
+                  writeClipDrag(event.dataTransfer, item.key);
+                }}
+                onDragEnd={() => (dragIndex.current = null)}
                 onDragOver={(e) => reorderable && e.preventDefault()}
                 onDrop={() => {
                   if (!reorderable || dragIndex.current === null) return;
