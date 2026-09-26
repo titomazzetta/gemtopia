@@ -109,6 +109,7 @@ import { isClipDrag } from "@/client/clipDrag";
 import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
 import { PlaylistViewBar } from "./PlaylistViewBar";
+import { PullList } from "./PullList";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
@@ -208,6 +209,8 @@ export function CrateApp({
   const [rail, setRail] = useState<Rail>("filters");
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  /** Which playlist's pull list is open, if any. An id, so it never reopens on another playlist. */
+  const [pullListFor, setPullListFor] = useState<string | null>(null);
   /*
    * How the open playlist is being *looked at* — never how it is stored.
    * Remembered against the playlist it was chosen for, so opening any other
@@ -2232,8 +2235,18 @@ export function CrateApp({
             {activePlaylist && (
               <button
                 type="button"
+                onClick={() => setPullListFor(activePlaylist.id)}
+                title="The whole running order, big enough to pull records from"
+                className="ml-auto rounded-full border border-ink-700 px-3 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
+              >
+                Pull list
+              </button>
+            )}
+            {activePlaylist && (
+              <button
+                type="button"
                 onClick={() => setActivePlaylistId(null)}
-                className="ml-auto text-[11px] text-neutral-500 hover:text-neutral-200"
+                className="text-[11px] text-neutral-500 hover:text-neutral-200"
               >
                 Back to crate
               </button>
@@ -2393,6 +2406,19 @@ export function CrateApp({
       </div>
 
       {/* ---- mobile: sticky player bar ---- */}
+      {activePlaylist && pullListFor === activePlaylist.id && (
+        <PullList
+          playlistId={activePlaylist.id}
+          name={activePlaylist.name}
+          items={playlistItems}
+          onClose={() => setPullListFor(null)}
+          onPlay={(index) => {
+            playFrom(playlistItems, index);
+            setPullListFor(null);
+          }}
+        />
+      )}
+
       <MobileBar
         current={current}
         playing={api.status === "playing"}
