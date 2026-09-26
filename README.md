@@ -131,7 +131,7 @@ A few ideas every feature is held to. They're why the app looks the way it does.
 | **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
 | **Hear the whole record** | Something grabs you on shuffle: tap the artist or the record and the whole release opens in running order — every track, the one playing marked, the ones with no audio still listed. Play it through, then drop straight back into your shuffle where you left it. |
 | **Dig from anything** | Hit `D` (or **Dig from this** on a phone) on whatever's playing and pivot on any field. Two halves: what else you own, and what exists beyond it — other versions, the remixer or producer, the artist, the label, the style and the era. No lane dead-ends: each one ends in **More** or **Dig deeper**. |
-| **Playlists that follow you** | Stored against your Discogs account. Private by default, always. On a desktop, drag any record from the crate or a dig lane straight onto a playlist (hover the Playlists tab and it opens); on a phone it's the + button. Drag to reorder, play in order or shuffled. View by artist, genre, BPM or year without losing the order you built. |
+| **Playlists that follow you** | Stored against your Discogs account. Private by default, always. On a desktop, drag any record from the crate or a dig lane straight onto a playlist (hover the Playlists tab and it opens); on a phone it's the + button. Drag to reorder, play in order or shuffled. **Pull list** opens the whole running order full-screen — numbered, one sleeve per record, tick them off as they go in the bag. View by artist, genre, BPM or year without losing the order you built. |
 | **BPM catalogue** | Detect tempo from the audio as it plays — with a live beat meter showing exactly what it hears — or tap it in with `T`. Genre-aware: a record Discogs tags as drum & bass is counted at 174, not 87. **Measure** plays through everything on screen unattended, skipping what is already done. |
 | **Share a set** | One tap mints a read-only link to a playlist that anyone can open and play — no account, no route back to yours. Turn sharing off and the link is dead, not dormant. See [the one exception](#the-one-exception-and-why-it-looks-like-one). |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **out of range**. Flags the hard ones before you pack the bag. |
@@ -701,7 +701,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 527 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 533 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -815,6 +815,7 @@ scripts/
 ├── test-dig-links.mjs         which credits are worth following
 ├── test-sync-queue.mjs        what a first sync fetches next
 ├── test-clip-drag.mjs         a drop accepts our records and nothing else
+├── test-pull-list.mjs         the running order you take to the shelves
 ├── test-mark.mjs              the logo's three cuts
 ├── test-tempo.mjs             estimator vs synthetic signals
 ├── test-mixing.mjs            beatmatch maths, tiers and set length
@@ -843,6 +844,7 @@ src/
 │   ├── sync.ts                resumable, rate-limit-aware background sync
 │   ├── syncQueue.ts           tapped and searched-for records load first
 │   ├── clipDrag.ts            drag a record onto a playlist, safely
+│   ├── pullList.ts            numbered set, one sleeve per record, ticks
 │   ├── playables.ts           video↔track matching, Fisher–Yates, spread shuffle
 │   ├── digLocal.ts            in-collection pivots, zero network
 │   ├── adopt.ts               a just-added record, folded into the crate
@@ -900,7 +902,8 @@ npm run test:views      # 16
 npm run test:dig-feed   # 9
 npm run test:dig-links  # 8
 npm run test:sync-queue # 7
-npm run test:clip-drag  # 5   — 527 offline in all
+npm run test:clip-drag  # 5
+npm run test:pull-list  # 6   — 533 offline in all
 npm run test:api        # 87 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
