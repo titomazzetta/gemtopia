@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Playable } from "@/lib/types";
 import { formatBpm } from "@/lib/mixing";
@@ -92,6 +92,28 @@ export function MobileBar({
   const [held, setHeld] = useState<number | null>(null);
   const dragging = useRef(false);
 
+  /*
+   * Publish this bar's height as a CSS variable, so the player sheet can sit
+   * *above* it instead of over it. Exploring an EP from the sheet then keeps
+   * the scrubber, previous / next and play under your thumb — the transport
+   * you'd want while flipping through a record. Measured rather than hard-
+   * coded because the bar grows when the "Back to shuffle" strip appears.
+   */
+  const barRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const element = barRef.current;
+    if (!element) return;
+    const root = document.documentElement;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) root.style.setProperty("--mobile-bar-h", `${Math.ceil(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height)}px`);
+    });
+    observer.observe(element);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--mobile-bar-h");
+    };
+  }, []);
+
   const position = held ?? positionOf(currentTime, duration);
   const shownTime = held === null ? currentTime : secondsOf(held, duration);
 
@@ -104,7 +126,7 @@ export function MobileBar({
   };
 
   return (
-    <div className="shrink-0 border-t border-ink-800 bg-ink-900/95 backdrop-blur lg:hidden">
+    <div ref={barRef} className="shrink-0 border-t border-ink-800 bg-ink-900/95 backdrop-blur lg:hidden">
       {/*
         There is no B key on a phone, so the way back from a record lives in
         the one bar that is always on screen. Full width and 36px tall: this is

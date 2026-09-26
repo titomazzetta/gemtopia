@@ -141,7 +141,12 @@ export interface DigResponse {
  * well on Discogs is the kind of confident wrong answer that makes people
  * stop believing the rest of the app.
  */
-export type SilenceReason = "no-audio" | "not-loaded";
+export type SilenceReason = "no-audio" | "not-loaded" | "loading";
+/*
+ * `loading` is the third, and the most temporary: the record is in the
+ * listing, but the sync has not reached it yet this session. Tapping one
+ * moves it to the front of the queue (client/syncQueue.ts).
+ */
 
 export interface Playable {
   /** Stable key: `${releaseId}:${videoId}`, or `${releaseId}:silent`. */

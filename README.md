@@ -127,7 +127,7 @@ A few ideas every feature is held to. They're why the app looks the way it does.
 |---|---|
 | **Shuffle the crate** | Fisher–Yates over every clip Discogs has for your collection, spread so the same release never lands twice in a row. |
 | **Filter on real metadata** | Style, genre, label, artist, format, country, decade, year and tempo — every option counted from *your* synced collection. Multi-select is **any** or **all**, so you can ask for Techno *or* Deep House, or for the shelf tagged both. |
-| **Works on a phone** | Sheets rather than stacked panels: source and playlists in one, filters in another, the player in a third. Transport and TAP sit in a sticky bottom bar at thumb height. Tap the playing track and the whole record is right there under it; Dig is one scroll with the crate/beyond switch pinned. |
+| **Works on a phone** | Sheets rather than stacked panels: source and playlists in one, filters in another, the player in a third. Transport and TAP sit in a sticky bottom bar at thumb height. Tap the playing track and the whole record opens above that bar — so the scrubber, previous and next stay under your thumb while you flip through the EP. Dig is one scroll with the crate/beyond switch pinned. |
 | **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
 | **Hear the whole record** | Something grabs you on shuffle: tap the artist or the record and the whole release opens in running order — every track, the one playing marked, the ones with no audio still listed. Play it through, then drop straight back into your shuffle where you left it. |
 | **Dig from anything** | Hit `D` (or **Dig from this** on a phone) on whatever's playing and pivot on any field. Two halves: what else you own, and what exists beyond it — other versions, the remixer or producer, the artist, the label, the style and the era. No lane dead-ends: each one ends in **More** or **Dig deeper**. |
@@ -139,7 +139,7 @@ A few ideas every feature is held to. They're why the app looks the way it does.
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
 | **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
 | **Newest first, by default** | Your collection and wantlist both open in the order you added to them, newest at the top — the same way Discogs presents them. No button to press and nothing to keep in sync: the dates come off the collection and wantlist endpoints, which we already read. Sortable both ways as an **Added** column. |
-| **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, dimmed and marked, instead of silently not existing. The header splits the count: what plays, what Discogs has no audio for, and what hasn't finished syncing — the last of which is a button. |
+| **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, dimmed and marked, instead of silently not existing. On a first sync every record shows up within a minute as *loading* — tap one and it's fetched next. The header splits the count: what plays, what Discogs has no audio for, what's still loading, and what hasn't finished syncing — the last of which is a button. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
 
 ### Keyboard
@@ -669,9 +669,15 @@ Discogs allows **60 authenticated requests per minute** per account, and its ter
 forbid getting around that with extra keys. Listing your collection takes one
 request per hundred records; fetching each record's tracklist and videos takes one
 request per record. So a first sync runs in the background for minutes on a small
-crate and closer to an hour on a few thousand records — while you browse, filter
-and play whatever has already loaded. Progress saves after every batch; close the
-tab and it resumes. Later syncs only fetch what you've added.
+crate and closer to an hour on a few thousand records.
+
+It doesn't feel like an hour, because the order isn't fixed. Every record you own
+appears within about a minute, dimmed and marked *loading*, and the whole crate is
+searchable and filterable from then on. **Tap a loading record and it's fetched
+next, then starts playing by itself.** Search or filter during a sync and whatever
+matches jumps the queue. Everything else loads newest-first in the background.
+Progress saves after every batch; close the tab and it resumes. Later syncs only
+fetch what you've added.
 
 The cache lives in the browser, so a new device or browser syncs from scratch.
 That's deliberate for now: Discogs' API terms don't allow keeping their data
@@ -695,7 +701,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 512 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 522 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -807,6 +813,7 @@ scripts/
 ├── test-record.mjs            running order, the highlight, the detour back
 ├── test-dig-feed.mjs          lanes that never just stop
 ├── test-dig-links.mjs         which credits are worth following
+├── test-sync-queue.mjs        what a first sync fetches next
 ├── test-mark.mjs              the logo's three cuts
 ├── test-tempo.mjs             estimator vs synthetic signals
 ├── test-mixing.mjs            beatmatch maths, tiers and set length
@@ -833,6 +840,7 @@ src/
 ├── client/                    browser-only
 │   ├── db.ts                  IndexedDB crate cache
 │   ├── sync.ts                resumable, rate-limit-aware background sync
+│   ├── syncQueue.ts           tapped and searched-for records load first
 │   ├── playables.ts           video↔track matching, Fisher–Yates, spread shuffle
 │   ├── digLocal.ts            in-collection pivots, zero network
 │   ├── adopt.ts               a just-added record, folded into the crate
@@ -866,7 +874,7 @@ src/
 npm run test           # everything below
 npm run test:env        # 36 cases, no server needed
 npm run test:headers    # 23
-npm run test:playables  # 31
+npm run test:playables  # 34
 npm run test:sorting    # 24
 npm run test:share      # 28
 npm run test:scrub      # 12
@@ -888,7 +896,8 @@ npm run test:record     # 24
 npm run test:mark       # 14
 npm run test:views      # 16
 npm run test:dig-feed   # 9
-npm run test:dig-links  # 8   — 512 offline in all
+npm run test:dig-links  # 8
+npm run test:sync-queue # 7   — 522 offline in all
 npm run test:api        # 87 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint

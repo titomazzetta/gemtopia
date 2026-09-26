@@ -50,6 +50,7 @@ import {
 import { useCrateCache } from "@/client/useCrateCache";
 import {
   buildPlayables,
+  pendingPlayables,
   countSilence,
   playableOnly,
   queueFrom,
@@ -182,7 +183,9 @@ export function CrateApp({
     sourceIds,
     sync,
     loading,
+    pending,
     runSync,
+    prioritize,
     adopt,
     markCollected,
     markWanted,
@@ -752,10 +755,18 @@ export function CrateApp({
     return map;
   }, [trackMeta]);
 
-  const allPlayables = useMemo(
-    () => buildPlayables([...details, ...externalDetails], bpmByClip, addedAt),
-    [details, externalDetails, bpmByClip, addedAt],
-  );
+  /*
+   * Every record the app can show: what is detailed and playable (or known to
+   * be silent), plus what the listing knows about but the sync has not reached
+   * yet, as "loading" rows. The second half is what makes a first sync
+   * searchable from its first minute.
+   */
+  const allPlayables = useMemo(() => {
+    const built = buildPlayables([...details, ...externalDetails], bpmByClip, addedAt);
+    if (pending.length === 0) return built;
+    const detailed = new Set(details.map((d) => d.id));
+    return [...built, ...pendingPlayables(pending, detailed)];
+  }, [details, externalDetails, bpmByClip, addedAt, pending]);
 
   const byKey = useMemo(() => {
     const map = new Map<string, Playable>();
@@ -998,6 +1009,8 @@ export function CrateApp({
 
   /* ================= player ================= */
 
+  /** A "loading" record that was tapped; plays itself when the sync lands it. */
+  const waitingFor = useRef<number | null>(null);
   /** Key of the clip last handed to the player, so a re-render never reloads it. */
   const lastLoaded = useRef<string | null>(null);
 
@@ -1077,8 +1090,19 @@ export function CrateApp({
       if (items.length === 0) return false;
 
       const plan = queueFrom(items, index);
+      const target = items[index];
+      if (target?.silence === "loading") {
+        /*
+         * Still in the sync queue. Tapping it is the clearest possible signal
+         * of what to fetch next, so it goes to the front, and it plays by
+         * itself once it lands — the tap was the request.
+         */
+        prioritize([target.releaseId], source);
+        waitingFor.current = target.releaseId;
+        say(`Fetching ${target.title} from Discogs next — it'll start in a moment.`);
+        return false;
+      }
       if (plan === null) {
-        const target = items[index];
         say(
           target?.silence === "not-loaded"
             ? `${target.title} hasn't finished syncing — hit refresh to fetch it.`
@@ -1092,9 +1116,10 @@ export function CrateApp({
       setQueue(plan.queue);
       setQueueIndex(plan.index);
       lastLoaded.current = null;
+      waitingFor.current = null;
       return true;
     },
-    [say],
+    [say, prioritize, source],
   );
 
   /**
@@ -1109,6 +1134,41 @@ export function CrateApp({
     },
     [loadQueue],
   );
+
+  /*
+   * A tapped "loading" record, once the sync has fetched it: play the record
+   * from its first track. If Discogs turned out to have no audio for it, say
+   * so instead — the tap deserves an answer either way.
+   */
+  useEffect(() => {
+    const releaseId = waitingFor.current;
+    if (releaseId === null) return;
+    const rows = allPlayables.filter((p) => p.releaseId === releaseId);
+    if (rows.length === 0 || rows.some((p) => p.silence === "loading")) return;
+    waitingFor.current = null;
+    const first = rows.find((p) => p.videoId !== null);
+    if (!first) {
+      say(`Discogs has no audio for ${rows[0]?.title ?? "that record"}.`);
+      return;
+    }
+    const order = runningOrder(first, recordDetailById.get(releaseId) ?? null, allPlayables, null);
+    const queue = recordQueue(order);
+    playFrom(queue.length > 0 ? queue : [first], 0);
+  }, [allPlayables, recordDetailById, playFrom, say]);
+
+  /*
+   * Searching or filtering during a first sync: whatever matches and is still
+   * loading jumps the queue, so the records you are looking for are the next
+   * ones to become playable. A hint only — it never starts a sync.
+   */
+  useEffect(() => {
+    if (activePlaylist || (activeFilterCount === 0 && !filters.query.trim())) return;
+    const wanted = filtered
+      .filter((p) => p.silence === "loading")
+      .slice(0, 48)
+      .map((p) => p.releaseId);
+    if (wanted.length > 0) prioritize(wanted, source, { start: false });
+  }, [filtered, activeFilterCount, filters.query, activePlaylist, prioritize, source]);
 
   /**
    * Explore a record without losing your place. Saves where the shuffle was,
@@ -2034,12 +2094,12 @@ export function CrateApp({
 
                 <span className="shrink-0 font-mono text-[11px] text-neutral-600">
                   {silence.playable.toLocaleString()}
-                  {silence.noAudio + silence.notLoaded > 0 && (
+                  {silence.noAudio + silence.notLoaded + silence.loading > 0 && (
                     <span
                       className="text-neutral-700"
-                      title={`${(silence.noAudio + silence.notLoaded).toLocaleString()} shown but not playable`}
+                      title={`${(silence.noAudio + silence.notLoaded + silence.loading).toLocaleString()} shown but not playable yet`}
                     >
-                      +{(silence.noAudio + silence.notLoaded).toLocaleString()}
+                      +{(silence.noAudio + silence.notLoaded + silence.loading).toLocaleString()}
                     </span>
                   )}
                 </span>
@@ -2135,6 +2195,12 @@ export function CrateApp({
                 <span title="Discogs holds no audio for these pressings">
                   {" · "}
                   {silence.noAudio.toLocaleString()} without a preview
+                </span>
+              )}
+              {silence.loading > 0 && (
+                <span title="Listed, still loading from Discogs — tap one to fetch it next">
+                  {" · "}
+                  {silence.loading.toLocaleString()} loading
                 </span>
               )}
               {silence.notLoaded > 0 && (
@@ -2457,6 +2523,7 @@ export function CrateApp({
         open={sheet === "player"}
         onClose={() => setSheet("none")}
         title={current ? current.title : "Player"}
+        aboveBar
       >
         <div className="px-4 pb-4">
           {current ? (

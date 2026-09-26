@@ -14,6 +14,7 @@ import {
   buildPlayables,
   countSilence,
   distinct,
+  pendingPlayables,
   playableOnly,
   queueFrom,
 } from "../src/client/playables.ts";
@@ -442,7 +443,37 @@ check("countSilence splits the two kinds, because they lead somewhere different"
     playable: 1,
     noAudio: 1,
     notLoaded: 2,
+    loading: 0,
   });
+});
+
+const summary = (over = {}) => ({
+  id: 501, title: "Moneyshot EP", artist: "Rob & Si", year: 2004,
+  genres: ["Electronic"], styles: ["Tech House", "tech house"], labels: ["Drugsex", "Drugsex"],
+  formats: ["Vinyl"], country: "US", artistIds: [1], labelIds: [2],
+  addedAt: "2026-01-02T00:00:00Z", thumb: "t.jpg", coverImage: "", ...over,
+});
+
+check("records the sync hasn't reached yet show as loading rows, never playable", () => {
+  const rows = pendingPlayables([summary()], new Set());
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].silence, "loading");
+  assert.equal(rows[0].videoId, null);
+  assert.equal(rows[0].releaseId, 501);
+  assert.equal(rows[0].addedAt, "2026-01-02T00:00:00Z", "sorts by date added like everything else");
+  assert.deepEqual(rows[0].labels, ["Drugsex"], "one of each label, as for detailed rows");
+  assert.deepEqual(rows[0].styles, ["Tech House"]);
+  assert.equal(queueFrom(rows, 0), null, "a loading row never reaches the queue");
+});
+
+check("a record already detailed never also appears as loading", () => {
+  const rows = pendingPlayables([summary(), summary({ id: 502 }), summary()], new Set([501]));
+  assert.deepEqual(rows.map((r) => r.releaseId), [502]);
+});
+
+check("countSilence reports loading separately from not synced", () => {
+  const items = [...pendingPlayables([summary(), summary({ id: 503 })], new Set())];
+  assert.deepEqual(countSilence(items), { playable: 0, noAudio: 0, notLoaded: 0, loading: 2 });
 });
 
 check("every emitted key is unique", () => {

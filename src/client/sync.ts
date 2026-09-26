@@ -8,14 +8,17 @@ import {
   putSummaries,
   setSyncState,
 } from "./db";
+import { mergePriority, nextBatch } from "./syncQueue";
 
 /**
  * Incremental background sync.
  *
- * Listing a 1,500-record collection is 15 requests. Fetching the tracklist and
- * videos for each of those releases is 1,500 more — and Discogs allows 60 a
- * minute. So the first sync takes ~10 minutes and every sync after it only
- * fetches releases we have never seen. Progress is persisted after every
+ * Listing a collection is one request per hundred records. Fetching the
+ * tracklist and videos for each release is one request per record — and
+ * Discogs allows 60 a minute. So a first sync takes minutes to an hour by
+ * crate size, and every sync after it only fetches releases we have never
+ * seen. The order of that second phase is not fixed: what you tap or search
+ * for during it is fetched next (client/syncQueue.ts). Progress is persisted after every
  * batch, so closing the tab mid-sync costs at most one batch of work.
  */
 
@@ -25,6 +28,11 @@ const BATCH_INTERVAL_MS = 2_600;
 
 export interface SyncHandle {
   cancel(): void;
+  /**
+   * Fetch these releases next. Ids already fetched, or not in this sync, are
+   * ignored. See client/syncQueue.ts.
+   */
+  prioritize(releaseIds: readonly number[]): void;
 }
 
 interface ApiError {
@@ -61,6 +69,7 @@ export function startSync(options: {
   force?: boolean;
 }): SyncHandle {
   let cancelled = false;
+  let priority: number[] = [];
 
   const emit = (partial: Omit<SyncState, "source" | "updatedAt">) => {
     const state: SyncState = {
@@ -136,11 +145,15 @@ export function startSync(options: {
       }
 
       let done = alreadyDone;
+      let pending = missing;
 
-      for (let i = 0; i < missing.length; i += BATCH_SIZE) {
+      while (pending.length > 0) {
         if (cancelled) return;
 
-        const batch = missing.slice(i, i + BATCH_SIZE);
+        // Whatever you tapped or searched for goes first; see syncQueue.ts.
+        const next = nextBatch(pending, priority, BATCH_SIZE);
+        const batch = next.batch;
+        pending = next.rest;
 
         try {
           const data = await apiGet<{
@@ -203,7 +216,7 @@ export function startSync(options: {
               message: `Discogs rate limit — resuming in ${wait}s`,
             });
             await sleep(wait * 1_000);
-            i -= BATCH_SIZE; // retry this batch
+            pending = [...batch, ...pending]; // retry this batch first
             continue;
           }
 
@@ -248,6 +261,9 @@ export function startSync(options: {
   return {
     cancel() {
       cancelled = true;
+    },
+    prioritize(releaseIds) {
+      priority = mergePriority(priority, releaseIds);
     },
   };
 }
