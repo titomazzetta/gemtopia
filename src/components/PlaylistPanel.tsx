@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { Playlist } from "@/lib/types";
+import { isClipDrag, readClipDrag } from "@/client/clipDrag";
 import { Link, Lock, Play, Plus, Shuffle, Trash } from "./Icons";
 
 export function PlaylistPanel({
@@ -16,6 +17,7 @@ export function PlaylistPanel({
   onImport,
   onShare,
   sharedIds,
+  onDropClip,
 }: {
   playlists: Playlist[];
   activeId: string | null;
@@ -30,9 +32,16 @@ export function PlaylistPanel({
   onShare: (id: string, shared: boolean) => void;
   /** Ids that currently have a live share link. */
   sharedIds: Set<string>;
+  /**
+   * A record dragged from the crate or a dig lane and dropped on a playlist.
+   * Desktop only in practice; omitted, the rows are not drop targets.
+   */
+  onDropClip?: (playlistId: string, clipKey: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  /** The playlist a record is being dragged over, so it can light up. */
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const submit = (event: React.FormEvent) => {
@@ -78,8 +87,30 @@ export function PlaylistPanel({
               return (
                 <li
                   key={playlist.id}
+                  onDragOver={(event) => {
+                    if (!onDropClip || !isClipDrag(event.dataTransfer)) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                    if (dropTarget !== playlist.id) setDropTarget(playlist.id);
+                  }}
+                  onDragLeave={(event) => {
+                    // Leaving for a child element is not leaving the row.
+                    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                    setDropTarget((current) => (current === playlist.id ? null : current));
+                  }}
+                  onDrop={(event) => {
+                    setDropTarget(null);
+                    const key = readClipDrag(event.dataTransfer);
+                    if (!onDropClip || key === null) return;
+                    event.preventDefault();
+                    onDropClip(playlist.id, key);
+                  }}
                   className={`group border-b border-ink-850 ${
-                    active ? "bg-accent/10" : "hover:bg-ink-850"
+                    dropTarget === playlist.id
+                      ? "bg-accent/15 outline outline-1 -outline-offset-1 outline-accent/60"
+                      : active
+                        ? "bg-accent/10"
+                        : "hover:bg-ink-850"
                   }`}
                 >
                   <div className="flex items-center gap-1 px-3 py-2">
