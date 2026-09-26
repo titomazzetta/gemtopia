@@ -22,6 +22,7 @@ export function Sheet({
   title,
   children,
   footer,
+  aboveBar = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -29,6 +30,12 @@ export function Sheet({
   children: React.ReactNode;
   /** Pinned below the scroll area — for a "clear all" or a primary action. */
   footer?: React.ReactNode;
+  /**
+   * Stop above the player bar instead of covering it, so the transport stays
+   * usable while the sheet is open. The bar publishes its height as
+   * `--mobile-bar-h` (MobileBar.tsx); without it this falls back to 0.
+   */
+  aboveBar?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -66,7 +73,10 @@ export function Sheet({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col justify-end lg:hidden">
+    <div
+      className="fixed inset-x-0 top-0 z-50 flex flex-col justify-end lg:hidden"
+      style={{ bottom: aboveBar ? "var(--mobile-bar-h, 0px)" : 0 }}
+    >
       <button
         type="button"
         aria-label="Close"
@@ -80,7 +90,9 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative flex max-h-[85vh] flex-col rounded-t-2xl border-t border-ink-700 bg-ink-900 outline-none"
+        className={`relative flex flex-col rounded-t-2xl border-t border-ink-700 bg-ink-900 outline-none ${
+          aboveBar ? "max-h-[calc(85vh_-_var(--mobile-bar-h,0px))] border-b" : "max-h-[85vh]"
+        }`}
       >
         {/* The grab handle. Purely a signal that this thing dismisses. */}
         <div className="flex shrink-0 justify-center pt-2.5" aria-hidden="true">
@@ -112,7 +124,7 @@ export function Sheet({
           Home-indicator clearance on iPhones. Without it the last row of a
           sheet sits under the gesture bar and cannot be tapped.
         */}
-        <div className="h-[env(safe-area-inset-bottom)] shrink-0" />
+        {!aboveBar && <div className="h-[env(safe-area-inset-bottom)] shrink-0" />}
       </div>
     </div>
   );

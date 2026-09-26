@@ -289,9 +289,11 @@ export function TrackList({
              */
             const silent = item.silence !== null;
             const silentReason =
-              item.silence === "not-loaded"
-                ? "Not synced yet — hit refresh to fetch this release"
-                : "Discogs has no audio for this pressing";
+              item.silence === "loading"
+                ? "Still loading from Discogs — tap to fetch it next"
+                : item.silence === "not-loaded"
+                  ? "Not synced yet — hit refresh to fetch this release"
+                  : "Discogs has no audio for this pressing";
 
             return (
               <li
@@ -308,7 +310,7 @@ export function TrackList({
                 className={`group border-b border-ink-850 ${
                   active ? "bg-accent/10" : "hover:bg-ink-850"
                 } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""} ${
-                  silent ? "opacity-45" : ""
+                  silent ? (item.silence === "loading" ? "opacity-60" : "opacity-45") : ""
                 }`}
               >
                 {showTransitions &&
@@ -375,9 +377,11 @@ export function TrackList({
                       {silent && (
                         <span className="ml-1.5 text-neutral-600">
                           ·{" "}
-                          {item.silence === "not-loaded"
-                            ? "not synced"
-                            : "no preview"}
+                          {item.silence === "loading"
+                            ? "loading"
+                            : item.silence === "not-loaded"
+                              ? "not synced"
+                              : "no preview"}
                         </span>
                       )}
                     </span>

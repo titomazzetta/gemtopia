@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { ReleaseDetail, Source, SyncState } from "@/lib/types";
+import type { ReleaseDetail, ReleaseSummary, Source, SyncState } from "@/lib/types";
 import {
   getAllDetails,
   getSummaries,
@@ -34,6 +34,11 @@ export interface CrateCache {
   sourceIds: Record<Source, Set<number>>;
   sync: SyncState | null;
   loading: boolean;
+  /**
+   * Listed but not yet detailed — shown as "loading" rows during a first sync
+   * so the whole crate is searchable from the first minute.
+   */
+  pending: ReleaseSummary[];
 
   /** Re-read everything from IndexedDB into state. */
   reload: () => Promise<void>;
@@ -41,6 +46,15 @@ export interface CrateCache {
   runSync: (target: Source, force?: boolean) => void;
   /** Stop any sync in flight — for effect cleanup. */
   cancelSync: () => void;
+  /**
+   * Fetch these releases next. Starts a sync for `source` if none is running,
+   * so tapping a loading row always does something.
+   */
+  prioritize: (
+    releaseIds: readonly number[],
+    source: Source,
+    options?: { start?: boolean },
+  ) => void;
 
   setSync: (state: SyncState | null) => void;
   setLoading: (value: boolean) => void;
@@ -66,8 +80,13 @@ export function useCrateCache(username: string): CrateCache {
   });
   const [sync, setSync] = useState<SyncState | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState<ReleaseSummary[]>([]);
 
   const syncRef = useRef<SyncHandle | null>(null);
+  /** Whether `syncRef` is still working, so a priority request can restart it. */
+  const syncRunning = useRef(false);
+  /** Listing emits once per page; re-reading the cache on every one is waste. */
+  const lastListingReload = useRef(0);
 
   const reload = useCallback(async () => {
     const [cachedDetails, collection, wantlist] = await Promise.all([
@@ -76,6 +95,10 @@ export function useCrateCache(username: string): CrateCache {
       getSummaries(username, "wantlist"),
     ]);
     setDetails(cachedDetails);
+    const detailed = new Set(cachedDetails.map((d) => d.id));
+    setPending(
+      [...collection, ...wantlist].filter((summary) => !detailed.has(summary.id)),
+    );
     setSourceIds({
       collection: new Set(collection.map((s) => s.id)),
       wantlist: new Set(wantlist.map((s) => s.id)),
@@ -90,13 +113,24 @@ export function useCrateCache(username: string): CrateCache {
   const runSync = useCallback(
     (target: Source, force = false) => {
       syncRef.current?.cancel();
+      syncRunning.current = true;
       syncRef.current = startSync({
         owner: username,
         source: target,
         force,
         onProgress: (state) => {
           setSync(state);
-          if (state.status === "done" || state.status === "detailing") {
+          if (state.status === "done" || state.status === "error") {
+            syncRunning.current = false;
+          }
+          // "listing" too: the rows appear as each page of the listing lands,
+          // so the crate is searchable before a single detail is fetched.
+          if (state.status === "listing") {
+            const now = Date.now();
+            if (now - lastListingReload.current < 4_000) return;
+            lastListingReload.current = now;
+            void reload();
+          } else if (state.status === "done" || state.status === "detailing") {
             void reload();
           }
         },
@@ -107,7 +141,21 @@ export function useCrateCache(username: string): CrateCache {
 
   const cancelSync = useCallback(() => {
     syncRef.current?.cancel();
+    syncRunning.current = false;
   }, []);
+
+  const prioritize = useCallback(
+    (releaseIds: readonly number[], source: Source, options: { start?: boolean } = {}) => {
+      if (releaseIds.length === 0) return;
+      if (!syncRunning.current) {
+        // A background hint (a search) never starts a sync; a tap does.
+        if (options.start === false) return;
+        runSync(source);
+      }
+      syncRef.current?.prioritize(releaseIds);
+    },
+    [runSync],
+  );
 
   const markCollected = useCallback((releaseId: number) => {
     setSourceIds((previous) => {
@@ -146,9 +194,11 @@ export function useCrateCache(username: string): CrateCache {
     sourceIds,
     sync,
     loading,
+    pending,
     reload,
     runSync,
     cancelSync,
+    prioritize,
     setSync,
     setLoading,
     adopt,

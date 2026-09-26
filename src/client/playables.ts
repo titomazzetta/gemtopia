@@ -1,6 +1,6 @@
 "use client";
 
-import type { Playable, ReleaseDetail, Track } from "@/lib/types";
+import type { Playable, ReleaseDetail, ReleaseSummary, Track } from "@/lib/types";
 import { parseBpmFromText } from "./tempo";
 
 /**
@@ -212,6 +212,48 @@ export function distinct(values: readonly string[]): string[] {
     if (!key || seen.has(key)) continue;
     seen.add(key);
     out.push(value.trim());
+  }
+  return out;
+}
+
+/**
+ * Records the listing knows about but the sync has not detailed yet, as rows
+ * the crate can show straight away — dimmed, marked "loading", filterable by
+ * everything the listing carries (artist, label, style, year, country,
+ * format). Showing them is what lets you search a crate on its first sync,
+ * and tap what you want so it loads next, rather than watching a list trickle
+ * in newest-first for an hour.
+ */
+export function pendingPlayables(
+  summaries: readonly ReleaseSummary[],
+  detailed: ReadonlySet<number>,
+): Playable[] {
+  const out: Playable[] = [];
+  const seen = new Set<number>();
+  for (const summary of summaries) {
+    if (detailed.has(summary.id) || seen.has(summary.id)) continue;
+    seen.add(summary.id);
+    out.push({
+      key: `${summary.id}:silent`,
+      releaseId: summary.id,
+      videoId: null,
+      silence: "loading",
+      addedAt: summary.addedAt,
+      title: summary.title,
+      artist: summary.artist,
+      releaseTitle: summary.title,
+      year: summary.year,
+      genres: distinct(summary.genres),
+      styles: distinct(summary.styles),
+      labels: distinct(summary.labels),
+      thumb: summary.thumb,
+      country: summary.country,
+      formats: summary.formats,
+      duration: null,
+      position: null,
+      bpm: null,
+      matchKind: "release",
+    });
   }
   return out;
 }
@@ -546,16 +588,20 @@ export function countSilence(items: readonly Playable[]): {
   playable: number;
   noAudio: number;
   notLoaded: number;
+  /** Still to be reached by the sync in progress — not a failure. */
+  loading: number;
 } {
   let playable = 0;
   let noAudio = 0;
   let notLoaded = 0;
+  let loading = 0;
 
   for (const item of items) {
     if (item.silence === null) playable += 1;
     else if (item.silence === "no-audio") noAudio += 1;
+    else if (item.silence === "loading") loading += 1;
     else notLoaded += 1;
   }
 
-  return { playable, noAudio, notLoaded };
+  return { playable, noAudio, notLoaded, loading };
 }
