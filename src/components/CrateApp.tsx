@@ -106,6 +106,7 @@ import { useLocalNumber } from "@/client/useLocalPreference";
 import { DigDrawer, RecordSection } from "./DigDrawer";
 import { recordQueue, runningOrder } from "@/client/recordOrder";
 import { isClipDrag } from "@/client/clipDrag";
+import { searchRecord } from "@/client/searchPlay";
 import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
 import { PlaylistViewBar } from "./PlaylistViewBar";
@@ -1188,6 +1189,38 @@ export function CrateApp({
     [loadQueue, queue, queueIndex, say],
   );
 
+  /**
+   * Play a record found in a Discogs search, from the clip that was tapped.
+   * Played as a detour, like exploring a record from Dig, so Back to shuffle
+   * returns you. A record you don't own joins the previews so its running
+   * order, dig and player sheet all work — exactly as a Dig preview does.
+   */
+  const playFromSearch = useCallback(
+    (release: ReleaseDetail, startKey: string) => {
+      const clips = buildPlayables([release], bpmByClip).filter((p) => p.videoId !== null);
+      if (clips.length === 0) {
+        say(`Discogs has no audio for ${release.title}.`);
+        return;
+      }
+      if (!detailById.has(release.id)) {
+        setExternalDetails((previous) =>
+          previous.some((d) => d.id === release.id) ? previous : [...previous, release].slice(-60),
+        );
+      }
+      const record = searchRecord(release, null, bpmByClip);
+      const queue = record?.queue ?? clips;
+      const at = queue.findIndex((p) => p.key === startKey);
+      if (at >= 0) {
+        playRecord(queue, at, release.title);
+        return;
+      }
+      // A full-side rip or mix: not a track on the record, so it plays alone.
+      const extra = clips.find((p) => p.key === startKey);
+      playRecord(extra ? [extra] : queue, 0, release.title);
+    },
+    [bpmByClip, detailById, playRecord, say],
+  );
+
   const shuffleNow = useCallback(() => {
     const scope = playableOnly(activePlaylist ? playlistItems : filtered);
     if (scope.length === 0) {
@@ -2068,6 +2101,9 @@ export function CrateApp({
                   initialQuery={searchSeed}
                   onAddToCollection={addFromSearch}
                   onAddToWantlist={wantFromSearch}
+                  localDetail={(id) => detailById.get(id) ?? null}
+                  onPlay={playFromSearch}
+                  playingKey={current?.key ?? null}
                 />
               </div>
             )}
@@ -2441,7 +2477,8 @@ export function CrateApp({
       <Sheet
         open={sheet === "search"}
         onClose={() => setSheet("none")}
-        title="Add from Discogs"
+        title="Search Discogs"
+        aboveBar
       >
         {/*
           No scroll container here: the Sheet already scrolls its children, and
@@ -2459,6 +2496,9 @@ export function CrateApp({
             initialQuery={searchSeed}
             onAddToCollection={addFromSearch}
             onAddToWantlist={wantFromSearch}
+            localDetail={(id) => detailById.get(id) ?? null}
+            onPlay={playFromSearch}
+            playingKey={current?.key ?? null}
           />
         </div>
       </Sheet>

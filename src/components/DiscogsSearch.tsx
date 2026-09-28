@@ -19,6 +19,8 @@ import {
   type SearchField,
 } from "@/client/searchFields";
 import { Heart, InCollection, NoPreview, Plus, Search } from "./Icons";
+import { RecordSection } from "./DigDrawer";
+import { searchRecord, startIndexFor } from "@/client/searchPlay";
 
 /**
  * Look a record up on Discogs and put it in your collection.
@@ -42,6 +44,15 @@ interface Props {
   initialQuery?: string;
   onAddToCollection: (hit: SearchHit) => Promise<void>;
   onAddToWantlist: (hit: SearchHit) => Promise<void>;
+  /**
+   * A release this device already holds — your collection or wantlist — so
+   * opening it costs no Discogs request and it can play the moment you tap.
+   */
+  localDetail?: (releaseId: number) => ReleaseDetail | null;
+  /** Play this record, starting from the clip with this key. */
+  onPlay?: (detail: ReleaseDetail, startKey: string) => void;
+  /** What is on the decks, so an open tracklist highlights it. */
+  playingKey?: string | null;
 }
 
 /*
@@ -57,6 +68,9 @@ export function DiscogsSearch({
   initialQuery = "",
   onAddToCollection,
   onAddToWantlist,
+  localDetail,
+  onPlay,
+  playingKey = null,
 }: Props) {
   const [query, setQuery] = useState(initialQuery);
   const [field, setField] = useState<SearchField>("all");
@@ -102,6 +116,14 @@ export function DiscogsSearch({
 
     if (requested.current.has(releaseId)) return;
     requested.current.add(releaseId);
+
+    // Already on this device: no request, no wait.
+    const local = localDetail?.(releaseId) ?? null;
+    if (local) {
+      setDetail((current) => ({ ...current, [releaseId]: local }));
+      return;
+    }
+
     setDetail((current) => ({ ...current, [releaseId]: "loading" }));
 
     void (async () => {
@@ -119,7 +141,28 @@ export function DiscogsSearch({
         setDetail((d) => ({ ...d, [releaseId]: "failed" }));
       }
     })();
-  }, []);
+  }, [localDetail]);
+
+  /*
+   * Tapping a record you already own plays it straight away — from the track
+   * you searched for, when the search was a track name — and opens its
+   * tracklist so you can jump around. Anything else opens first: whether a
+   * pressing you don't own has previews is only known once it is fetched.
+   */
+  const openOrPlay = useCallback(
+    (releaseId: number) => {
+      const local = localDetail?.(releaseId) ?? null;
+      const record = local ? searchRecord(local) : null;
+      if (local && record && onPlay) {
+        const start = record.queue[startIndexFor(record.queue, query)] ?? record.queue[0];
+        if (start) onPlay(local, start.key);
+        if (openId !== releaseId) toggle(releaseId);
+        return;
+      }
+      toggle(releaseId);
+    },
+    [localDetail, onPlay, query, openId, toggle],
+  );
 
   /*
    * Searching is explicit — submit, not debounced-as-you-type. Discogs allows
@@ -279,8 +322,9 @@ export function DiscogsSearch({
 
               <button
                 type="button"
-                onClick={() => toggle(hit.id)}
+                onClick={() => openOrPlay(hit.id)}
                 aria-expanded={openId === hit.id}
+                title={localDetail?.(hit.id) ? "Play it, and show the tracklist" : "Show the tracklist and previews"}
                 className="min-w-0 flex-1 text-left"
               >
                 <span className="block truncate text-[13px] font-medium text-neutral-100">
@@ -399,6 +443,8 @@ export function DiscogsSearch({
                   hit={hit}
                   detail={detail[hit.id]}
                   owned={badge}
+                  onPlay={onPlay}
+                  playingKey={playingKey}
                 />
               )}
             </li>
@@ -423,11 +469,20 @@ function ReleasePanel({
   hit,
   detail,
   owned,
+  onPlay,
+  playingKey,
 }: {
   hit: SearchHit;
   detail: ReleaseDetail | "loading" | "failed" | undefined;
   owned: string | null;
+  onPlay?: (detail: ReleaseDetail, startKey: string) => void;
+  playingKey: string | null;
 }) {
+  const record =
+    onPlay && detail !== undefined && detail !== "loading" && detail !== "failed"
+      ? searchRecord(detail, playingKey)
+      : null;
+
   return (
     <div className="border-t border-ink-850 bg-ink-950/60 px-4 py-3">
       {owned && (
@@ -463,7 +518,25 @@ function ReleasePanel({
             </p>
           )}
 
-          {detail.tracks.length > 0 && (
+          {record && onPlay ? (
+            /*
+             * The same running-order list as the dig drawer and the player
+             * sheet: ▶ on tracks with a preview, "no preview" on the rest,
+             * the playing track highlighted. Tap to play from there.
+             */
+            <div className="-mx-4 mb-2">
+              <RecordSection
+                order={record.order}
+                releaseTitle={detail.title}
+                year={detail.year}
+                onPlay={(index) => {
+                  const start = record.queue[index];
+                  if (start) onPlay(detail, start.key);
+                }}
+                onPlayExtra={(item) => onPlay(detail, item.key)}
+              />
+            </div>
+          ) : detail.tracks.length > 0 && (
             <ol className="mb-2 space-y-0.5">
               {detail.tracks.slice(0, 12).map((track, index) => (
                 <li
