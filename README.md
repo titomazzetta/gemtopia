@@ -17,6 +17,10 @@ Dig your records, shape the set, tell the story. Built by a DJ who loves records
 [![Threat model](https://img.shields.io/badge/threat%20model-documented-5ef08a)](./THREAT_MODEL.md)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
+<br>
+
+<img src="docs/screenshots/crate-desktop.jpg" width="800" alt="Gemtopia on desktop: the filter rail with tempo ranges measured from the collection, the crate list with BPMs, and the player showing a record with its tempo and a mixing window for the next track">
+
 </div>
 
 ---
@@ -102,9 +106,53 @@ A few ideas every feature is held to. They're why the app looks the way it does.
 
 ---
 
+## See it
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/dig-in-your-crate.jpg" alt="Dig from a record: its Discogs details, the whole EP with a play-the-record button, and more by the same artist from your own crate"></td>
+<td width="50%"><img src="docs/screenshots/dig-beyond-your-crate.jpg" alt="Beyond your crate: records you don't own yet that share a style or era, each with a preview and a wantlist heart"></td>
+</tr>
+<tr>
+<td><sub><b>Dig from anything.</b> The whole EP, and everything you own that connects to it.</sub></td>
+<td><sub><b>Beyond your crate.</b> Same style, same era, same remixers — with previews.</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/set-prep-desktop.jpg" alt="A playlist in your own order with total runtime, a count of comfortable and pushing-it transitions for Technics decks, and each transition marked with the tempo the two records meet at"></td>
+<td><img src="docs/screenshots/pull-list.jpg" alt="The pull list: every record in the set, numbered, with side, label and BPM, to take to the shelves"></td>
+</tr>
+<tr>
+<td><sub><b>Will it mix?</b> Every transition checked against your decks' pitch range.</sub></td>
+<td><sub><b>Pull list.</b> The set as a list to take to the shelves.</sub></td>
+</tr>
+</table>
+
+<p align="center">
+<img src="docs/screenshots/phone-set-prep.jpg" width="270" alt="Gemtopia on a phone: a playlist with runtime and mix checks, with the player pinned to the bottom">
+&nbsp;&nbsp;
+<img src="docs/screenshots/phone-record.jpg" width="270" alt="Gemtopia on a phone: tapping the playing track opens the whole record, with the transport still under your thumb">
+</p>
+
+### Install it as an app
+
+It installs like an app — its own window, its own icon, no browser bar:
+
+- **Chrome or Edge** (Mac, Windows, Linux): the **Install Gemtopia** button at
+  the right of the address bar.
+- **Safari on a Mac:** File → **Add to Dock**.
+- **iPhone or iPad:** Safari → Share → **Add to Home Screen**. Sign in from the
+  installed app itself — iOS keeps a home-screen app's sign-in separate from
+  Safari's.
+- **Android:** Chrome → ⋮ → **Install app**.
+
+There's nothing to download or update: it is always the live version.
+
+---
+
 ## Contents
 
 - [Who this is for](#who-this-is-for)
+- [See it](#see-it) · [Install it as an app](#install-it-as-an-app)
 - [What it's built around](#what-its-built-around)
 - [What it does](#what-it-does)
 - [The digging model](#the-digging-model)
@@ -727,7 +775,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 574 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 582 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 105 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -944,7 +992,8 @@ npm run test:sync-queue # 7
 npm run test:clip-drag  # 5
 npm run test:pull-list  # 6
 npm run test:search-play # 4
-npm run test:invites    # 28 — 574 offline in all
+npm run test:invites    # 28
+npm run test:manifest   # 8 — 582 offline in all
 npm run test:api        # 105 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
