@@ -137,7 +137,7 @@ A few ideas every feature is held to. They're why the app looks the way it does.
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **out of range**. Flags the hard ones before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
-| **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. What you add is playable immediately, not after the next sync. |
+| **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. **Tap a record you own and it plays** — from the track you searched for, if you searched by track — with its tracklist open to jump around; open any other result to preview its tracks. What you add is playable immediately, not after the next sync. |
 | **Newest first, by default** | Your collection and wantlist both open in the order you added to them, newest at the top — the same way Discogs presents them. No button to press and nothing to keep in sync: the dates come off the collection and wantlist endpoints, which we already read. Sortable both ways as an **Added** column. |
 | **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, dimmed and marked, instead of silently not existing. On a first sync every record shows up within a minute as *loading* — tap one and it's fetched next. The header splits the count: what plays, what Discogs has no audio for, what's still loading, and what hasn't finished syncing — the last of which is a button. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
@@ -701,7 +701,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 533 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 537 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 89 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -816,6 +816,7 @@ scripts/
 ├── test-sync-queue.mjs        what a first sync fetches next
 ├── test-clip-drag.mjs         a drop accepts our records and nothing else
 ├── test-pull-list.mjs         the running order you take to the shelves
+├── test-search-play.mjs       play a search result from the track you asked for
 ├── test-mark.mjs              the logo's three cuts
 ├── test-tempo.mjs             estimator vs synthetic signals
 ├── test-mixing.mjs            beatmatch maths, tiers and set length
@@ -845,6 +846,7 @@ src/
 │   ├── syncQueue.ts           tapped and searched-for records load first
 │   ├── clipDrag.ts            drag a record onto a playlist, safely
 │   ├── pullList.ts            numbered set, one sleeve per record, ticks
+│   ├── searchPlay.ts          a search result as a playable running order
 │   ├── playables.ts           video↔track matching, Fisher–Yates, spread shuffle
 │   ├── digLocal.ts            in-collection pivots, zero network
 │   ├── adopt.ts               a just-added record, folded into the crate
@@ -903,7 +905,8 @@ npm run test:dig-feed   # 9
 npm run test:dig-links  # 8
 npm run test:sync-queue # 7
 npm run test:clip-drag  # 5
-npm run test:pull-list  # 6   — 533 offline in all
+npm run test:pull-list  # 6
+npm run test:search-play # 4  — 537 offline in all
 npm run test:api        # 87 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
