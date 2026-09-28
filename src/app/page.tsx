@@ -37,9 +37,33 @@ export default async function Home({
   // The API routes reject a revoked session on their own, so the app would be
   // inert anyway — but rendering the shell for someone who has signed out
   // everywhere is a confusing lie. Check here too.
-  const live = session
-    ? await resolveSession(session.u, session.v).catch(() => null)
-    : null;
+  //
+  // "Revoked" and "couldn't check" are kept apart. This used to swallow any
+  // error into "revoked", so when production was briefly missing a database
+  // column every member was told they had signed out of every device — which
+  // is untrue, alarming, and sends people to fix the wrong thing.
+  let live: string | null = null;
+  let unavailable = false;
+  if (session) {
+    try {
+      live = await resolveSession(session.u, session.v);
+    } catch (error) {
+      console.error("[home] session check failed", error);
+      unavailable = true;
+    }
+  }
+
+  if (unavailable) {
+    return (
+      <SignIn
+        error={
+          "Gemtopia can't reach its database right now. You're still signed in, " +
+          "and your playlists are safe — try again in a minute."
+        }
+        inviteOnly={INVITE_ONLY}
+      />
+    );
+  }
 
   if (!session || !live) {
     const code = typeof params.auth_error === "string" ? params.auth_error : null;
