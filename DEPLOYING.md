@@ -94,7 +94,9 @@ your key or secret. If that passes and sign-in still fails, the problem is
 
 ## Run it on your laptop
 
-Same Neon database production will use, so there's no local Postgres to install.
+A Neon database for development, so there's no local Postgres to install.
+Production can share it, but giving production its own Neon project is safer —
+see [Two databases](#two-databases-and-changing-the-schema) before you deploy.
 
 ### Step 1 — Write your environment file
 
@@ -121,8 +123,8 @@ DATABASE_URL=postgresql://...-pooler...neon.tech/gemtopia?sslmode=require
 npm run db:migrate
 ```
 
-It prints the seven tables it created. The schema is idempotent, so re-running is
-always safe.
+It first prints which database it is about to change (`Migrating <host>/<db>`),
+then the tables it found. The schema is idempotent, so re-running is always safe.
 
 ### Step 3 — Prove it works before you trust it
 
@@ -234,7 +236,7 @@ No trailing slash, and `https` not `http`.
 **Production**.
 
 Use the *new* Discogs credentials, a *fresh* `SESSION_SECRET` (run `npm run keygen`
-again — don't reuse your local one), and the same Neon string.
+again — don't reuse your local one), and your **production** Neon string.
 
 | Variable | Required | Value |
 |---|---|---|
@@ -252,14 +254,17 @@ again — don't reuse your local one), and the same Neon string.
 
 Then **Deployments → ⋯ → Redeploy**. This one should go green.
 
-### Step 11 — Migrate, if you skipped local
+### Step 11 — Migrate production
 
-If you ran step 2 against the same Neon database, the tables exist and you're
-done. Otherwise:
+Step 2 migrated whatever `.env.local` points at. Unless production shares that
+database, its tables don't exist yet:
 
 ```bash
-DATABASE_URL="your-pooler-string" npm run db:migrate
+DATABASE_URL='your-production-pooler-string' npm run db:migrate
 ```
+
+The first line it prints should name your **production** host. Single quotes,
+so the shell leaves the password's punctuation alone.
 
 Open your URL and sign in. Because it's a different Discogs application, this is a
 separate authorisation from your local one — expect to approve it again.
@@ -386,22 +391,57 @@ with everything else that is known and deliberately unmitigated.
 
 ---
 
+## Two databases, and changing the schema
+
+The live deployment runs with two Neon projects:
+
+| | Neon project | Who uses it |
+|---|---|---|
+| Development | `gemtopia` (us-east-2) | `.env.local` — `npm run dev`, `npm run db:migrate` |
+| Production | `gemtopia-prod` (us-east-1) | Vercel's `DATABASE_URL` |
+
+Separate is safer — nothing you do locally can touch members' data — with one
+cost: **`npm run db:migrate` on its own only ever changes development.**
+
+**The rule: when a PR changes `db/schema.sql`, migrate production before you
+merge it.** Code that reads a column production doesn't have fails on every
+request that touches it. Either:
+
+- from the terminal, with the production string from Neon → `gemtopia-prod` →
+  **Connect** (pooling on):
+
+  ```bash
+  DATABASE_URL='your-production-pooler-string' npm run db:migrate
+  ```
+
+  and check the first line says `Migrating ep-…us-east-1…`, not your
+  development host; **or**
+- in Neon → `gemtopia-prod` → **SQL Editor**, paste the new part of
+  `db/schema.sql` and run it.
+
+Every schema change is additive and idempotent (`IF NOT EXISTS` throughout), so
+migrating early is harmless: the version already running ignores what it
+doesn't use. A "… already exists, skipping" notice just means that part was
+already there.
+
+**If a PR went in first anyway**, you'll see members get errors, and Vercel →
+Logs shows `column "…" does not exist`. Migrate production as above — it takes
+effect immediately, no redeploy. If you can't do that straight away, Vercel →
+Deployments → the previous deployment → **Instant Rollback** buys time.
+
+---
+
 ## Turning on invite-only
 
 Order matters: the new code expects the new columns.
 
-1. **Migrate first.** From your machine, with `.env.local` pointing at the Neon
-   database production uses:
+1. **Migrate production first** — see
+   [Two databases](#two-databases-and-changing-the-schema). It is additive and
+   idempotent — one new table (`invite_codes`) and two nullable columns on
+   `users` — so the version already running is unaffected.
 
-   ```bash
-   npm run db:migrate
-   ```
-
-   It is additive and idempotent — one new table (`invite_codes`) and two
-   nullable columns on `users` — so the version already running is unaffected.
-
-2. **Set the variables** in Vercel → Settings → Environment Variables
-   (Production, and Preview if previews share the database):
+2. **Set the variables** in Vercel → Settings → Environment Variables,
+   Production:
 
    | Variable | Value |
    |---|---|

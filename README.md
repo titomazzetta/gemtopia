@@ -727,9 +727,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 537 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 574 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 89 API tests against a running server. CodeQL
+reached the client bundle, then 105 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -760,6 +760,17 @@ impersonate anything in production. This matters more than it looks — the API
 test harness forges valid sessions using `SESSION_SECRET`, so a shared one
 would make any developer's laptop able to mint a production session for any
 user.
+
+The price of separate databases is that a schema change has to be applied to
+production on purpose: `npm run db:migrate` reads `.env.local`, so on its own
+it only ever migrates development. The rule is **migrate production before
+merging any PR that changes `db/schema.sql`** — the schema is additive and
+idempotent, so going early is harmless and going late is an outage. That was
+learned the direct way: on 2026-09-28 the invite-codes PR merged with only
+development migrated, and every signed-in request failed for about ten
+minutes until production caught up. `db:migrate` now prints which host it is
+about to change before it changes it, and the sign-in page no longer reports a
+database failure as "you signed out of every device".
 
 Also covered in [DEPLOYING.md](./DEPLOYING.md).
 
