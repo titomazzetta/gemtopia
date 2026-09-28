@@ -111,6 +111,7 @@ import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
 import { PlaylistViewBar } from "./PlaylistViewBar";
 import { PullList } from "./PullList";
+import { InvitePanel } from "./InvitePanel";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
@@ -167,9 +168,12 @@ function reEntry(row: PlaylistItemRow): NewEntry {
 export function CrateApp({
   username,
   csrfToken,
+  canInvite = false,
 }: {
   username: string;
   csrfToken: string;
+  /** Named in ADMIN_USERNAMES. Only shows the menu item; the API checks for itself. */
+  canInvite?: boolean;
 }) {
   setCsrfToken(csrfToken);
 
@@ -212,6 +216,7 @@ export function CrateApp({
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   /** Which playlist's pull list is open, if any. An id, so it never reopens on another playlist. */
   const [pullListFor, setPullListFor] = useState<string | null>(null);
+  const [invitesOpen, setInvitesOpen] = useState(false);
   /*
    * How the open playlist is being *looked at* — never how it is stored.
    * Remembered against the playlist it was chosen for, so opening any other
@@ -1999,6 +2004,22 @@ export function CrateApp({
             {username}
           </summary>
           <div className="absolute right-0 z-30 mt-1 w-48 rounded-md border border-ink-700 bg-ink-850 p-1 shadow-xl">
+            {canInvite && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  setInvitesOpen(true);
+                }}
+                className="mb-0.5 w-full rounded px-2 py-1.5 text-left text-xs text-accent hover:bg-ink-800"
+              >
+                Invite someone
+                <span className="mt-0.5 block text-[10px] leading-snug text-neutral-600">
+                  Make a one-time code
+                </span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={signOut}
@@ -2440,6 +2461,10 @@ export function CrateApp({
           digging={Boolean(digTarget)}
         />
       </div>
+
+      {canInvite && invitesOpen && (
+        <InvitePanel username={username} onClose={() => setInvitesOpen(false)} />
+      )}
 
       {/* ---- mobile: sticky player bar ---- */}
       {activePlaylist && pullListFor === activePlaylist.id && (

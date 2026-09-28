@@ -3,6 +3,7 @@ import type { NextResponse } from "next/server";
 import { getSession, verifyCsrf, type Session } from "./session";
 import { resolveSession } from "./repo";
 import { fail, forbidden, originAllowed, unauthorized } from "./api";
+import { isAdmin } from "./invites";
 
 /**
  * Route guard.
@@ -60,4 +61,24 @@ export async function requireUser(
   }
 
   return { session, userId, username: session.u };
+}
+
+/**
+ * `requireUser`, and the caller must be named in ADMIN_USERNAMES.
+ *
+ * Anyone else gets the same 404 an unknown route would — not a 403 — so the
+ * admin surface does not announce that it exists. The session and CSRF checks
+ * still run first: a stranger without a cookie sees 401 exactly as they would
+ * anywhere else, and learns nothing more.
+ */
+export async function requireAdmin(
+  request: Request,
+  options: { mutating?: boolean } = {},
+): Promise<{ response: NextResponse } | Caller> {
+  const auth = await requireUser(request, options);
+  if ("response" in auth) return auth;
+  if (!isAdmin(auth.username)) {
+    return { response: fail("not_found", "Not found.", 404) };
+  }
+  return auth;
 }

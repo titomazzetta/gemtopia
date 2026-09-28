@@ -21,6 +21,7 @@ interface UserRow {
   id: string;
   username_display: string;
   session_version: number;
+  access_revoked_at: Date | null;
 }
 
 /**
@@ -35,7 +36,7 @@ interface UserRow {
  */
 export async function ensureUser(
   discogsUsername: string,
-): Promise<{ userId: string; sessionVersion: number }> {
+): Promise<{ userId: string; sessionVersion: number; revoked: boolean }> {
   const key = discogsUsername.toLowerCase();
 
   const row = await queryOne<UserRow>(
@@ -44,12 +45,16 @@ export async function ensureUser(
      ON CONFLICT (username_key)
        DO UPDATE SET last_seen_at = now(),
                      username_display = EXCLUDED.username_display
-       RETURNING id, username_display, session_version`,
+       RETURNING id, username_display, session_version, access_revoked_at`,
     [key, discogsUsername],
   );
 
   if (!row) throw new Error("failed to upsert user");
-  return { userId: row.id, sessionVersion: row.session_version };
+  return {
+    userId: row.id,
+    sessionVersion: row.session_version,
+    revoked: row.access_revoked_at !== null,
+  };
 }
 
 /**
@@ -63,7 +68,11 @@ export async function resolveSession(
   discogsUsername: string,
   sessionVersion: number,
 ): Promise<string | null> {
-  const { userId, sessionVersion: current } = await ensureUser(discogsUsername);
+  const { userId, sessionVersion: current, revoked } = await ensureUser(discogsUsername);
+  // Removal bumps the version too, so a removed member's cookies already fail
+  // the comparison. Checking the flag as well means that stays true even if
+  // some later change forgets to bump.
+  if (revoked) return null;
   return sessionVersion === current ? userId : null;
 }
 
@@ -88,6 +97,253 @@ export async function revokeAllSessions(userId: string): Promise<number> {
   );
   if (!row) throw new Error("no such user");
   return row.session_version;
+}
+
+/* ------------------------------------------------------------------ */
+/* Invites and members                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Look a Discogs account up without creating it.
+ *
+ * `ensureUser` upserts, which is right for someone already signed in and
+ * wrong at the door: under invite-only, merely *asking* whether someone is a
+ * member must not make them one. The callback uses this first and only calls
+ * `ensureUser` once `admit` has said yes.
+ */
+export async function findMember(
+  discogsUsername: string,
+): Promise<{ userId: string; revoked: boolean } | null> {
+  const row = await queryOne<{ id: string; access_revoked_at: Date | null }>(
+    `SELECT id, access_revoked_at FROM users WHERE username_key = $1`,
+    [discogsUsername.toLowerCase()],
+  );
+  return row ? { userId: row.id, revoked: row.access_revoked_at !== null } : null;
+}
+
+/** Unused, unexpired, unrevoked codes this admin holds right now. */
+export async function countLiveInvites(adminId: string): Promise<number> {
+  const row = await queryOne<{ n: string }>(
+    `SELECT count(*)::text AS n
+       FROM invite_codes
+      WHERE created_by = $1
+        AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now()`,
+    [adminId],
+  );
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * Store a new code (as its hash) that lives `hours` from now.
+ *
+ * Codes that died more than 30 days ago are swept out on the way, so the
+ * table stays small without a cron job. Lifetime is bounded again by the
+ * table's CHECK, so a bug upstream cannot mint a week-long code.
+ */
+export async function createInvite(
+  adminId: string,
+  codeHash: string,
+  hours: number,
+): Promise<{ id: string; expiresAt: number }> {
+  await query(
+    `DELETE FROM invite_codes
+      WHERE expires_at < now() - interval '30 days'`,
+  );
+  const row = await queryOne<{ id: string; expires_at: Date }>(
+    `INSERT INTO invite_codes (code_hash, created_by, expires_at)
+          VALUES ($1, $2, now() + make_interval(hours => $3))
+       RETURNING id, expires_at`,
+    [codeHash, adminId, hours],
+  );
+  if (!row) throw new Error("failed to create invite");
+  return { id: row.id, expiresAt: row.expires_at.getTime() };
+}
+
+/** Whether a code could be spent right now. Used to fail fast at the door. */
+export async function inviteUsable(codeHash: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `SELECT id FROM invite_codes
+      WHERE code_hash = $1
+        AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now()`,
+    [codeHash],
+  );
+  return row !== null;
+}
+
+/**
+ * Spend a code and let this Discogs account in, atomically.
+ *
+ * The first UPDATE is the single-use guarantee. It only matches a code that
+ * is unused, unrevoked and unexpired *at the moment it runs*, and it takes the
+ * row lock while doing it. A second redemption of the same code — the same
+ * person double-clicking, or a friend-of-a-friend racing them — blocks on that
+ * lock, then re-checks the WHERE clause against the committed row, finds
+ * `used_at` set, and matches nothing. No code path reads "is it used?" and
+ * writes "now it is" as two separate steps.
+ *
+ * Everything else — creating the member, recording who invited them,
+ * lifting a previous removal — happens in the same transaction, so a failure
+ * part way leaves the code unspent.
+ *
+ * Returns null if the code could not be spent, for any reason: the caller
+ * does not get to learn *why*, and neither does the person at the door.
+ */
+export async function redeemInvite(
+  codeHash: string,
+  discogsUsername: string,
+): Promise<{ userId: string; sessionVersion: number } | null> {
+  return tx(async (client) => {
+    const spent = await client.query<{ id: string; created_by: string | null }>(
+      `UPDATE invite_codes
+          SET used_at = now()
+        WHERE code_hash = $1
+          AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+        RETURNING id, created_by`,
+      [codeHash],
+    );
+    const invite = spent.rows[0];
+    if (!invite) return null;
+
+    const user = await client.query<{ id: string; session_version: number }>(
+      `INSERT INTO users (username_key, username_display, invited_by)
+            VALUES ($1, $2, $3)
+       ON CONFLICT (username_key)
+         DO UPDATE SET last_seen_at = now(),
+                       username_display = EXCLUDED.username_display,
+                       access_revoked_at = NULL,
+                       invited_by = COALESCE(users.invited_by, EXCLUDED.invited_by)
+         RETURNING id, session_version`,
+      [discogsUsername.toLowerCase(), discogsUsername, invite.created_by],
+    );
+    const member = user.rows[0];
+    if (!member) throw new Error("failed to create member");
+
+    await client.query(`UPDATE invite_codes SET used_by = $2 WHERE id = $1`, [
+      invite.id,
+      member.id,
+    ]);
+
+    return { userId: member.id, sessionVersion: member.session_version };
+  });
+}
+
+export interface InviteRow {
+  id: string;
+  createdAt: number;
+  expiresAt: number;
+  usedAt: number | null;
+  usedBy: string | null;
+  revokedAt: number | null;
+}
+
+/** This admin's codes, newest first. Hashes never leave the database. */
+export async function listInvites(adminId: string): Promise<InviteRow[]> {
+  const rows = await query<{
+    id: string;
+    created_at: Date;
+    expires_at: Date;
+    used_at: Date | null;
+    used_by: string | null;
+    revoked_at: Date | null;
+  }>(
+    `SELECT i.id, i.created_at, i.expires_at, i.used_at, i.revoked_at,
+            u.username_display AS used_by
+       FROM invite_codes i
+       LEFT JOIN users u ON u.id = i.used_by
+      WHERE i.created_by = $1
+      ORDER BY i.created_at DESC
+      LIMIT 50`,
+    [adminId],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    createdAt: r.created_at.getTime(),
+    expiresAt: r.expires_at.getTime(),
+    usedAt: r.used_at?.getTime() ?? null,
+    usedBy: r.used_by,
+    revokedAt: r.revoked_at?.getTime() ?? null,
+  }));
+}
+
+/**
+ * Kill an unspent code. Scoped to the admin who made it, like every other
+ * write in this file is scoped to its owner. A used code cannot be revoked —
+ * it has already done its job; remove the member instead.
+ */
+export async function revokeInvite(adminId: string, inviteId: string): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `UPDATE invite_codes
+        SET revoked_at = now()
+      WHERE id = $1 AND created_by = $2
+        AND used_at IS NULL AND revoked_at IS NULL
+      RETURNING id`,
+    [inviteId, adminId],
+  );
+  return row !== null;
+}
+
+export interface MemberRow {
+  id: string;
+  username: string;
+  joinedAt: number;
+  lastSeenAt: number;
+  invitedBy: string | null;
+  removedAt: number | null;
+}
+
+/** Everyone with an account, most recently active first. Admin-only route. */
+export async function listMembers(): Promise<MemberRow[]> {
+  const rows = await query<{
+    id: string;
+    username_display: string;
+    created_at: Date;
+    last_seen_at: Date;
+    invited_by: string | null;
+    access_revoked_at: Date | null;
+  }>(
+    `SELECT u.id, u.username_display, u.created_at, u.last_seen_at,
+            u.access_revoked_at, inv.username_display AS invited_by
+       FROM users u
+       LEFT JOIN users inv ON inv.id = u.invited_by
+      ORDER BY u.last_seen_at DESC
+      LIMIT 200`,
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    username: r.username_display,
+    joinedAt: r.created_at.getTime(),
+    lastSeenAt: r.last_seen_at.getTime(),
+    invitedBy: r.invited_by,
+    removedAt: r.access_revoked_at?.getTime() ?? null,
+  }));
+}
+
+/**
+ * Take someone's access away, effective on their next request.
+ *
+ * Two things in one statement: the flag stops them signing back in, and the
+ * version bump kills every cookie they hold (the same lever as "sign out
+ * everywhere"). Their playlists are left alone — this is a door, not a
+ * deletion — so a fresh code restores them exactly as they were.
+ *
+ * Admins are excluded by name in the WHERE clause, so no request can remove
+ * the people who hold the keys, including an admin removing themselves.
+ */
+export async function removeMember(
+  userId: string,
+  adminKeys: readonly string[],
+): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `UPDATE users
+        SET access_revoked_at = now(),
+            session_version = session_version + 1
+      WHERE id = $1
+        AND access_revoked_at IS NULL
+        AND NOT (username_key = ANY($2::text[]))
+      RETURNING id`,
+    [userId, adminKeys],
+  );
+  return row !== null;
 }
 
 /* ------------------------------------------------------------------ */

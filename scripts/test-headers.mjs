@@ -17,6 +17,7 @@
  */
 import assert from "node:assert/strict";
 import { securityHeaders } from "../next.config.ts";
+import { buildCsp } from "../src/lib/csp.ts";
 
 let ran = 0;
 let failed = 0;
@@ -201,6 +202,18 @@ check("CSP is not set statically — it carries a per-request nonce", () => {
     undefined,
     "CSP must come from proxy.ts so every response gets a fresh nonce",
   );
+});
+
+check("forms may go to us, and on to Discogs' OAuth page — nowhere else", () => {
+  // The invite form POSTs to /api/auth/login, which answers with a 303 to
+  // www.discogs.com. Browsers check form-action against the redirect target
+  // too, so without Discogs here the invite sign-in is blocked with nothing
+  // but a console line to show for it.
+  const directive = buildCsp("n")
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith("form-action "));
+  assert.equal(directive, "form-action 'self' https://www.discogs.com");
 });
 
 check("COEP is absent, deliberately", () => {

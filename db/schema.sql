@@ -288,3 +288,50 @@ END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS playlists_share_token_key
   ON playlists (share_token)
   WHERE share_token IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
+-- Invite-only sign-up
+--
+-- Turned on by INVITE_ONLY=true. Anyone who already has a row in `users` is a
+-- member and keeps their access; someone Gemtopia has never seen needs a
+-- one-time code from an admin (ADMIN_USERNAMES).
+--
+--   * Codes are stored as an HMAC, never as themselves (invite-code.ts). A copy
+--     of this table cannot be turned back into a working code without the
+--     server secret.
+--   * Single use is enforced here, not in application code: redemption is one
+--     UPDATE … WHERE used_at IS NULL AND revoked_at IS NULL AND expires_at >
+--     now(). Two people racing the same code both run it; the row lock makes
+--     the second one re-check, find it used, and match nothing.
+--   * A code lives an hour or a day (1 ≤ lifetime ≤ 24 h, checked below), so a
+--     code forwarded on dies on its own.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS invite_codes (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code_hash   TEXT NOT NULL UNIQUE CHECK (code_hash ~ '^[0-9a-f]{64}$'),
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ,
+  used_by     UUID REFERENCES users(id) ON DELETE SET NULL,
+  revoked_at  TIMESTAMPTZ,
+  CONSTRAINT invite_codes_lifetime
+    CHECK (expires_at > created_at AND expires_at <= created_at + interval '24 hours'),
+  CONSTRAINT invite_codes_used_consistent
+    CHECK (used_by IS NULL OR used_at IS NOT NULL),
+  CONSTRAINT invite_codes_used_or_revoked
+    CHECK (used_at IS NULL OR revoked_at IS NULL)
+);
+
+CREATE INDEX IF NOT EXISTS invite_codes_created_by_idx
+  ON invite_codes (created_by, created_at DESC);
+
+-- Who let this member in (NULL for everyone who predates invites), and
+-- whether an admin has since removed them. Removal also bumps
+-- session_version, so it takes effect on the member's very next request.
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS invited_by UUID REFERENCES users(id) ON DELETE SET NULL;
+
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS access_revoked_at TIMESTAMPTZ;

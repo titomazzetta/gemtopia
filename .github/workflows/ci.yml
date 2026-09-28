@@ -22,6 +22,10 @@ env:
   APP_ORIGIN: http://localhost:3000
   DISCOGS_CONTACT: +https://example.invalid
   DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/gemtopia_ci
+  # Invite-only on, with one admin the API tests can act as. Proves the
+  # switch boots and lets test:api exercise the admin surface.
+  INVITE_ONLY: "true"
+  ADMIN_USERNAMES: ci_admin
 
 jobs:
   verify:
@@ -116,6 +120,15 @@ jobs:
 
       - name: Mixability tests
         run: npm run test:mixing
+
+      - name: Client and feature unit tests
+        # These suites existed but CI never ran them. One step, fail on the
+        # first broken suite.
+        run: |
+          for suite in mark bpm-range beat-meter record views dig-feed dig-links \
+                       sync-queue clip-drag pull-list search-play invites; do
+            npm run "test:$suite"
+          done
 
       - name: Apply schema
         run: npm run db:migrate

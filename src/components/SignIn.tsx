@@ -9,7 +9,83 @@ const FEATURES = [
   ["Both lists, both ways", "Shuffle the wantlist like a crate. Search Discogs for a record that just arrived and put it in your collection. Adding is the only thing this app writes."],
 ];
 
-export function SignIn({ error }: { error: string | null }) {
+/** Who to ask for a code. The app is one person's for now, and says so. */
+const CONTACT = "titomazzetta";
+const CONTACT_LINKS = [
+  ["Discogs", `https://www.discogs.com/user/${CONTACT}`],
+  ["GitHub", `https://github.com/${CONTACT}`],
+] as const;
+
+const INVITE_ERRORS = new Set(["not_invited", "invite_invalid", "removed"]);
+
+function AskForCode() {
+  return (
+    <>
+      DM <span className="font-medium text-neutral-100">{CONTACT}</span> on{" "}
+      {CONTACT_LINKS.map(([name, href], i) => (
+        <span key={name}>
+          {i > 0 && " or "}
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-accent underline decoration-dotted underline-offset-2"
+          >
+            {name}
+          </a>
+        </span>
+      ))}
+    </>
+  );
+}
+
+/** The invite outcomes deserve more than a red line: they say what to do next. */
+function InviteNotice({ code }: { code: string }) {
+  if (code === "not_invited") {
+    return (
+      <div role="alert" className="mb-6 rounded-md border border-accent/30 bg-accent/5 px-4 py-3 text-sm text-neutral-300">
+        <p className="font-medium text-neutral-100">Ooh — you&rsquo;re not on the list yet.</p>
+        <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+          Gemtopia is invite-only while it&rsquo;s small. <AskForCode /> for a code, then
+          enter it below. Nothing from your Discogs account was kept.
+        </p>
+      </div>
+    );
+  }
+  if (code === "invite_invalid") {
+    return (
+      <div role="alert" className="mb-6 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+        <p className="font-medium">That invite code didn&rsquo;t work.</p>
+        <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+          Each code works once, for an hour or a day. Check it for typos — or <AskForCode /> for a
+          fresh one.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div role="alert" className="mb-6 rounded-md border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+      <p className="font-medium">This account&rsquo;s access to Gemtopia was removed.</p>
+      <p className="mt-1 text-xs leading-relaxed text-neutral-400">
+        If that&rsquo;s a mistake, <AskForCode />.
+      </p>
+    </div>
+  );
+}
+
+export function SignIn({
+  error,
+  errorCode = null,
+  inviteOnly = false,
+}: {
+  error: string | null;
+  errorCode?: string | null;
+  inviteOnly?: boolean;
+}) {
+  const inviteError = errorCode !== null && INVITE_ERRORS.has(errorCode);
+  const showCodeField = inviteOnly || inviteError;
+  const openCodeField = errorCode === "not_invited" || errorCode === "invite_invalid";
+
   return (
     <main className="mx-auto flex min-h-full max-w-2xl flex-col justify-center px-6 py-16">
       <div className="mb-8 flex items-center gap-3">
@@ -27,7 +103,9 @@ export function SignIn({ error }: { error: string | null }) {
         </div>
       </div>
 
-      {error && (
+      {inviteError && errorCode ? (
+        <InviteNotice code={errorCode} />
+      ) : error && (
         <p
           role="alert"
           className="mb-6 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300"
@@ -42,6 +120,46 @@ export function SignIn({ error }: { error: string | null }) {
       >
         Sign in with Discogs
       </a>
+
+      {showCodeField && (
+        <details open={openCodeField} className="group -mt-5 mb-8">
+          <summary className="cursor-pointer list-none text-center text-xs text-neutral-500 hover:text-neutral-300">
+            {inviteOnly ? "Invite-only for now. " : ""}
+            <span className="underline decoration-dotted underline-offset-2">Have an invite code?</span>
+          </summary>
+          {/*
+            A real form POST, not a link: the code travels in the request body,
+            so it never lands in the address bar, history, or a server log.
+            Works with JavaScript off.
+          */}
+          <form method="post" action="/api/auth/login" className="mt-3 flex gap-2">
+            <label htmlFor="invite-code" className="sr-only">
+              Invite code
+            </label>
+            <input
+              id="invite-code"
+              name="code"
+              required
+              maxLength={32}
+              autoComplete="off"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
+              placeholder="XXXX-XXXX"
+              className="h-11 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-3 text-center font-mono text-base uppercase tracking-[0.2em] text-neutral-100 placeholder:text-neutral-700 focus:border-accent/60 focus:outline-none"
+            />
+            <button
+              type="submit"
+              className="h-11 shrink-0 rounded-md border border-accent/60 px-4 text-sm font-semibold text-accent hover:bg-accent/10"
+            >
+              Use code
+            </button>
+          </form>
+          <p className="mt-2 text-center text-[11px] text-neutral-600">
+            You&rsquo;ll sign in with Discogs next. Already a member? You don&rsquo;t need one.
+          </p>
+        </details>
+      )}
 
       <dl className="grid gap-5 sm:grid-cols-2">
         {FEATURES.map(([title, body]) => (

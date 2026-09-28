@@ -637,6 +637,32 @@ It costs no extra database round trip: resolving your session into a user id
 was already a query, and the version comes back in the same row. Full write-up
 in [THREAT_MODEL.md §6](./THREAT_MODEL.md).
 
+### Invite-only sign-up
+
+Gemtopia is small on purpose. With `INVITE_ONLY=true`, a Discogs account it has
+never seen gets *"Ooh — you're not on the list yet"* and a way to ask for a code;
+everyone who already signed up carries on as before.
+
+- **Codes, not links.** An admin (named in `ADMIN_USERNAMES`) taps **Invite
+  someone** in the account menu and gets a code like `K7QX-M3RD` that works
+  **once**, for **an hour or a day**. Forward it on and it is either already
+  spent or about to die. Copy it alone, or as a ready-to-send message.
+- **Stored as a hash.** The server keeps an HMAC of each code, keyed from its own
+  secret, and shows the code exactly once. A copy of the database lets nobody in.
+- **Spent atomically.** Redeeming is a single `UPDATE … WHERE unused AND
+  unexpired AND unrevoked`; two people racing one code cannot both win.
+- **Checked twice.** At the door (so a typo fails in a second, not after a trip
+  to Discogs, behind a 10-per-15-minutes limit), and again when Discogs sends
+  the person back — the check that counts. Someone refused gets no account and
+  no cookie; the Discogs token just granted is discarded, never stored.
+- **Never in a URL.** The code field is a real form POST, so a code never lands
+  in the address bar, history, a `Referer` or a request log.
+- **Removable.** The same panel lists members. **Remove** signs someone out
+  everywhere at once and keeps them out until they get a fresh code; their
+  playlists are kept. Admins cannot be removed.
+
+Details and the reasoning in [THREAT_MODEL.md §6](./THREAT_MODEL.md#invite-only-sign-up).
+
 ---
 
 ## Deploy it
@@ -878,8 +904,8 @@ src/
 
 ```bash
 npm run test           # everything below
-npm run test:env        # 36 cases, no server needed
-npm run test:headers    # 23
+npm run test:env        # 44 cases, no server needed
+npm run test:headers    # 24
 npm run test:playables  # 34
 npm run test:sorting    # 24
 npm run test:share      # 28
@@ -906,8 +932,9 @@ npm run test:dig-links  # 8
 npm run test:sync-queue # 7
 npm run test:clip-drag  # 5
 npm run test:pull-list  # 6
-npm run test:search-play # 4  — 537 offline in all
-npm run test:api        # 87 checks, needs a running server + Postgres
+npm run test:search-play # 4
+npm run test:invites    # 28 — 574 offline in all
+npm run test:api        # 105 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci
@@ -939,6 +966,15 @@ an error. Writing them immediately found a second bug: `z.string().url()` accept
 `localhost:3000`, because `new URL()` reads it as scheme `localhost:` with path
 `3000` — which would have validated and then built a callback URL Discogs could
 never match.
+
+**`test-invites.mjs`** pins the invite code itself — alphabet, shape, that the
+bytes which would bias the draw really are thrown away, that what people type
+(lower case, spaces, a missing dash) normalises and anything else is refused —
+and walks `admit`, the sign-up policy, through every combination of member,
+removed member, admin, invite-only and code. The database half (single use,
+revocation, removal, the 404 wall around the admin routes) is in `test-api.mjs`,
+because only Postgres can prove a row lock holds. CI runs every suite; until
+this change a dozen of the newer ones existed but were never wired into it.
 
 **`test-tempo.mjs`** synthesises onset envelopes at known tempi — with jitter,
 noise, off-beat hats and backbeats — and asserts the estimator recovers them. It
