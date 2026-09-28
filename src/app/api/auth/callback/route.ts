@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { accessToken, getIdentity } from "@/lib/discogs";
 import { consumeHandshake, createSession } from "@/lib/session";
-import { ensureUser } from "@/lib/repo";
+import { ensureUser, findMember, redeemInvite } from "@/lib/repo";
+import { admit } from "@/lib/invite-code";
+import { INVITE_ONLY, isAdmin } from "@/lib/invites";
 import { safeEqual } from "@/lib/crypto";
 import { env } from "@/lib/env";
 import { callerId, rateLimit } from "@/lib/ratelimit";
@@ -69,10 +71,36 @@ export async function GET(request: NextRequest) {
       tokenSecret: granted.tokenSecret,
     });
 
+    // The door. Discogs has told us who this is; now decide whether they are
+    // allowed in, without creating anything until the answer is yes. The
+    // policy itself is `admit`, which is pure and tested branch by branch.
+    const code = handshake.data.ih;
+    const admission = admit({
+      member: await findMember(username),
+      isAdmin: isAdmin(username),
+      inviteOnly: INVITE_ONLY,
+      hasCode: Boolean(code),
+    });
+
+    // Refused: no user row, no cookie. The Discogs token we were just granted
+    // is dropped on the floor — it was never written anywhere.
+    if (admission === "not_invited") return back("not_invited");
+    if (admission === "removed") return back("removed");
+
     // Seal the user's *current* session version into the cookie. Signing in
     // after a "sign out everywhere" therefore works immediately, while every
     // cookie issued before it stays dead.
-    const { sessionVersion } = await ensureUser(username);
+    let sessionVersion: number;
+    if (admission === "redeem" && code) {
+      // Checked at the door already, but it can have been used, revoked or
+      // run out in the minutes spent on Discogs. This is the check that
+      // counts: one atomic statement, see repo.redeemInvite.
+      const redeemed = await redeemInvite(code, username);
+      if (!redeemed) return back("invite_invalid");
+      sessionVersion = redeemed.sessionVersion;
+    } else {
+      ({ sessionVersion } = await ensureUser(username));
+    }
 
     await createSession({
       token: granted.token,

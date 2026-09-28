@@ -214,6 +214,48 @@ check("NODE_ENV rejects nonsense", () => {
   throws({ ...base(), NODE_ENV: "staging" }, /NODE_ENV/);
 });
 
+/* -- invite-only ---------------------------------------------------------- */
+
+check("invite-only is off by default, with no admins", () => {
+  const env = parseEnv(base());
+  assert.equal(env.INVITE_ONLY, false);
+  assert.deepEqual(env.ADMIN_USERNAMES, []);
+});
+
+check('INVITE_ONLY="false" means off (not the truthy string it is)', () => {
+  assert.equal(parseEnv({ ...base(), INVITE_ONLY: "false" }).INVITE_ONLY, false);
+});
+
+check('INVITE_ONLY="true" with an admin turns it on', () => {
+  const env = parseEnv({ ...base(), INVITE_ONLY: "true", ADMIN_USERNAMES: "titomazzetta" });
+  assert.equal(env.INVITE_ONLY, true);
+  assert.deepEqual(env.ADMIN_USERNAMES, ["titomazzetta"]);
+});
+
+check("INVITE_ONLY rejects anything but true or false", () => {
+  for (const value of ["1", "yes", "TRUE", "on"]) {
+    throws({ ...base(), INVITE_ONLY: value, ADMIN_USERNAMES: "a" }, /INVITE_ONLY/);
+  }
+});
+
+check("invite-only with no admins refuses to boot", () => {
+  throws({ ...base(), INVITE_ONLY: "true" }, /nobody could make an invite code/);
+});
+
+check("a blank ADMIN_USERNAMES counts as none", () => {
+  throws({ ...base(), INVITE_ONLY: "true", ADMIN_USERNAMES: "  " }, /ADMIN_USERNAMES/);
+});
+
+check("admin names are trimmed, lowercased, and empties dropped", () => {
+  const env = parseEnv({ ...base(), ADMIN_USERNAMES: " TitoMazzetta , ,dj.friend_2 " });
+  assert.deepEqual(env.ADMIN_USERNAMES, ["titomazzetta", "dj.friend_2"]);
+});
+
+check("an admin name that is not a Discogs username is rejected", () => {
+  throws({ ...base(), ADMIN_USERNAMES: "tito mazzetta" }, /ADMIN_USERNAMES/);
+  throws({ ...base(), ADMIN_USERNAMES: "a;DROP TABLE users" }, /ADMIN_USERNAMES/);
+});
+
 /* -- withoutBlanks itself ------------------------------------------------ */
 
 check("withoutBlanks drops blank and undefined, keeps everything else", () => {

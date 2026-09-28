@@ -166,6 +166,59 @@ export const authApi = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Invites (admin only — everyone else gets a 404)                     */
+/* ------------------------------------------------------------------ */
+
+export type InviteStatus = "live" | "used" | "expired" | "revoked";
+
+export interface InviteView {
+  id: string;
+  createdAt: number;
+  expiresAt: number;
+  usedAt: number | null;
+  usedBy: string | null;
+  revokedAt: number | null;
+  status: InviteStatus;
+}
+
+export interface MemberView {
+  id: string;
+  username: string;
+  joinedAt: number;
+  lastSeenAt: number;
+  invitedBy: string | null;
+  removedAt: number | null;
+}
+
+export interface AdminOverview {
+  inviteOnly: boolean;
+  maxLive: number;
+  invites: InviteView[];
+  members: MemberView[];
+}
+
+export const adminApi = {
+  overview: () => request<AdminOverview>("/api/admin/invites"),
+
+  /** The only response that ever carries a code in plain text. */
+  create: (hours: 1 | 24) =>
+    request<{ code: string; hours: number; id: string; expiresAt: number }>(
+      "/api/admin/invites",
+      { method: "POST", body: JSON.stringify({ hours }) },
+    ),
+
+  revoke: (id: string) =>
+    request<{ ok: true }>(`/api/admin/invites/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
+  removeMember: (id: string) =>
+    request<{ ok: true }>(`/api/admin/members/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+};
+
+/* ------------------------------------------------------------------ */
 /* Preferences                                                         */
 /* ------------------------------------------------------------------ */
 

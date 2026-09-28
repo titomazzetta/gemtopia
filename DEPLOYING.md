@@ -247,6 +247,8 @@ again — don't reuse your local one), and the same Neon string.
 | `ANTHROPIC_API_KEY` | optional | Enables the written playlist analysis |
 | `ANTHROPIC_MODEL` | optional | Defaults to `claude-sonnet-4-5` |
 | `LLM_DAILY_OUTPUT_TOKEN_BUDGET` | optional | Defaults to 40,000 per user per day |
+| `INVITE_ONLY` | optional | `true` or `false` (default). See "Turning on invite-only" below |
+| `ADMIN_USERNAMES` | with `INVITE_ONLY` | Comma-separated Discogs usernames who can make invite codes |
 
 Then **Deployments → ⋯ → Redeploy**. This one should go green.
 
@@ -381,3 +383,37 @@ with everything else that is known and deliberately unmitigated.
 **See also:** [README.md](./README.md) for what the app does and how it's built ·
 [THREAT_MODEL.md](./THREAT_MODEL.md) for the threat model ·
 [SECURITY.md](./SECURITY.md) to report a vulnerability.
+
+---
+
+## Turning on invite-only
+
+Order matters: the new code expects the new columns.
+
+1. **Migrate first.** From your machine, with `.env.local` pointing at the Neon
+   database production uses:
+
+   ```bash
+   npm run db:migrate
+   ```
+
+   It is additive and idempotent — one new table (`invite_codes`) and two
+   nullable columns on `users` — so the version already running is unaffected.
+
+2. **Set the variables** in Vercel → Settings → Environment Variables
+   (Production, and Preview if previews share the database):
+
+   | Variable | Value |
+   |---|---|
+   | `INVITE_ONLY` | `true` |
+   | `ADMIN_USERNAMES` | your Discogs username |
+
+   The app refuses to boot with `INVITE_ONLY=true` and no admin, rather than
+   locking everyone new out with nobody able to make a code.
+
+3. **Merge** (or redeploy). Everyone who has ever signed in keeps their access.
+   You'll see **Invite someone** in the account menu.
+
+To open sign-up again, set `INVITE_ONLY=false` and redeploy. Codes and removals
+stay in the database; a removed member stays removed either way.
+

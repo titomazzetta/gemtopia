@@ -161,6 +161,13 @@ const handshakeSchema = z.object({
   rt: z.string().min(1), // oauth_token from step 1
   rs: z.string().min(1), // oauth_token_secret from step 1
   iat: z.number().int().positive(),
+  /**
+   * The invite code this sign-in carries, if any — as its hash, never the
+   * code. Riding inside the sealed handshake means the code cannot be
+   * swapped between leaving for Discogs and coming back, and it never has to
+   * appear in the callback URL.
+   */
+  ih: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
 
 export type Handshake = z.infer<typeof handshakeSchema>;
@@ -176,11 +183,13 @@ export type Handshake = z.infer<typeof handshakeSchema>;
 export async function setHandshake(data: {
   requestToken: string;
   requestSecret: string;
+  inviteHash?: string;
 }): Promise<void> {
   const payload: Handshake = {
     rt: data.requestToken,
     rs: data.requestSecret,
     iat: Math.floor(Date.now() / 1000),
+    ...(data.inviteHash ? { ih: data.inviteHash } : {}),
   };
   const jar = await cookies();
   jar.set(HANDSHAKE_COOKIE, seal(payload), {

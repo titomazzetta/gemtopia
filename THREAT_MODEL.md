@@ -227,6 +227,64 @@ too, that every route honours it rather than just the one that was checked
 first, that signing back in works immediately, that one account's revoke does
 not touch another's, and that revocation kills sessions without touching data.
 
+### Invite-only sign-up
+
+`INVITE_ONLY=true` closes open sign-up. It is a door policy, not a new identity
+system: identity is still exactly what Discogs asserts in the OAuth callback.
+
+**Who gets in** is one pure function, `admit` in `src/lib/invite-code.ts`, tested
+branch by branch: admins always; existing members always (a code they carry is
+left unspent for whoever it was meant for); a removed member only by spending a
+fresh code; someone new freely while invite-only is off, and only with a code
+while it is on. The callback looks the account up *without* creating it
+(`findMember`), asks `admit`, and only then writes anything. A refusal creates
+no row and no cookie, and the access token Discogs just granted is dropped.
+
+**The code.** 8 characters from a 31-letter alphabet with look-alikes removed,
+drawn with rejection sampling so no letter is favoured: 31⁸ ≈ 8.5 × 10¹¹, about
+39.6 bits. That would be thin for a password; it is enough for a credential that
+is single-use, lives at most 24 hours (enforced by a table CHECK as well as the
+API), is testable only through a 10-per-15-minutes limit per client, and of
+which one admin may hold at most 20 live at once.
+
+**Storage.** Only `HMAC-SHA256(k, code)` is stored, where `k` is derived from
+`SESSION_SECRET` under a fixed label so the cookie key is never reused for a
+second purpose. A database dump yields no usable code. Rotating `SESSION_SECRET`
+voids every outstanding code, which is the right behaviour for the emergency
+lever and costs nothing since none outlives a day. The plaintext exists in one
+HTTP response, marked `no-store`, and in the admin's clipboard.
+
+**Single use** is enforced by Postgres, not by application logic: redemption is
+one `UPDATE … SET used_at = now() WHERE code_hash = $1 AND used_at IS NULL AND
+revoked_at IS NULL AND expires_at > now() RETURNING …`, in the same transaction
+that creates the member. A concurrent redemption blocks on the row lock,
+re-evaluates the predicate against the committed row, and matches nothing.
+There is no read-then-write window.
+
+**The code's path.** The invite form POSTs the code in the body (never a URL). It
+is shape-checked, hashed, and checked for usability before Discogs is contacted,
+then sealed — as its hash — inside the AES-GCM handshake cookie that already
+binds the OAuth round trip, so it cannot be swapped on the way back. The POST
+has no CSRF token (there is no session yet); Origin is checked instead, and the
+worst a forged submission could do is start a sign-in with the attacker's own
+code. CSP `form-action` names `https://www.discogs.com` alongside `'self'`,
+because browsers apply it to the redirect a form submission follows.
+
+**The admin surface** (`/api/admin/*`) runs `requireUser` first — so a revoked or
+absent session gets the usual 401 — then answers anyone not in
+`ADMIN_USERNAMES` with a plain 404, not a 403. Writes carry Origin and CSRF
+checks and their own rate limits. Revoking is scoped to the admin who made the
+code. **Remove member** sets `access_revoked_at` and bumps `session_version` in
+one statement, so it takes effect on the member's next request anywhere, and
+`resolveSession` refuses a removed account even with a correctly versioned
+cookie. Admins are excluded in the `WHERE` clause and cannot be removed.
+
+**What it does not do.** It does not stop a member showing someone the app on
+their own device — nothing can. The rate limiter is per instance (see §12), so
+a distributed guesser gets more than 10 tries per window; the code space and the
+24-hour ceiling are what make that immaterial. `ADMIN_USERNAMES` trusts the
+Discogs username, which is as strong as Discogs' own account security.
+
 ## 7. The LLM boundary
 
 The optional Claude pass is the one place where model output influences what a

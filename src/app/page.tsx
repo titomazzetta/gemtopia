@@ -3,6 +3,7 @@ import { getSession, CSRF_COOKIE } from "@/lib/session";
 import { resolveSession } from "@/lib/repo";
 import { SignIn } from "@/components/SignIn";
 import { CrateApp } from "@/components/CrateApp";
+import { INVITE_ONLY, isAdmin } from "@/lib/invites";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,11 @@ const AUTH_ERRORS: Record<string, string> = {
   invalid: "Discogs sent back something we could not read.",
   failed: "Discogs sign-in failed. Please try again.",
   rate_limited: "Too many sign-in attempts. Wait a minute and retry.",
+  // The three invite outcomes get their own words and links in SignIn; these
+  // are the plain-text fallbacks and what a screen reader hears first.
+  not_invited: "Ooh — you're not on the list yet.",
+  invite_invalid: "That invite code didn't work.",
+  removed: "This account's access to Gemtopia was removed.",
 };
 
 export default async function Home({
@@ -42,7 +48,7 @@ export default async function Home({
       : session && !live
         ? "You signed out of every device. Sign in again to carry on."
         : null;
-    return <SignIn error={message} />;
+    return <SignIn error={message} errorCode={code} inviteOnly={INVITE_ONLY} />;
   }
 
   const jar = await cookies();
@@ -50,6 +56,7 @@ export default async function Home({
     <CrateApp
       username={session.u}
       csrfToken={jar.get(CSRF_COOKIE)?.value ?? ""}
+      canInvite={isAdmin(session.u)}
     />
   );
 }

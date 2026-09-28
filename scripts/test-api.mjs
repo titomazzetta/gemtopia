@@ -798,6 +798,9 @@ await check("every route rejects a revoked session, not just playlists", async (
     // check only that the cookie decrypted — not that it was still current.
     ["/api/discogs/collection", "GET", undefined],
     ["/api/discogs/releases?ids=1", "GET", undefined],
+    // The admin surface sits behind the same check before it asks who you are.
+    ["/api/admin/invites", "GET", undefined],
+    ["/api/admin/invites", "POST", { hours: 1 }],
   ];
   for (const [path, method, body] of routes) {
     const res = await dead.call(path, { method, body, cookie: dead.cookie });
@@ -1084,6 +1087,181 @@ await check("deleting needs CSRF", async () => {
   });
   assert.equal(res.status, 403);
 });
+
+console.log("\ninvite codes");
+
+/*
+ * The admin half needs the server to name an admin. CI sets
+ * ADMIN_USERNAMES=ci_admin; locally, set it for the dev server and here, or
+ * those checks are skipped (and say so) rather than failing for the wrong
+ * reason. Everything a stranger or a plain member can reach runs regardless.
+ */
+const adminName = (process.env.ADMIN_USERNAMES ?? "").split(",")[0]?.trim() || null;
+const admin = adminName ? actor(adminName) : null;
+
+/** The invite form, exactly as a browser sends it. */
+async function submitCode(code, { origin = BASE } = {}) {
+  const response = await fetch(`${BASE}/api/auth/login`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      ...(origin ? { origin } : {}),
+    },
+    body: new URLSearchParams({ code }).toString(),
+  });
+  return { status: response.status, location: response.headers.get("location") ?? "" };
+}
+
+await check("the admin routes are a 404 to a member, not a 403", async () => {
+  const list = await mallory.call("/api/admin/invites");
+  assert.equal(list.status, 404);
+  const make = await mallory.call("/api/admin/invites", { method: "POST", body: { hours: 1 } });
+  assert.equal(make.status, 404);
+  const revoke = await mallory.call(`/api/admin/invites/${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}`, {
+    method: "DELETE",
+  });
+  assert.equal(revoke.status, 404);
+  const remove = await mallory.call(`/api/admin/members/${"0".repeat(8)}-0000-4000-8000-${"0".repeat(12)}`, {
+    method: "DELETE",
+  });
+  assert.equal(remove.status, 404);
+});
+
+await check("the admin routes need a session at all", async () => {
+  const res = await mallory.call("/api/admin/invites", { cookie: "" });
+  assert.equal(res.status, 401);
+});
+
+await check("a code that cannot be a code is refused before Discogs is asked", async () => {
+  for (const code of ["nope", "ABCD-EFG0", "' OR 1=1 --", ""]) {
+    const res = await submitCode(code);
+    assert.equal(res.status, 303, code);
+    assert.match(res.location, /auth_error=invite_invalid/, code);
+  }
+});
+
+await check("a well-formed code nobody made is refused the same way", async () => {
+  const res = await submitCode("ABCD-EFGH");
+  assert.equal(res.status, 303);
+  assert.match(res.location, /auth_error=invite_invalid/);
+  assert.ok(!res.location.includes("discogs.com"), "an unknown code reached Discogs");
+});
+
+await check("the invite form refuses another site's origin", async () => {
+  const res = await submitCode("ABCD-EFGH", { origin: "https://evil.example" });
+  assert.equal(res.status, 303);
+  assert.match(res.location, /auth_error=invalid/);
+});
+
+if (!admin) {
+  console.log("  skip admin checks (set ADMIN_USERNAMES for the server and this run)");
+} else {
+  let made = null;
+
+  await check("an admin makes a code: XXXX-XXXX, one hour, never cached", async () => {
+    const res = await admin.call("/api/admin/invites", { method: "POST", body: { hours: 1 } });
+    assert.equal(res.status, 201);
+    assert.match(res.body.code, /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+    const hours = (res.body.expiresAt - Date.now()) / 3_600_000;
+    assert.ok(hours > 0.9 && hours <= 1.01, `lives ${hours} h`);
+    made = res.body;
+  });
+
+  await check("making a code needs CSRF", async () => {
+    const res = await admin.call("/api/admin/invites", {
+      method: "POST",
+      body: { hours: 1 },
+      csrfToken: "wrong",
+    });
+    assert.equal(res.status, 403);
+  });
+
+  await check("only an hour or a day", async () => {
+    for (const hours of [0, 2, 168, "1", -1, 1.5]) {
+      const res = await admin.call("/api/admin/invites", { method: "POST", body: { hours } });
+      assert.equal(res.status, 400, `hours=${JSON.stringify(hours)}`);
+    }
+    const extra = await admin.call("/api/admin/invites", {
+      method: "POST",
+      body: { hours: 1, forUser: "someone" },
+    });
+    assert.equal(extra.status, 400, "unknown fields are refused");
+  });
+
+  await check("the list shows status, never the code or its hash", async () => {
+    const res = await admin.call("/api/admin/invites");
+    assert.equal(res.status, 200);
+    const row = res.body.invites.find((i) => i.id === made?.id);
+    assert.ok(row, "the new code is listed");
+    assert.equal(row.status, "live");
+    assert.ok(!res.raw.includes(made.code), "the plaintext code came back");
+    assert.ok(!res.raw.includes(made.code.replace("-", "")), "the plaintext code came back");
+    assert.ok(!/[0-9a-f]{64}/.test(res.raw), "a hash came back");
+    assert.ok(Array.isArray(res.body.members));
+  });
+
+  await check("a live code passes the door (and is only spent after Discogs)", async () => {
+    // Discogs is unreachable from CI, so a good code gets as far as asking it
+    // for a request token and fails there — which is the proof it passed.
+    const res = await submitCode(made.code.toLowerCase());
+    assert.ok(
+      !/invite_invalid/.test(res.location),
+      `a live code was refused at the door: ${res.status} ${res.location}`,
+    );
+    const list = await admin.call("/api/admin/invites");
+    assert.equal(
+      list.body.invites.find((i) => i.id === made.id).status,
+      "live",
+      "checking a code at the door must not spend it",
+    );
+  });
+
+  await check("a revoked code is dead at the door", async () => {
+    const res = await admin.call(`/api/admin/invites/${made.id}`, { method: "DELETE" });
+    assert.equal(res.status, 200);
+    const again = await admin.call(`/api/admin/invites/${made.id}`, { method: "DELETE" });
+    assert.equal(again.status, 404, "revoking twice should find nothing");
+    const door = await submitCode(made.code);
+    assert.match(door.location, /auth_error=invite_invalid/);
+  });
+
+  await check("a member can be removed: signed out now, and stays out", async () => {
+    const leaver = actor(`leaver_${randomBytes(4).toString("hex")}`);
+    assert.equal((await leaver.call("/api/playlists")).status, 200);
+
+    const members = await admin.call("/api/admin/invites");
+    const row = members.body.members.find((m) => m.username === leaver.username);
+    assert.ok(row, "the member is listed");
+
+    const removed = await admin.call(`/api/admin/members/${row.id}`, { method: "DELETE" });
+    assert.equal(removed.status, 200);
+
+    const after = await leaver.call("/api/playlists");
+    assert.equal(after.status, 401);
+    assert.equal(after.body?.error?.code, "session_revoked");
+
+    // Even a cookie sealed with the new version is refused: the flag, not
+    // just the version, keeps them out.
+    const forged = actor(leaver.username, 2);
+    const again = await forged.call("/api/playlists", { cookie: forged.cookie });
+    assert.equal(again.status, 401);
+  });
+
+  await check("an admin cannot be removed, even by themselves", async () => {
+    const members = await admin.call("/api/admin/invites");
+    const me = members.body.members.find((m) => m.username === admin.username);
+    assert.ok(me);
+    const res = await admin.call(`/api/admin/members/${me.id}`, { method: "DELETE" });
+    assert.equal(res.status, 404);
+    assert.equal((await admin.call("/api/playlists")).status, 200);
+  });
+
+  await check("a malformed id is a 400, not a query", async () => {
+    const res = await admin.call("/api/admin/invites/1%20OR%201=1", { method: "DELETE" });
+    assert.equal(res.status, 400);
+  });
+}
 
 console.log(
   failures === 0

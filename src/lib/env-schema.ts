@@ -132,6 +132,45 @@ export const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
     .default("development"),
+
+  /**
+   * Invite-only sign-up. When on, a Discogs account Gemtopia has never seen
+   * needs a one-time invite code to get in; everyone who already has a row in
+   * `users` carries on as before. Off by default so the migration that adds
+   * the invite table can run before anything depends on it.
+   *
+   * Only the literal strings "true" and "false" are accepted. `z.coerce.boolean`
+   * would read "false" as true (it is a non-empty string), which is exactly the
+   * wrong way round for a security switch.
+   */
+  INVITE_ONLY: z
+    .enum(["true", "false"], {
+      errorMap: () => ({ message: 'INVITE_ONLY must be "true" or "false"' }),
+    })
+    .default("false")
+    .transform((v) => v === "true"),
+
+  /**
+   * Comma-separated Discogs usernames who can make invite codes and manage
+   * members. Admins are always let in. Case-insensitive, like Discogs itself.
+   */
+  ADMIN_USERNAMES: z
+    .string()
+    .default("")
+    .transform((v) =>
+      v
+        .split(",")
+        .map((name) => name.trim().toLowerCase())
+        .filter(Boolean),
+    )
+    .refine((names) => names.every((name) => /^[a-z0-9._-]{1,64}$/.test(name)), {
+      message: "ADMIN_USERNAMES must be Discogs usernames separated by commas",
+    }),
+}).refine((env) => !env.INVITE_ONLY || env.ADMIN_USERNAMES.length > 0, {
+  // Invite-only with nobody able to make codes is a locked door with no key:
+  // existing members get in, and nobody new ever can.
+  message: "INVITE_ONLY is on but ADMIN_USERNAMES is empty, so nobody could make an invite code",
+  path: ["ADMIN_USERNAMES"],
 });
 
 export type Env = z.infer<typeof envSchema>;
