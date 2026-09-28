@@ -1145,7 +1145,12 @@ await check("a well-formed code nobody made is refused the same way", async () =
   const res = await submitCode("ABCD-EFGH");
   assert.equal(res.status, 303);
   assert.match(res.location, /auth_error=invite_invalid/);
-  assert.ok(!res.location.includes("discogs.com"), "an unknown code reached Discogs");
+  // Parse the redirect and compare whole origins. A substring test on the URL
+  // ("does it mention discogs.com?") is the pattern CodeQL rightly flags: a
+  // host can carry that text anywhere. Staying on our own origin is the
+  // stronger claim anyway — nothing here should send the browser elsewhere.
+  const ours = new URL(process.env.APP_ORIGIN ?? BASE).origin;
+  assert.equal(new URL(res.location, ours).origin, ours, "an unknown code left the app");
 });
 
 await check("the invite form refuses another site's origin", async () => {
