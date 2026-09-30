@@ -4,16 +4,26 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Playable } from "@/lib/types";
 import { formatBpm, type MixCheck } from "@/lib/mixing";
 import { TransitionStrip } from "./TrackList";
-import { prunePulled, pullRows, recordCount, togglePulled } from "@/client/pullList";
+import {
+  prunePulled,
+  pullRows,
+  recordCount,
+  slotAt,
+  slotToIndex,
+  togglePulled,
+} from "@/client/pullList";
 import { Play } from "./Icons";
 
 /**
- * A playlist as the list you take to the shelves. See client/pullList.ts.
+ * The whole set at once. See client/pullList.ts.
  *
- * Full screen on a phone, a centred panel on a desktop, closed from the corner
- * or with Escape. Tap a row to tick it off as pulled; ▶ plays from there.
- * Ticks are kept in this browser only — they are about this pull, not the
- * set — and a tick for a record no longer in the playlist is dropped.
+ * On a phone this is where a playlist gets worked on: every record with its
+ * BPM and the transition into it, tap a row to hear it (the list stays open,
+ * and the player bar stays underneath it), drag the handle to move it, tap
+ * the number to tick it off when you pull it. A centred panel on desktop,
+ * closed from the corner or with Escape. Ticks are kept in this browser only
+ * — they are about this pull, not the set — and a tick for a record no longer
+ * in the playlist is dropped.
  */
 export function PullList({
   playlistId,
@@ -24,6 +34,8 @@ export function PullList({
   transitions,
   addedBy,
   collab = false,
+  playingKey = null,
+  onReorder,
 }: {
   playlistId: string;
   name: string;
@@ -40,6 +52,10 @@ export function PullList({
   /** Who added each record, by index, on a collaborative playlist. */
   addedBy?: Array<string | null>;
   collab?: boolean;
+  /** What is playing, so its row can say so. */
+  playingKey?: string | null;
+  /** Move a record within the set. Omitted, the list is read-only. */
+  onReorder?: (from: number, to: number) => void;
 }) {
   const storageKey = `gemtopia:pulled:${playlistId}`;
   const [pulled, setPulled] = useState<Set<string>>(() => {
@@ -94,6 +110,63 @@ export function PullList({
     [items, pulled],
   );
 
+  /* ---------- drag to reorder ---------- */
+
+  const listRef = useRef<HTMLOListElement | null>(null);
+  const rowRefs = useRef<Array<HTMLLIElement | null>>([]);
+  const [drag, setDrag] = useState<{ from: number; slot: number } | null>(null);
+  const dragRef = useRef<{ from: number; slot: number } | null>(null);
+
+  const slotFor = (clientY: number) =>
+    slotAt(
+      clientY,
+      rowRefs.current.slice(0, rows.length).map((el) => {
+        const rect = el?.getBoundingClientRect();
+        return rect ? rect.top + rect.height / 2 : Number.POSITIVE_INFINITY;
+      }),
+    );
+
+  const startDrag = (event: React.PointerEvent<HTMLElement>, index: number) => {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const next = { from: index, slot: index };
+    dragRef.current = next;
+    setDrag(next);
+  };
+
+  const moveDrag = (event: React.PointerEvent<HTMLElement>) => {
+    const current = dragRef.current;
+    if (!current) return;
+    // Near the top or bottom edge, scroll the list so a record can travel
+    // further than one screen.
+    const list = listRef.current;
+    if (list) {
+      const box = list.getBoundingClientRect();
+      if (event.clientY < box.top + 48) list.scrollTop -= 12;
+      else if (event.clientY > box.bottom - 48) list.scrollTop += 12;
+    }
+    const slot = slotFor(event.clientY);
+    if (slot !== current.slot) {
+      const next = { ...current, slot };
+      dragRef.current = next;
+      setDrag(next);
+    }
+  };
+
+  const endDrag = () => {
+    const current = dragRef.current;
+    dragRef.current = null;
+    setDrag(null);
+    if (!current || !onReorder) return;
+    const to = slotToIndex(current.from, current.slot);
+    if (to !== current.from) onReorder(current.from, to);
+  };
+
+  const cancelDrag = () => {
+    dragRef.current = null;
+    setDrag(null);
+  };
+
   const closeRef = useRef<HTMLButtonElement | null>(null);
   /*
    * The parent re-renders several times a second while something plays, and
@@ -121,15 +194,18 @@ export function PullList({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-stretch justify-center bg-black/70 lg:items-center lg:p-8"
+      className="fixed inset-x-0 top-0 z-[60] flex items-stretch justify-center bg-black/70 lg:items-center lg:p-8"
+      // Stops above the phone's player bar, so the transport and the scrubber
+      // stay in reach while you audition and reorder. 0 on desktop.
+      style={{ bottom: "var(--mobile-bar-h, 0px)" }}
       role="dialog"
       aria-modal="true"
-      aria-label={`Pull list: ${name}`}
+      aria-label={`Whole list: ${name}`}
     >
       <div className="flex h-full w-full flex-col bg-ink-950 lg:h-auto lg:max-h-[85vh] lg:max-w-xl lg:rounded-xl lg:border lg:border-ink-700">
         <header className="flex shrink-0 items-start gap-3 border-b border-ink-800 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Pull list</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">Whole list</p>
             <h2 className="truncate text-base font-semibold text-neutral-100">{name}</h2>
             <p className="mt-0.5 text-[11px] text-neutral-500">
               {items.length} track{items.length === 1 ? "" : "s"} · {records} record{records === 1 ? "" : "s"}
@@ -159,7 +235,7 @@ export function PullList({
             ref={closeRef}
             type="button"
             onClick={onClose}
-            aria-label="Close pull list"
+            aria-label="Close the whole list"
             className="grid h-11 w-11 shrink-0 place-items-center rounded-full border border-ink-700 text-lg text-neutral-300 hover:border-ink-600 hover:text-neutral-100"
           >
             ×
@@ -169,29 +245,59 @@ export function PullList({
         {rows.length === 0 ? (
           <p className="p-8 text-center text-sm text-neutral-600">This playlist is empty.</p>
         ) : (
-          <ol className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom)]">
+          <ol
+            ref={listRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-2"
+          >
             {rows.map((row, index) => {
               const done = pulled.has(row.key);
               const check = transitions?.get(index);
               const who = addedBy?.[index] ?? null;
+              const playing = row.key === playingKey;
+              const dragging = drag?.from === index;
+              // The line that shows where a dragged record will land.
+              const dropAbove = drag !== null && drag.slot === index && drag.slot !== drag.from && drag.slot !== drag.from + 1;
+              const dropBelow = drag !== null && index === rows.length - 1 && drag.slot === rows.length && drag.from !== rows.length - 1;
               return (
-                <li key={`${row.key}:${index}`} className="border-b border-ink-850">
+                <li
+                  key={`${row.key}:${index}`}
+                  ref={(el) => {
+                    rowRefs.current[index] = el;
+                  }}
+                  className={`relative border-b border-ink-850 ${dragging ? "opacity-40" : ""} ${
+                    playing ? "bg-accent/10" : ""
+                  }`}
+                >
+                  {dropAbove && <span aria-hidden="true" className="absolute inset-x-0 -top-px z-10 h-0.5 bg-accent" />}
                   {/* The transition *into* this record, so the list reads as a set. */}
                   {check && <TransitionStrip check={check} />}
                   <div className="flex items-stretch">
+                    {/* The number ticks the record off as pulled. */}
                     <button
                       type="button"
                       onClick={() => save(togglePulled(pulled, row.key))}
                       aria-pressed={done}
-                      className={`flex min-w-0 flex-1 items-start gap-3 pl-4 pr-2 text-left ${
+                      aria-label={done ? `Untick ${row.title}` : `Tick ${row.title} as pulled`}
+                      className="w-11 shrink-0 pl-2 text-right font-mono text-sm tabular-nums text-neutral-500"
+                    >
+                      {done ? <span className="text-accent">✓</span> : row.number}
+                    </button>
+                    {/* The row plays from here — and the list stays open. */}
+                    <button
+                      type="button"
+                      onClick={() => onPlay(index)}
+                      aria-label={`Play from ${row.number}. ${row.title}`}
+                      className={`flex min-w-0 flex-1 items-start gap-3 pl-2 pr-1 text-left ${
                         dense ? "py-1.5" : "py-3"
                       } ${done ? "opacity-45" : ""}`}
                     >
-                      <span className="w-7 shrink-0 pt-0.5 text-right font-mono text-sm tabular-nums text-neutral-500">
-                        {done ? "✓" : row.number}
-                      </span>
                       <span className="min-w-0 flex-1">
-                        <span className={`block truncate text-sm text-neutral-100 ${done ? "line-through" : ""}`}>
+                        <span
+                          className={`block truncate text-sm ${playing ? "font-medium text-accent" : "text-neutral-100"} ${
+                            done ? "line-through" : ""
+                          }`}
+                        >
+                          {playing && <Play className="mr-1 inline h-3 w-3" />}
                           {row.title}
                         </span>
                         <span className="block truncate text-xs text-neutral-400">
@@ -214,15 +320,27 @@ export function PullList({
                         {row.bpm !== null && <span className="text-neutral-300">{formatBpm(row.bpm)}</span>}
                       </span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => onPlay(index)}
-                      aria-label={`Play from ${row.number}. ${row.title}`}
-                      className="grid w-12 shrink-0 place-items-center text-neutral-500 hover:text-accent"
-                    >
-                      <Play className="h-3.5 w-3.5" />
-                    </button>
+                    {/*
+                      Drag handle. Touch-first: pointer events, captured, with
+                      touch-action off on the handle only, so the list still
+                      scrolls from anywhere else on the row.
+                    */}
+                    {onReorder && (
+                      <span
+                        role="button"
+                        tabIndex={-1}
+                        aria-label={`Drag to move ${row.title}`}
+                        onPointerDown={(event) => startDrag(event, index)}
+                        onPointerMove={moveDrag}
+                        onPointerUp={endDrag}
+                        onPointerCancel={cancelDrag}
+                        className="grid w-11 shrink-0 cursor-grab touch-none select-none place-items-center text-neutral-600 active:cursor-grabbing active:text-accent"
+                      >
+                        <GripIcon />
+                      </span>
+                    )}
                   </div>
+                  {dropBelow && <span aria-hidden="true" className="absolute inset-x-0 -bottom-px z-10 h-0.5 bg-accent" />}
                 </li>
               );
             })}
@@ -230,5 +348,19 @@ export function PullList({
         )}
       </div>
     </div>
+  );
+}
+
+/** Six dots — the grip that says "this moves". */
+function GripIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true">
+      <circle cx="9" cy="6" r="1.6" />
+      <circle cx="15" cy="6" r="1.6" />
+      <circle cx="9" cy="12" r="1.6" />
+      <circle cx="15" cy="12" r="1.6" />
+      <circle cx="9" cy="18" r="1.6" />
+      <circle cx="15" cy="18" r="1.6" />
+    </svg>
   );
 }

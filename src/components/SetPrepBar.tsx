@@ -11,6 +11,7 @@ import {
   type SequenceReport,
   type SetLength,
 } from "@/lib/mixing";
+import { useState } from "react";
 import { Metronome, Shuffle } from "./Icons";
 
 /**
@@ -40,6 +41,14 @@ export function SetPrepBar({
   transitionSeconds: number;
   onTransitionChange: (seconds: number) => void;
 }) {
+  /*
+   * On a phone this bar is folded to one line by default. Opened up it is
+   * the length, the blend slider, the deck range, Smooth order and a note —
+   * a third of the screen, above a list that then shows one record. The
+   * summary line keeps the two numbers you glance at; the rest is a tap away.
+   * Desktop has the room and always shows it all.
+   */
+  const [open, setOpen] = useState(false);
   const total = report.steps.length;
   if (total === 0) {
     return (
@@ -76,6 +85,37 @@ export function SetPrepBar({
 
   return (
     <div className="border-b border-ink-800 bg-ink-900 px-4 py-2">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left lg:hidden"
+      >
+        <span className="font-mono text-sm font-semibold tabular-nums text-neutral-100">
+          {length.partial ? "≥ " : ""}
+          {formatSetLength(length.playedSeconds)}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[11px]">
+          {allComfortable ? (
+            <span className="text-accent">all {total} comfortable</span>
+          ) : (
+            shown.map((tier, i) => (
+              <span key={tier.key}>
+                {i > 0 && <span className="text-neutral-600"> · </span>}
+                <span className={tier.text}>
+                  {tier.count} {STRAIN_META[tier.key].label.toLowerCase()}
+                </span>
+              </span>
+            ))
+          )}
+          <span className="text-neutral-600"> · ±{pitchPercent}%</span>
+        </span>
+        <span className="shrink-0 text-[11px] text-neutral-500">
+          {open ? "Less ▴" : "Set prep ▾"}
+        </span>
+      </button>
+
+      <div className={open ? "mt-2 lg:mt-0" : "hidden lg:block"}>
       {/*
         Set length first, because it is the question you ask before any other:
         have I got enough records for the slot. The mixability bar answers a
@@ -251,6 +291,7 @@ export function SetPrepBar({
           real window is wider than ±{preset.percent}% suggests.
         </p>
       )}
+      </div>
     </div>
   );
 }

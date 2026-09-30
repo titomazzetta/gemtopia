@@ -7,7 +7,7 @@
  * record, and ticks that never outlive the rows they belong to.
  */
 import assert from "node:assert/strict";
-import { prunePulled, pullRows, recordCount, togglePulled } from "../src/client/pullList.ts";
+import { prunePulled, pullRows, slotAt, slotToIndex, recordCount, togglePulled } from "../src/client/pullList.ts";
 
 let ran = 0, failed = 0;
 const check = (name, fn) => {
@@ -57,6 +57,24 @@ check("ticking toggles without mutating", () => {
 check("ticks for rows no longer in the set are dropped", () => {
   const kept = prunePulled(["1:aaaaaaaaaaa", "9:zzzzzzzzzzz"], set);
   assert.deepEqual([...kept], ["1:aaaaaaaaaaa"]);
+});
+
+check("dropping a row: slots map to final positions, remove-then-insert", () => {
+  // Five rows; drag row 1.
+  assert.equal(slotToIndex(1, 0), 0); // to the top
+  assert.equal(slotToIndex(1, 1), 1); // the gap above itself: no move
+  assert.equal(slotToIndex(1, 2), 1); // the gap below itself: no move
+  assert.equal(slotToIndex(1, 3), 2); // past the next row
+  assert.equal(slotToIndex(1, 5), 4); // to the bottom
+});
+
+check("the slot under the pointer comes from row middles", () => {
+  const middles = [10, 30, 50];
+  assert.equal(slotAt(0, middles), 0);
+  assert.equal(slotAt(11, middles), 1);
+  assert.equal(slotAt(30, middles), 1);
+  assert.equal(slotAt(49, middles), 2);
+  assert.equal(slotAt(999, middles), 3);
 });
 
 console.log(`${ran - failed}/${ran} pull list tests passed`);
