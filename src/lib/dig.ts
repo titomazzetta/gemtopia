@@ -10,7 +10,14 @@ import {
   type SearchHit,
 } from "./discogs";
 import { DIG_LANE_LABELS, type DigLane, type DigResult } from "./types";
-import { pickCredits, roleWord, versionReason, type MasterVersion } from "./digLinks";
+import {
+  artistLabels,
+  labelForPage,
+  pickCredits,
+  roleWord,
+  versionReason,
+  type MasterVersion,
+} from "./digLinks";
 
 /**
  * Off-the-cuff digging from a single record.
@@ -175,7 +182,7 @@ export async function digFromRelease(options: DigOptions): Promise<
 
   /*
    * The first credit worth following — usually the remixer. One per dig
-   * keeps a dig at seven upstream calls; "dig deeper" pages through the same
+   * keeps a dig at eight upstream calls (with the artist-labels lookup); "dig deeper" pages through the same
    * credit, and digging from one of their records moves on to that record's
    * credits.
    */
@@ -229,6 +236,22 @@ export async function digFromRelease(options: DigOptions): Promise<
       : Promise.resolve([]),
   ]);
 
+  /*
+   * Step three, one more call: a label the artist has released on besides
+   * this one, read through records by anyone. It needs the artist's
+   * discography from step two to know the labels, so it cannot join the
+   * parallel batch — which is also what keeps a dig at eight calls. "Dig
+   * deeper" moves to the artist's next label (see labelForPage).
+   */
+  const seedLabelNames = [...seed.labelNames, ...links.labels.map((l) => l.name)];
+  const otherLabel = labelForPage(artistLabels(artistRows, seedLabelNames), page);
+  const otherLabelHits = otherLabel
+    ? await attempt(
+        () => searchReleases(user, { label: otherLabel.label, perPage: 60, page: otherLabel.page }),
+        [],
+      )
+    : [];
+
   const artistName = seed.artistNames[0] ?? links.artists[0]?.name ?? "this artist";
   const labelName = seed.labelNames[0] ?? links.labels[0]?.name ?? "this label";
   const styleName = seed.styles[0] ?? seed.genres[0] ?? "this style";
@@ -259,6 +282,17 @@ export async function digFromRelease(options: DigOptions): Promise<
       lane: "same-label",
       results: labelRows.map((row) =>
         fromRelated(row, "same-label", `Also on ${labelName}`),
+      ),
+    },
+    {
+      lane: "artist-labels",
+      label: otherLabel ? `On ${otherLabel.label} · where ${artistName} has released` : undefined,
+      results: otherLabelHits.map((hit) =>
+        fromHit(
+          hit,
+          "artist-labels",
+          otherLabel ? `On ${otherLabel.label}, a label ${artistName} has released on` : "A label this artist has released on",
+        ),
       ),
     },
     {

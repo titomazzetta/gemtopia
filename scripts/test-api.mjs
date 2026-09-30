@@ -657,7 +657,7 @@ await check("dig rejects an unknown property", async () => {
   assert.equal(res.status, 400);
 });
 
-// Three calls, not more: the dig limit is 8 a minute and counts these.
+// Three calls, not more: the dig limit is 7 a minute and counts these.
 await check("dig rejects a page outside 1–20 or not an integer", async () => {
   for (const page of [0, 21, "2"]) {
     const res = await alice.call("/api/dig", {
@@ -1087,6 +1087,210 @@ await check("deleting needs CSRF", async () => {
   });
   assert.equal(res.status, 403);
 });
+
+console.log("\ncollaborative playlists");
+
+{
+  // Fresh accounts, so nothing earlier in the run can make these pass by accident.
+  const owner = actor(`owner_${randomBytes(4).toString("hex")}`);
+  const friend = actor(`friend_${randomBytes(4).toString("hex")}`);
+  const third = actor(`third_${randomBytes(4).toString("hex")}`);
+  const stranger = actor(`stranger_${randomBytes(4).toString("hex")}`);
+  for (const a of [owner, friend, third, stranger]) await a.call("/api/playlists");
+
+  let playlistId = null;
+  let token = null;
+  const find = async (who) =>
+    (await who.call("/api/playlists")).body?.playlists?.find((p) => p.id === playlistId) ?? null;
+
+  await check("a new playlist is private, and owned", async () => {
+    const res = await owner.call("/api/playlists", {
+      method: "POST",
+      body: { name: "B2B at the Lot", entries: [clip(5001, "ccccccccccc")] },
+    });
+    assert.equal(res.status, 201);
+    playlistId = res.body.playlist.id;
+    assert.equal(res.body.playlist.role, "owner");
+    assert.deepEqual(res.body.playlist.collaborators, []);
+    assert.equal(res.body.playlist.joinLinkOn, false);
+    assert.equal((await friend.call(`/api/playlists/${playlistId}`)).status, 404);
+  });
+
+  await check("only the owner can make a join link", async () => {
+    const nope = await friend.call(`/api/playlists/${playlistId}/collab`, {
+      method: "POST",
+      body: { on: true },
+    });
+    assert.equal(nope.status, 404);
+    const res = await owner.call(`/api/playlists/${playlistId}/collab`, {
+      method: "POST",
+      body: { on: true },
+    });
+    assert.equal(res.status, 200);
+    const url = new URL(res.body.url);
+    const parts = url.pathname.split("/");
+    assert.equal(parts[1], "join");
+    token = parts[2];
+    assert.match(token, /^[A-Za-z0-9_-]{43}$/);
+    assert.equal((await find(owner)).joinLinkOn, true);
+  });
+
+  await check("the owner can copy the same link again", async () => {
+    const res = await owner.call(`/api/playlists/${playlistId}/collab`);
+    assert.equal(res.status, 200);
+    assert.ok(res.body.url.endsWith(`/join/${token}`));
+    assert.equal((await friend.call(`/api/playlists/${playlistId}/collab`)).status, 404);
+  });
+
+  await check("holding the link shows what it is, and adds nobody", async () => {
+    const res = await friend.call(`/api/join/${token}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.preview.name, "B2B at the Lot");
+    assert.equal(res.body.preview.alreadyIn, false);
+    assert.equal(res.body.preview.tracks, 1);
+    assert.ok(!("items" in res.body.preview) && !("entries" in res.body.preview));
+    assert.equal(await find(friend), null, "previewing must not join");
+  });
+
+  await check("joining needs a session and a CSRF token", async () => {
+    assert.equal((await friend.call(`/api/join/${token}`, { method: "POST", cookie: "" })).status, 401);
+    assert.equal(
+      (await friend.call(`/api/join/${token}`, { method: "POST", csrfToken: "wrong" })).status,
+      403,
+    );
+  });
+
+  await check("a wrong or malformed link is one indistinguishable 404", async () => {
+    const wrong = randomBytes(32).toString("base64url");
+    assert.equal((await friend.call(`/api/join/${wrong}`)).status, 404);
+    assert.equal((await friend.call(`/api/join/${wrong}`, { method: "POST" })).status, 404);
+    assert.equal((await friend.call("/api/join/not-a-token")).status, 404);
+  });
+
+  await check("pressing Join adds you as a collaborator", async () => {
+    const res = await friend.call(`/api/join/${token}`, { method: "POST" });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.status, "joined");
+    assert.equal(res.body.playlistId, playlistId);
+    const mine = await find(friend);
+    assert.ok(mine, "joined playlist is in the friend's list");
+    assert.equal(mine.role, "editor");
+    assert.equal(mine.owner, owner.username);
+    assert.equal(mine.joinLinkOn, false, "an editor is never told about the link");
+    assert.deepEqual((await find(owner)).collaborators, [friend.username]);
+    const again = await friend.call(`/api/join/${token}`, { method: "POST" });
+    assert.equal(again.body.status, "already");
+  });
+
+  await check("a collaborator can change the records, and is credited for them", async () => {
+    const current = await find(friend);
+    const entries = [
+      ...current.entries.map((e) => ({
+        clipKey: e.clipKey,
+        releaseId: e.releaseId,
+        videoId: e.videoId,
+        title: e.title,
+        artist: e.artist,
+        releaseTitle: e.releaseTitle,
+        year: e.year,
+      })),
+      clip(5002, "ddddddddddd"),
+    ];
+    const res = await friend.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: { entries, version: current.version },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.playlist.version, current.version + 1);
+    const byKey = new Map(res.body.playlist.entries.map((e) => [e.clipKey, e.addedBy]));
+    assert.equal(byKey.get("5001:ccccccccccc"), owner.username, "owner's record keeps its credit");
+    assert.equal(byKey.get("5002:ddddddddddd"), friend.username);
+  });
+
+  await check("an edit against an old version is refused, not merged over", async () => {
+    const res = await owner.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: { entries: [clip(5003, "eeeeeeeeeee")], version: 1 },
+    });
+    assert.equal(res.status, 409);
+    assert.equal(res.body?.error?.code, "playlist_changed");
+    assert.equal((await find(owner)).entries.length, 2, "the refused edit changed nothing");
+  });
+
+  await check("a collaborator cannot rename, delete, share or manage people", async () => {
+    assert.equal(
+      (await friend.call(`/api/playlists/${playlistId}`, { method: "PATCH", body: { name: "Mine now" } })).status,
+      404,
+    );
+    assert.equal((await friend.call(`/api/playlists/${playlistId}`, { method: "DELETE" })).status, 404);
+    assert.equal(
+      (await friend.call(`/api/playlists/${playlistId}/share`, { method: "POST", body: { shared: true } })).status,
+      404,
+    );
+    assert.equal(
+      (await friend.call(`/api/playlists/${playlistId}/members`, {
+        method: "DELETE",
+        body: { username: owner.username },
+      })).status,
+      404,
+      "nobody can remove the owner",
+    );
+    assert.equal((await find(owner)).name, "B2B at the Lot");
+  });
+
+  await check("a collaborator cannot remove another collaborator", async () => {
+    assert.equal((await third.call(`/api/join/${token}`, { method: "POST" })).status, 200);
+    const res = await friend.call(`/api/playlists/${playlistId}/members`, {
+      method: "DELETE",
+      body: { username: third.username },
+    });
+    assert.equal(res.status, 404);
+    assert.ok(await find(third));
+  });
+
+  await check("strangers still cannot see it at all", async () => {
+    assert.equal((await stranger.call(`/api/playlists/${playlistId}`)).status, 404);
+    assert.equal(await find(stranger), null);
+  });
+
+  await check("turning the link off stops new joins, keeps everyone in", async () => {
+    const off = await owner.call(`/api/playlists/${playlistId}/collab`, {
+      method: "POST",
+      body: { on: false },
+    });
+    assert.equal(off.status, 200);
+    assert.equal(off.body.url, null);
+    assert.equal((await stranger.call(`/api/join/${token}`)).status, 404);
+    assert.equal((await stranger.call(`/api/join/${token}`, { method: "POST" })).status, 404);
+    assert.ok(await find(friend));
+    assert.ok(await find(third));
+  });
+
+  await check("the owner can remove a collaborator; they lose it at once", async () => {
+    const res = await owner.call(`/api/playlists/${playlistId}/members`, {
+      method: "DELETE",
+      body: { username: third.username },
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await third.call(`/api/playlists/${playlistId}`)).status, 404);
+    assert.equal(await find(third), null);
+  });
+
+  await check("a collaborator can leave", async () => {
+    const res = await friend.call(`/api/playlists/${playlistId}/members`, {
+      method: "DELETE",
+      body: { username: friend.username },
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await friend.call(`/api/playlists/${playlistId}`)).status, 404);
+    assert.deepEqual((await find(owner)).collaborators, []);
+  });
+
+  await check("the owner deleting it takes it from everyone", async () => {
+    assert.equal((await owner.call(`/api/playlists/${playlistId}`, { method: "DELETE" })).status, 200);
+    assert.equal(await find(owner), null);
+  });
+}
 
 console.log("\ninvite codes");
 

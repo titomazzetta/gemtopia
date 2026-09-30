@@ -25,7 +25,7 @@ import { formatBpm } from "@/lib/mixing";
  *                     era, country, or mixable tempo. Everything here is
  *                     already yours and already playable.
  *
- *   BEYOND YOUR CRATE six Discogs lanes. Records you do not own, each
+ *   BEYOND YOUR CRATE seven Discogs lanes. Records you do not own, each
  *                     tagged with the relationship that surfaced it. Preview
  *                     the audio, add to your wantlist, or dig again from it —
  *                     which is what makes it endless.

@@ -24,6 +24,13 @@ export const viewport: Viewport = {
   themeColor: "#050806",
   width: "device-width",
   initialScale: 1,
+  /*
+   * Let the page reach the screen's rounded corners and home indicator, and
+   * say so — without this, iOS reports every safe-area inset as 0, so nothing
+   * can move out of the way and, in the installed app, the bottom bar's
+   * outer corners were being clipped by the screen itself.
+   */
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

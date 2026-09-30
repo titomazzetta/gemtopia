@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import type { Playlist } from "@/lib/types";
 import { isClipDrag, readClipDrag } from "@/client/clipDrag";
-import { Link, Lock, Play, Plus, Shuffle, Trash } from "./Icons";
+import { isCollabPlaylist, collabLine } from "@/client/collabView";
+import { Link, Lock, Play, Plus, Shuffle, Trash, Users } from "./Icons";
 
 export function PlaylistPanel({
   playlists,
@@ -18,6 +19,8 @@ export function PlaylistPanel({
   onShare,
   sharedIds,
   onDropClip,
+  onCollaborate,
+  me,
 }: {
   playlists: Playlist[];
   activeId: string | null;
@@ -37,6 +40,10 @@ export function PlaylistPanel({
    * Desktop only in practice; omitted, the rows are not drop targets.
    */
   onDropClip?: (playlistId: string, clipKey: string) => void;
+  /** Open the collaborate panel for a playlist. */
+  onCollaborate?: (id: string) => void;
+  /** The signed-in Discogs username, so "you" can be left out of names. */
+  me: string;
 }) {
   const [draft, setDraft] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -84,6 +91,9 @@ export function PlaylistPanel({
           <ul>
             {playlists.map((playlist) => {
               const active = playlist.id === activeId;
+              const collab = isCollabPlaylist(playlist);
+              const owner = playlist.role === "owner";
+              const line = collabLine(playlist, me);
               return (
                 <li
                   key={playlist.id}
@@ -105,7 +115,11 @@ export function PlaylistPanel({
                     event.preventDefault();
                     onDropClip(playlist.id, key);
                   }}
-                  className={`group border-b border-ink-850 ${
+                  // Amber edge: this set is open to other people. It shows
+                  // the moment a join link is out, not only once someone joins.
+                  className={`group border-b border-l-2 border-b-ink-850 ${
+                    collab ? "border-l-accent-alt" : "border-l-transparent"
+                  } ${
                     dropTarget === playlist.id
                       ? "bg-accent/15 outline outline-1 -outline-offset-1 outline-accent/60"
                       : active
@@ -135,7 +149,10 @@ export function PlaylistPanel({
                       <button
                         type="button"
                         onClick={() => onSelect(active ? null : playlist.id)}
-                        onDoubleClick={() => setEditingId(playlist.id)}
+                        onDoubleClick={() => {
+                          // Only the owner names the set.
+                          if (owner) setEditingId(playlist.id);
+                        }}
                         className="min-w-0 flex-1 text-left"
                       >
                         <span
@@ -146,9 +163,14 @@ export function PlaylistPanel({
                           {playlist.name}
                         </span>
                         <span className="flex items-center gap-1 text-[10px] text-neutral-600">
-                          <Lock className="h-2.5 w-2.5" />
+                          {collab ? (
+                            <Users className="h-2.5 w-2.5 text-accent-alt" />
+                          ) : (
+                            <Lock className="h-2.5 w-2.5" />
+                          )}
                           {playlist.items.length} clip
                           {playlist.items.length === 1 ? "" : "s"}
+                          {line && <span className="truncate text-accent-alt/80">· {line}</span>}
                         </span>
                       </button>
                     )}
@@ -170,6 +192,19 @@ export function PlaylistPanel({
                       >
                         <Shuffle className="h-3 w-3" />
                       </button>
+                      {onCollaborate && (
+                        <button
+                          type="button"
+                          onClick={() => onCollaborate(playlist.id)}
+                          title={collab ? "Collaborators and join link" : "Collaborate — invite people to build this with you"}
+                          className={`rounded p-1.5 hover:bg-ink-800 ${
+                            collab ? "text-accent-alt" : "text-neutral-500 hover:text-neutral-200"
+                          }`}
+                        >
+                          <Users className="h-3 w-3" />
+                        </button>
+                      )}
+                      {owner && (<>
                       {/*
                         Share is off until asked for, and the icon shows which
                         state you are in rather than which action is available —
@@ -217,6 +252,7 @@ export function PlaylistPanel({
                       >
                         <Trash className="h-3 w-3" />
                       </button>
+                      </>)}
                     </div>
                   </div>
                 </li>
@@ -228,8 +264,9 @@ export function PlaylistPanel({
 
       <p className="flex items-center gap-1.5 border-t border-ink-800 px-3 pt-2 text-[10px] leading-relaxed text-neutral-600">
         <Lock className="h-3 w-3 shrink-0" />
-        Every playlist is private to your Discogs account. Nothing here is
-        readable by another signed-in user, and there is no public URL.
+        Playlists are private to your account. Amber ones are shared with the
+        collaborators you let in — nobody else can see them, and your
+        collection is never shared.
       </p>
 
       <div className="flex gap-2 border-t border-ink-800 p-3 text-[11px]">

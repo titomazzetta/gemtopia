@@ -237,7 +237,7 @@ press the key. Click anything to play it; `+` adds it to a playlist. Each lane
 shows the first 16 and ends in **More**, then **Beyond your crate →** once it
 has shown everything you own there.
 
-### Beyond your crate — six Discogs lanes
+### Beyond your crate — seven Discogs lanes
 
 Records you *don't* own, each tagged with the relationship that surfaced it:
 
@@ -247,6 +247,7 @@ Records you *don't* own, each tagged with the relationship that surfaced it:
 | **Credits · *name*, remixer** | The first credit worth following (remixer, then producer, then writer) — their own records *and* what they remixed or produced for others |
 | **More by this artist** | The artist's discography, minus what you own |
 | **More on this label** | The label's catalogue |
+| **On *label* · where *artist* has released** | Another label the artist has put records out on, read through records by *anyone* — the artist's world, and the next name to follow. **Dig deeper** moves to their next label |
 | **Same style** | Discogs search on the style, ranked by how many people want it |
 | **Same era** | Style + a ±3 year window + country of pressing |
 
@@ -254,7 +255,7 @@ Credits skip the roles that don't shape the music — mastering, lacquer cut,
 artwork, photography — and never repeat the record's own artist. Digging from
 a record you found beyond the crate gets every lane too: its artists and labels
 are looked up by id first, so it isn't limited to style and era. A dig is at
-most seven Discogs calls, and the per-user limit (8 a minute) keeps even a
+most eight Discogs calls, and the per-user limit (7 a minute) keeps even a
 fast digger under Discogs' 60-a-minute budget.
 
 Each result gives you three things: **preview** (plays the audio Discogs has
@@ -599,7 +600,34 @@ They're also a different shape. A playlist row is keyed on `releaseId:videoId` �
 one specific clip on one specific release, in a specific position, carrying its
 own BPM and the mixability verdict for the transition into the next one. A List
 can hold none of that. Playlists live in Gemtopia's own Postgres, in
-`playlists` / `playlist_items`, private to your account.
+`playlists` / `playlist_items`, private to your account and to whoever you
+invite to build one with you.
+
+### Build a set together
+
+Plan a back-to-back, or build a list with friends. On any playlist, press
+**Collaborate** and send the join link however you like. Anyone with a Gemtopia
+account who opens it sees what it is and presses **Join** — nobody is added to
+anything without doing that themselves — and from then on it's in their
+playlists too.
+
+- **Amber means shared.** A playlist open to other people has an amber edge and
+  says who's on it, from the moment its link is out.
+- **Everyone builds, one person owns.** Collaborators add, remove and reorder
+  records; only the owner renames it, deletes it, makes a read-only share link,
+  or manages the join link and the people on it. Anyone can leave.
+- **Who brought what.** Every record remembers who added it, and the whole
+  list shows it — so on the night, everyone knows which records to pack.
+- **No silent overwrites.** Each edit says which version of the list it was
+  made against; if someone else changed it first, yours is refused and the
+  list refreshes, instead of quietly wiping their change.
+- **Collections stay private.** Only the records someone adds are shared.
+  Nobody sees anybody's collection, wantlist or BPM catalogue.
+
+The link is 256 bits of randomness, looked up by its hash and otherwise stored
+only sealed with the server key; turning it off kills it, and people already in
+stay in until the owner removes them. Details in
+[THREAT_MODEL.md §5](./THREAT_MODEL.md#5-playlist-privacy).
 
 **Your collection is add-only. Your wantlist is a toggle.** Grep for
 `writeRequest` and you will find exactly three callers: `addToWantlist`
@@ -775,9 +803,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 582 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 602 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 105 API tests against a running server. CodeQL
+reached the client bundle, then 121 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -987,14 +1015,16 @@ npm run test:record     # 24
 npm run test:mark       # 14
 npm run test:views      # 16
 npm run test:dig-feed   # 9
-npm run test:dig-links  # 8
+npm run test:dig-links  # 11
 npm run test:sync-queue # 7
 npm run test:clip-drag  # 5
 npm run test:pull-list  # 6
 npm run test:search-play # 4
 npm run test:invites    # 28
-npm run test:manifest   # 8 — 582 offline in all
-npm run test:api        # 105 checks, needs a running server + Postgres
+npm run test:manifest   # 8
+npm run test:collab     # 12
+npm run test:collab-view # 5 — 602 offline in all
+npm run test:api        # 121 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci

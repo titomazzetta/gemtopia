@@ -53,7 +53,7 @@ const TONE_CLASS: Record<string, string> = {
  * cannot, it says what pitch range *would* have worked — that is the number
  * that tells you whether to swap the record or swap the deck.
  */
-function TransitionStrip({ check }: { check: MixCheck }) {
+export function TransitionStrip({ check }: { check: MixCheck }) {
   // Colour answers "is this comfortable", which is what you scan for; the
   // verdict says how the records meet. A double-time blend that needs ±1% is
   // green, and a straight 1:1 at ±7% each is amber.

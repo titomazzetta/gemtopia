@@ -1,6 +1,13 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { query, queryOne, tx } from "./db";
+import { seal, unseal } from "./crypto";
+import {
+  MAX_COLLABORATORS,
+  carryAddedBy,
+  hashJoinToken,
+  isJoinToken,
+} from "./collab";
 import type { Playlist, PlaylistItemRow, TrackMeta } from "./types";
 
 /**
@@ -357,6 +364,11 @@ interface PlaylistRow {
   visibility: string;
   created_at: Date;
   updated_at: Date;
+  version: number;
+  is_owner: boolean;
+  join_link_on: boolean;
+  owner: string;
+  collaborators: string[] | null;
 }
 
 interface ItemRow {
@@ -369,6 +381,46 @@ interface ItemRow {
   artist: string;
   release_title: string;
   year: number | null;
+  added_by?: string | null;
+}
+
+/*
+ * The access rule for playlists, as SQL, written once.
+ *
+ * Before collaboration this was `user_id = $n` everywhere. It is now "you own
+ * it, or you are a member of it" — still a condition in the WHERE clause of
+ * every statement, still taking the caller's id from the session and never
+ * from the request, so a playlist you have no part in still does not exist
+ * as far as any query you can cause is concerned. Owner-only operations
+ * (rename, delete, share link, join link, removing people) keep the stricter
+ * `user_id = $n` and do not use this.
+ */
+const CAN_EDIT = (playlist: string, user: string) =>
+  `(${playlist}.user_id = ${user} OR EXISTS (
+      SELECT 1 FROM playlist_members pm
+       WHERE pm.playlist_id = ${playlist}.id AND pm.user_id = ${user}))`;
+
+const PLAYLIST_COLUMNS = `
+  p.id, p.name, p.notes, p.visibility, p.created_at, p.updated_at, p.version,
+  (p.user_id = $1) AS is_owner,
+  (p.user_id = $1 AND p.collab_token_hash IS NOT NULL) AS join_link_on,
+  o.username_display AS owner,
+  (SELECT array_agg(u.username_display ORDER BY m.joined_at)
+     FROM playlist_members m JOIN users u ON u.id = m.user_id
+    WHERE m.playlist_id = p.id) AS collaborators`;
+
+function toEntry(i: ItemRow): PlaylistItemRow {
+  return {
+    clipKey: i.clip_key,
+    releaseId: Number(i.release_id),
+    videoId: i.video_id,
+    title: i.title,
+    artist: i.artist,
+    releaseTitle: i.release_title,
+    year: i.year,
+    position: i.position,
+    addedBy: i.added_by ?? null,
+  };
 }
 
 function toPlaylist(row: PlaylistRow, items: PlaylistItemRow[]): Playlist {
@@ -381,15 +433,21 @@ function toPlaylist(row: PlaylistRow, items: PlaylistItemRow[]): Playlist {
     updatedAt: row.updated_at.getTime(),
     items: items.map((i) => i.clipKey),
     entries: items,
+    role: row.is_owner ? "owner" : "editor",
+    owner: row.owner,
+    collaborators: row.collaborators ?? [],
+    joinLinkOn: row.join_link_on,
+    version: row.version,
   };
 }
 
 export async function listPlaylists(userId: string): Promise<Playlist[]> {
   const playlists = await query<PlaylistRow>(
-    `SELECT id, name, notes, visibility, created_at, updated_at
-       FROM playlists
-      WHERE user_id = $1
-      ORDER BY updated_at DESC`,
+    `SELECT ${PLAYLIST_COLUMNS}
+       FROM playlists p
+       JOIN users o ON o.id = p.user_id
+      WHERE ${CAN_EDIT("p", "$1")}
+      ORDER BY p.updated_at DESC`,
     [userId],
   );
 
@@ -399,10 +457,12 @@ export async function listPlaylists(userId: string): Promise<Playlist[]> {
   // Cheaper than N queries and the volumes here are small.
   const items = await query<ItemRow>(
     `SELECT i.playlist_id, i.position, i.clip_key, i.release_id, i.video_id,
-            i.title, i.artist, i.release_title, i.year
+            i.title, i.artist, i.release_title, i.year,
+            a.username_display AS added_by
        FROM playlist_items i
        JOIN playlists p ON p.id = i.playlist_id
-      WHERE p.user_id = $1
+       LEFT JOIN users a ON a.id = i.added_by
+      WHERE ${CAN_EDIT("p", "$1")}
       ORDER BY i.playlist_id, i.position`,
     [userId],
   );
@@ -410,16 +470,7 @@ export async function listPlaylists(userId: string): Promise<Playlist[]> {
   const grouped = new Map<string, PlaylistItemRow[]>();
   for (const row of items) {
     const list = grouped.get(row.playlist_id) ?? [];
-    list.push({
-      clipKey: row.clip_key,
-      releaseId: Number(row.release_id),
-      videoId: row.video_id,
-      title: row.title,
-      artist: row.artist,
-      releaseTitle: row.release_title,
-      year: row.year,
-      position: row.position,
-    });
+    list.push(toEntry(row));
     grouped.set(row.playlist_id, list);
   }
 
@@ -431,35 +482,26 @@ export async function getPlaylist(
   playlistId: string,
 ): Promise<Playlist | null> {
   const row = await queryOne<PlaylistRow>(
-    `SELECT id, name, notes, visibility, created_at, updated_at
-       FROM playlists
-      WHERE id = $1 AND user_id = $2`,
-    [playlistId, userId],
+    `SELECT ${PLAYLIST_COLUMNS}
+       FROM playlists p
+       JOIN users o ON o.id = p.user_id
+      WHERE p.id = $2 AND ${CAN_EDIT("p", "$1")}`,
+    [userId, playlistId],
   );
   if (!row) return null;
 
   const items = await query<ItemRow>(
-    `SELECT playlist_id, position, clip_key, release_id, video_id,
-            title, artist, release_title, year
-       FROM playlist_items
-      WHERE playlist_id = $1
-      ORDER BY position`,
+    `SELECT i.playlist_id, i.position, i.clip_key, i.release_id, i.video_id,
+            i.title, i.artist, i.release_title, i.year,
+            a.username_display AS added_by
+       FROM playlist_items i
+       LEFT JOIN users a ON a.id = i.added_by
+      WHERE i.playlist_id = $1
+      ORDER BY i.position`,
     [playlistId],
   );
 
-  return toPlaylist(
-    row,
-    items.map((i) => ({
-      clipKey: i.clip_key,
-      releaseId: Number(i.release_id),
-      videoId: i.video_id,
-      title: i.title,
-      artist: i.artist,
-      releaseTitle: i.release_title,
-      year: i.year,
-      position: i.position,
-    })),
-  );
+  return toPlaylist(row, items.map(toEntry));
 }
 
 export async function createPlaylist(
@@ -467,25 +509,30 @@ export async function createPlaylist(
   name: string,
   entries: PlaylistItemRow[] = [],
 ): Promise<Playlist> {
-  return tx(async (client) => {
-    const created = await client.query<PlaylistRow>(
+  const id = await tx(async (client) => {
+    const created = await client.query<{ id: string }>(
       `INSERT INTO playlists (user_id, name)
             VALUES ($1, $2)
-         RETURNING id, name, notes, visibility, created_at, updated_at`,
+         RETURNING id`,
       [userId, name],
     );
     const row = created.rows[0];
     if (!row) throw new Error("insert returned no row");
 
     if (entries.length > 0) {
-      await insertItems(client, row.id, entries);
+      await insertItems(
+        client,
+        row.id,
+        entries,
+        entries.map(() => userId),
+      );
     }
-
-    return toPlaylist(
-      row,
-      entries.map((e, i) => ({ ...e, position: i })),
-    );
+    return row.id;
   });
+
+  const playlist = await getPlaylist(userId, id);
+  if (!playlist) throw new Error("created playlist not readable");
+  return playlist;
 }
 
 interface Queryable {
@@ -503,21 +550,22 @@ async function insertItems(
   client: Queryable,
   playlistId: string,
   entries: PlaylistItemRow[],
+  addedBy: Array<string | null>,
 ): Promise<void> {
   if (entries.length === 0) return;
 
   await client.query(
     `INSERT INTO playlist_items
         (playlist_id, position, clip_key, release_id, video_id,
-         title, artist, release_title, year)
+         title, artist, release_title, year, added_by)
      SELECT $1,
             t.position, t.clip_key, t.release_id, t.video_id,
-            t.title, t.artist, t.release_title, t.year
+            t.title, t.artist, t.release_title, t.year, t.added_by
        FROM unnest(
               $2::int[], $3::text[], $4::bigint[], $5::text[],
-              $6::text[], $7::text[], $8::text[], $9::int[]
+              $6::text[], $7::text[], $8::text[], $9::int[], $10::uuid[]
             ) AS t(position, clip_key, release_id, video_id,
-                   title, artist, release_title, year)`,
+                   title, artist, release_title, year, added_by)`,
     [
       playlistId,
       entries.map((_, i) => i),
@@ -528,10 +576,12 @@ async function insertItems(
       entries.map((e) => e.artist.slice(0, 400)),
       entries.map((e) => (e.releaseTitle ?? "").slice(0, 400)),
       entries.map((e) => e.year),
+      addedBy,
     ],
   );
 }
 
+/** Owner only. A collaborator renaming the set is not a thing that happens. */
 export async function renamePlaylist(
   userId: string,
   playlistId: string,
@@ -547,35 +597,65 @@ export async function renamePlaylist(
   return rows.length > 0;
 }
 
+export type ReplaceResult = "ok" | "not_found" | "conflict";
+
 /**
  * Replace a playlist's contents wholesale. Reorder, add and remove all funnel
  * through here: the client sends the list it wants, we make the table match.
  * Simpler to reason about than incremental position patching, and atomic.
+ *
+ * Owner or collaborator. With more than one person editing, "the list it
+ * wants" can be stale — made against a version someone else has since
+ * changed. `expectedVersion` is the version the client was looking at; if it
+ * is not the current one the edit is refused ("conflict", a 409) rather than
+ * silently throwing away the other person's change. The row lock makes the
+ * check and the write one step.
+ *
+ * Who added each record survives the rewrite: see collab.carryAddedBy.
  */
 export async function replaceItems(
   userId: string,
   playlistId: string,
   entries: PlaylistItemRow[],
-): Promise<boolean> {
+  expectedVersion?: number,
+): Promise<ReplaceResult> {
   return tx(async (client) => {
-    const owned = await client.query<{ id: string }>(
-      `SELECT id FROM playlists WHERE id = $1 AND user_id = $2 FOR UPDATE`,
+    const locked = await client.query<{ version: number }>(
+      `SELECT p.version FROM playlists p
+        WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
+        FOR UPDATE`,
       [playlistId, userId],
     );
-    if (owned.rows.length === 0) return false;
+    const current = locked.rows[0];
+    if (!current) return "not_found";
+    if (expectedVersion !== undefined && current.version !== expectedVersion) {
+      return "conflict";
+    }
+
+    const previous = await client.query<{ clip_key: string; added_by: string | null }>(
+      `SELECT clip_key, added_by FROM playlist_items
+        WHERE playlist_id = $1 ORDER BY position`,
+      [playlistId],
+    );
+    const addedBy = carryAddedBy(
+      previous.rows.map((r) => ({ clipKey: r.clip_key, addedBy: r.added_by })),
+      entries.map((e) => e.clipKey),
+      userId,
+    );
 
     await client.query(`DELETE FROM playlist_items WHERE playlist_id = $1`, [
       playlistId,
     ]);
-    await insertItems(client, playlistId, entries);
+    await insertItems(client, playlistId, entries, addedBy);
     await client.query(
-      `UPDATE playlists SET updated_at = now() WHERE id = $1`,
+      `UPDATE playlists SET updated_at = now(), version = version + 1 WHERE id = $1`,
       [playlistId],
     );
-    return true;
+    return "ok";
   });
 }
 
+/** Owner only. Deleting takes every collaborator's access with it. */
 export async function deletePlaylist(
   userId: string,
   playlistId: string,
@@ -587,6 +667,169 @@ export async function deletePlaylist(
   return rows.length > 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Collaboration                                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Turn the join link on (minting a fresh one) or off. Owner only.
+ *
+ * Off is permanent for that link, like a share link: turning it back on makes
+ * a new one. People already in stay in — the link is how you get in, not
+ * what keeps you there. Returns the link token once, on the way out; it is
+ * stored only as a hash (for lookup) and sealed (so the owner can copy it
+ * again without breaking the copy already sent).
+ */
+export async function setJoinLink(
+  userId: string,
+  playlistId: string,
+  on: boolean,
+): Promise<{ token: string | null } | null> {
+  const token = on ? randomBytes(32).toString("base64url") : null;
+  const row = await queryOne<{ id: string }>(
+    `UPDATE playlists
+        SET collab_token_hash = $3::text,
+            collab_token_sealed = $4::text,
+            updated_at = now()
+      WHERE id = $1 AND user_id = $2
+      RETURNING id`,
+    [playlistId, userId, token ? hashJoinToken(token) : null, token ? seal(token) : null],
+  );
+  return row ? { token } : null;
+}
+
+/** The current join link, for its owner to copy again. Null if it is off. */
+export async function getJoinLink(
+  userId: string,
+  playlistId: string,
+): Promise<{ token: string | null } | null> {
+  const row = await queryOne<{ collab_token_sealed: string | null }>(
+    `SELECT collab_token_sealed FROM playlists WHERE id = $1 AND user_id = $2`,
+    [playlistId, userId],
+  );
+  if (!row) return null;
+  const token = row.collab_token_sealed ? unseal<string>(row.collab_token_sealed) : null;
+  return { token: isJoinToken(token) ? token : null };
+}
+
+export interface JoinPreview {
+  playlistId: string;
+  name: string;
+  owner: string;
+  tracks: number;
+  collaborators: number;
+  /** You already have it: owner, or joined before. */
+  alreadyIn: boolean;
+}
+
+/**
+ * What the join page shows a signed-in member holding a live link.
+ *
+ * Deliberately small: the name, whose it is, how big. The records themselves
+ * are not shown until you have joined — the link is an invitation to work on
+ * the set, not a second way to read it.
+ */
+export async function previewJoin(
+  userId: string,
+  token: string,
+): Promise<JoinPreview | null> {
+  if (!isJoinToken(token)) return null;
+  const row = await queryOne<{
+    id: string;
+    name: string;
+    owner: string;
+    tracks: string;
+    collaborators: string;
+    already_in: boolean;
+  }>(
+    `SELECT p.id, p.name, o.username_display AS owner,
+            (SELECT count(*) FROM playlist_items i WHERE i.playlist_id = p.id)::text AS tracks,
+            (SELECT count(*) FROM playlist_members m WHERE m.playlist_id = p.id)::text AS collaborators,
+            ${CAN_EDIT("p", "$2")} AS already_in
+       FROM playlists p
+       JOIN users o ON o.id = p.user_id
+      WHERE p.collab_token_hash = $1`,
+    [hashJoinToken(token), userId],
+  );
+  if (!row) return null;
+  return {
+    playlistId: row.id,
+    name: row.name,
+    owner: row.owner,
+    tracks: Number(row.tracks),
+    collaborators: Number(row.collaborators),
+    alreadyIn: row.already_in,
+  };
+}
+
+export type JoinResult =
+  | { status: "joined" | "already"; playlistId: string }
+  | { status: "full" }
+  | null;
+
+/**
+ * Join a playlist through its link — only ever as a result of the person
+ * pressing Join themselves. The playlist row is locked so the member cap
+ * cannot be overshot by two people joining at once.
+ */
+export async function joinPlaylist(userId: string, token: string): Promise<JoinResult> {
+  if (!isJoinToken(token)) return null;
+  return tx(async (client) => {
+    const found = await client.query<{ id: string; user_id: string }>(
+      `SELECT id, user_id FROM playlists WHERE collab_token_hash = $1 FOR UPDATE`,
+      [hashJoinToken(token)],
+    );
+    const playlist = found.rows[0];
+    if (!playlist) return null;
+    if (playlist.user_id === userId) return { status: "already", playlistId: playlist.id };
+
+    const counted = await client.query<{ n: string; mine: boolean }>(
+      `SELECT count(*)::text AS n, bool_or(user_id = $2) AS mine
+         FROM playlist_members WHERE playlist_id = $1`,
+      [playlist.id, userId],
+    );
+    const { n, mine } = counted.rows[0] ?? { n: "0", mine: false };
+    if (mine) return { status: "already", playlistId: playlist.id };
+    if (Number(n) >= MAX_COLLABORATORS) return { status: "full" };
+
+    await client.query(
+      `INSERT INTO playlist_members (playlist_id, user_id) VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [playlist.id, userId],
+    );
+    await client.query(`UPDATE playlists SET updated_at = now() WHERE id = $1`, [
+      playlist.id,
+    ]);
+    return { status: "joined", playlistId: playlist.id };
+  });
+}
+
+/**
+ * Take someone off a playlist.
+ *
+ * The owner can remove any collaborator; a collaborator can remove only
+ * themselves (leaving). Nobody can remove the owner — there is no row to
+ * delete, the owner is not a member, they are the owner. Anyone else asking
+ * gets the same "no such thing" as for a playlist they cannot see.
+ */
+export async function removeCollaborator(
+  actorId: string,
+  playlistId: string,
+  username: string,
+): Promise<boolean> {
+  const row = await queryOne<{ id: string }>(
+    `DELETE FROM playlist_members m
+      USING playlists p, users u
+      WHERE m.playlist_id = p.id
+        AND m.user_id = u.id
+        AND p.id = $1
+        AND u.username_key = lower($3)
+        AND (p.user_id = $2 OR m.user_id = $2)
+      RETURNING m.user_id AS id`,
+    [playlistId, actorId, username],
+  );
+  return row !== null;
+}
 
 /* ------------------------------------------------------------------ */
 /* Share links                                                         */
