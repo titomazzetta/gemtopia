@@ -1,0 +1,220 @@
+/**
+ * Chat on collaborative playlists: the text rules (src/lib/chat.ts) and how
+ * the chat is kept and drawn (src/client/chatView.ts).
+ *
+ *   npm run test:chat
+ *
+ * Who can read, post and delete is enforced in SQL and tested against a real
+ * database in test-api.mjs.
+ */
+import assert from "node:assert/strict";
+import {
+  MAX_MESSAGE_CHARS,
+  MAX_MESSAGE_LINES,
+  canDeleteMessage,
+  isMessageId,
+  messageLength,
+  normaliseMessage,
+} from "../src/lib/chat.ts";
+import { groupRuns, hasUnread, mergeLatest, prependOlder } from "../src/client/chatView.ts";
+
+let ran = 0;
+let failed = 0;
+function check(name, fn) {
+  ran += 1;
+  try {
+    fn();
+  } catch (error) {
+    failed += 1;
+    console.error(`FAIL  ${name}\n      ${error.message}`);
+  }
+}
+
+const body = (input) => {
+  const r = normaliseMessage(input);
+  return r.ok ? r.body : r.reason;
+};
+
+/* ---------------- what gets stored ---------------- */
+
+check("ordinary text is kept exactly", () => {
+  for (const text of [
+    "Swap 4 and 5 — the key clash is rough",
+    "Move the Theo Parrish up <3",
+    "it's \"fine\" & 100% ok; DROP TABLE users; --",
+    "<script>alert(1)</script>",
+    "¡Qué bueno! 日本語 🔥🎛️ 👩🏽‍🎤",
+  ]) {
+    assert.equal(body(text), text, text);
+  }
+});
+
+check("markup and SQL are data, not something to strip", () => {
+  // Parameterised queries and React's escaping are the defences; mangling
+  // what people typed would add nothing.
+  assert.equal(body("<b>bold</b>"), "<b>bold</b>");
+  assert.equal(body("'; DELETE FROM playlist_messages; --"), "'; DELETE FROM playlist_messages; --");
+});
+
+check("empty and whitespace-only messages are refused", () => {
+  for (const v of ["", "   ", "\n\n\t", "​‮", "\u0000\u0007"]) {
+    assert.equal(body(v), "empty", JSON.stringify(v));
+  }
+});
+
+check("anything that isn't a string is refused", () => {
+  for (const v of [null, undefined, 42, {}, ["hi"], true]) {
+    assert.equal(body(v), "empty", String(v));
+  }
+});
+
+check("the limit is 500 characters, counted as Postgres counts them", () => {
+  assert.equal(MAX_MESSAGE_CHARS, 500);
+  assert.equal(body("a".repeat(500)).length, 500);
+  assert.equal(body("a".repeat(501)), "too_long");
+  // 500 emoji are 1000 UTF-16 units but 500 characters.
+  const fire = "🔥".repeat(500);
+  assert.equal(messageLength(fire), 500);
+  assert.equal(body(fire), fire);
+  assert.equal(body(fire + "🔥"), "too_long");
+});
+
+check("too long is refused, never silently cut", () => {
+  assert.equal(normaliseMessage("x".repeat(10_000)).ok, false);
+});
+
+check("bidi overrides and invisible characters are removed (Trojan Source)", () => {
+  assert.equal(body("pay ‮gnp.exe"), "pay gnp.exe");
+  assert.equal(body("a⁦b⁩c"), "abc");
+  assert.equal(body("zero​width"), "zerowidth");
+  assert.equal(body("﻿bom"), "bom");
+  assert.equal(body("soft­hyphen"), "softhyphen");
+});
+
+check("emoji joiners survive", () => {
+  const family = "👨‍👩‍👧";
+  assert.equal(body(family), family);
+  assert.equal(body("1️⃣"), "1️⃣");
+});
+
+check("control characters go; tabs become spaces; CRLF becomes a newline", () => {
+  assert.equal(body("a\u0000b\u0007c\u001Bd\u009Fe"), "abcde");
+  assert.equal(body("a\tb"), "a b");
+  assert.equal(body("one\r\ntwo\rthree"), "one\ntwo\nthree");
+});
+
+check("broken UTF-16 is replaced, not stored", () => {
+  assert.equal(body("a\uD800b"), "a�b");
+  assert.equal(body("a\uDC00b"), "a�b");
+});
+
+check("stacks of combining marks are cut down (no Zalgo)", () => {
+  const zalgo = "e" + "́".repeat(40);
+  const out = body(zalgo);
+  assert.equal(messageLength(out), 5, "the letter and four marks");
+});
+
+check("text is stored in one Unicode form", () => {
+  // "é" as e + combining acute becomes the single character.
+  assert.equal(body("café"), "café");
+});
+
+check("blank lines collapse; trailing space goes; the ends are trimmed", () => {
+  assert.equal(body("  one  \n\n\n\ntwo   \n"), "one\n\ntwo");
+});
+
+check("a wall of lines is folded to the line limit", () => {
+  const many = Array.from({ length: 60 }, (_, i) => `line ${i}`).join("\n");
+  const out = body(many);
+  assert.equal(out.split("\n").length, MAX_MESSAGE_LINES);
+  assert.ok(out.endsWith("line 59"));
+});
+
+check("normalising is stable", () => {
+  for (const text of ["a‮b\r\n\n\nc  ", "e" + "́".repeat(9), "plain"]) {
+    const once = body(text);
+    assert.equal(body(once), once);
+  }
+});
+
+/* ---------------- ids and permissions ---------------- */
+
+check("message ids are positive decimal BIGINTs and nothing else", () => {
+  for (const v of ["1", "42", "999999999999999999"]) assert.ok(isMessageId(v), v);
+  for (const v of ["0", "-1", "01", "1.5", "1e3", "abc", "1; DROP TABLE x", "", "9999999999999999999", 1, null]) {
+    assert.equal(isMessageId(v), false, String(v));
+  }
+});
+
+check("you can delete your own messages; the owner can delete any", () => {
+  assert.equal(canDeleteMessage("editor", true), true);
+  assert.equal(canDeleteMessage("editor", false), false);
+  assert.equal(canDeleteMessage("owner", false), true);
+  assert.equal(canDeleteMessage("owner", true), true);
+});
+
+/* ---------------- keeping and drawing the chat ---------------- */
+
+const msg = (id, author, at, mine = false) => ({ id: String(id), author, body: `m${id}`, at, mine });
+const T = new Date(2026, 8, 30, 21, 0).getTime();
+
+check("the latest page is folded in oldest first", () => {
+  const out = mergeLatest([], [msg(3, "a", T), msg(2, "a", T), msg(1, "a", T)]);
+  assert.deepEqual(out.map((m) => m.id), ["1", "2", "3"]);
+});
+
+check("ids are compared as numbers, not text", () => {
+  const out = mergeLatest([], [msg(10, "a", T), msg(9, "a", T)]);
+  assert.deepEqual(out.map((m) => m.id), ["9", "10"]);
+});
+
+check("a deleted message disappears on the next poll", () => {
+  const shown = [msg(1, "a", T), msg(2, "b", T), msg(3, "a", T)];
+  const out = mergeLatest(shown, [msg(3, "a", T), msg(1, "a", T)]);
+  assert.deepEqual(out.map((m) => m.id), ["1", "3"]);
+});
+
+check("older history you scrolled back to is kept", () => {
+  const shown = [msg(5, "a", T), msg(60, "a", T), msg(61, "a", T)];
+  const out = mergeLatest(shown, [msg(62, "b", T), msg(61, "a", T), msg(60, "a", T)]);
+  assert.deepEqual(out.map((m) => m.id), ["5", "60", "61", "62"]);
+});
+
+check("an empty latest page means an empty chat", () => {
+  assert.deepEqual(mergeLatest([msg(1, "a", T)], []), []);
+});
+
+check("an older page goes in front, without duplicates", () => {
+  const out = prependOlder([msg(3, "a", T), msg(4, "a", T)], [msg(2, "a", T), msg(3, "a", T), msg(1, "a", T)]);
+  assert.deepEqual(out.map((m) => m.id), ["1", "2", "3", "4"]);
+});
+
+check("unread is newer than what this browser has seen", () => {
+  assert.equal(hasUnread(null, null), false);
+  assert.equal(hasUnread("5", null), true);
+  assert.equal(hasUnread("5", "5"), false);
+  assert.equal(hasUnread("10", "9"), true, "numeric, not text");
+  assert.equal(hasUnread("9", "10"), false);
+});
+
+check("consecutive messages from one person are one run", () => {
+  const runs = groupRuns(
+    [msg(1, "a", T), msg(2, "a", T + 60_000), msg(3, "b", T + 120_000), msg(4, "a", T + 180_000)],
+    T,
+  );
+  assert.deepEqual(runs.map((r) => r.messages.map((m) => m.id)), [["1", "2"], ["3"], ["4"]]);
+});
+
+check("a long pause starts a new run", () => {
+  const runs = groupRuns([msg(1, "a", T), msg(2, "a", T + 10 * 60_000)], T);
+  assert.equal(runs.length, 2);
+});
+
+check("each day gets one divider", () => {
+  const yesterday = T - 86_400_000;
+  const runs = groupRuns([msg(1, "a", yesterday), msg(2, "b", yesterday + 1000), msg(3, "a", T)], T);
+  assert.deepEqual(runs.map((r) => r.day), ["Yesterday", null, "Today"]);
+});
+
+console.log(`\n${ran - failed}/${ran} chat tests passed.`);
+if (failed > 0) process.exit(1);

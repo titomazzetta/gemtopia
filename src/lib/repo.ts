@@ -7,8 +7,14 @@ import {
   carryAddedBy,
   hashJoinToken,
   isJoinToken,
+  removalsNotAllowed,
 } from "./collab";
-import type { Playlist, PlaylistItemRow, TrackMeta } from "./types";
+import {
+  MAX_MESSAGES_KEPT,
+  MAX_MESSAGES_PER_MINUTE,
+  MESSAGE_PAGE,
+} from "./chat";
+import type { ChatMessage, Playlist, PlaylistItemRow, TrackMeta } from "./types";
 
 /**
  * Data access.
@@ -369,6 +375,7 @@ interface PlaylistRow {
   join_link_on: boolean;
   owner: string;
   collaborators: string[] | null;
+  last_message_id: string | null;
 }
 
 interface ItemRow {
@@ -407,7 +414,9 @@ const PLAYLIST_COLUMNS = `
   o.username_display AS owner,
   (SELECT array_agg(u.username_display ORDER BY m.joined_at)
      FROM playlist_members m JOIN users u ON u.id = m.user_id
-    WHERE m.playlist_id = p.id) AS collaborators`;
+    WHERE m.playlist_id = p.id) AS collaborators,
+  (SELECT max(c.id)::text FROM playlist_messages c
+    WHERE c.playlist_id = p.id) AS last_message_id`;
 
 function toEntry(i: ItemRow): PlaylistItemRow {
   return {
@@ -438,6 +447,7 @@ function toPlaylist(row: PlaylistRow, items: PlaylistItemRow[]): Playlist {
     collaborators: row.collaborators ?? [],
     joinLinkOn: row.join_link_on,
     version: row.version,
+    lastMessageId: row.last_message_id,
   };
 }
 
@@ -597,7 +607,7 @@ export async function renamePlaylist(
   return rows.length > 0;
 }
 
-export type ReplaceResult = "ok" | "not_found" | "conflict";
+export type ReplaceResult = "ok" | "not_found" | "conflict" | "not_yours";
 
 /**
  * Replace a playlist's contents wholesale. Reorder, add and remove all funnel
@@ -612,6 +622,11 @@ export type ReplaceResult = "ok" | "not_found" | "conflict";
  * check and the write one step.
  *
  * Who added each record survives the rewrite: see collab.carryAddedBy.
+ *
+ * A collaborator may take out only records they added; anyone else's stay
+ * unless the owner removes them. That is checked here, against the rows as
+ * they are under the lock, not against anything the client says it removed
+ * ("not_yours", a 403). See collab.removalsNotAllowed.
  */
 export async function replaceItems(
   userId: string,
@@ -620,8 +635,8 @@ export async function replaceItems(
   expectedVersion?: number,
 ): Promise<ReplaceResult> {
   return tx(async (client) => {
-    const locked = await client.query<{ version: number }>(
-      `SELECT p.version FROM playlists p
+    const locked = await client.query<{ version: number; is_owner: boolean }>(
+      `SELECT p.version, (p.user_id = $2) AS is_owner FROM playlists p
         WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
         FOR UPDATE`,
       [playlistId, userId],
@@ -637,11 +652,15 @@ export async function replaceItems(
         WHERE playlist_id = $1 ORDER BY position`,
       [playlistId],
     );
-    const addedBy = carryAddedBy(
-      previous.rows.map((r) => ({ clipKey: r.clip_key, addedBy: r.added_by })),
-      entries.map((e) => e.clipKey),
-      userId,
-    );
+    const credited = previous.rows.map((r) => ({
+      clipKey: r.clip_key,
+      addedBy: r.added_by,
+    }));
+    const nextKeys = entries.map((e) => e.clipKey);
+    if (removalsNotAllowed(credited, nextKeys, userId, current.is_owner) > 0) {
+      return "not_yours";
+    }
+    const addedBy = carryAddedBy(credited, nextKeys, userId);
 
     await client.query(`DELETE FROM playlist_items WHERE playlist_id = $1`, [
       playlistId,
@@ -847,6 +866,147 @@ export interface SharedPlaylist {
   notes: string | null;
   items: PlaylistItemRow[];
   sharedAt: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Chat on collaborative playlists                                     */
+/* ------------------------------------------------------------------ */
+
+interface MessageRow {
+  id: string;
+  body: string;
+  created_at: Date;
+  author: string | null;
+  mine: boolean;
+}
+
+function toMessage(row: MessageRow): ChatMessage {
+  return {
+    id: row.id,
+    author: row.author,
+    body: row.body,
+    at: row.created_at.getTime(),
+    mine: row.mine,
+  };
+}
+
+/**
+ * A page of a playlist's chat, newest first: the latest page, or the page
+ * before `before`. Owner or collaborator; anyone else gets null (a 404), the
+ * same answer as for a playlist that does not exist.
+ *
+ * Polling reads the latest page again rather than "everything after id N":
+ * it picks up deletions for free, and it cannot miss a message that
+ * committed out of id order.
+ */
+export async function listMessages(
+  userId: string,
+  playlistId: string,
+  before: string | null,
+): Promise<{ messages: ChatMessage[]; hasMore: boolean } | null> {
+  const access = await queryOne<{ id: string }>(
+    `SELECT p.id FROM playlists p WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}`,
+    [playlistId, userId],
+  );
+  if (!access) return null;
+
+  const rows = await query<MessageRow>(
+    `SELECT m.id::text AS id, m.body, m.created_at,
+            u.username_display AS author,
+            (m.author_id IS NOT DISTINCT FROM $2::uuid) AS mine
+       FROM playlist_messages m
+       LEFT JOIN users u ON u.id = m.author_id
+      WHERE m.playlist_id = $1
+        AND ($3::bigint IS NULL OR m.id < $3::bigint)
+      ORDER BY m.id DESC
+      LIMIT $4`,
+    [playlistId, userId, before, MESSAGE_PAGE + 1],
+  );
+  return {
+    messages: rows.slice(0, MESSAGE_PAGE).map(toMessage),
+    hasMore: rows.length > MESSAGE_PAGE,
+  };
+}
+
+export type PostResult =
+  | { status: "ok"; message: ChatMessage }
+  | { status: "not_found" }
+  | { status: "too_fast" };
+
+/**
+ * Post a message. `body` must already be normalised (chat.normaliseMessage);
+ * the CHECK constraint refuses anything empty or over 500 characters anyway.
+ *
+ * The access condition is inside the INSERT itself, so there is no window
+ * between "may they?" and "they did". The per-person limit is counted in the
+ * database, so it holds however many serverless instances are running.
+ */
+export async function postMessage(
+  userId: string,
+  playlistId: string,
+  body: string,
+): Promise<PostResult> {
+  const recent = await queryOne<{ n: number }>(
+    `SELECT count(*)::int AS n FROM playlist_messages
+      WHERE author_id = $1 AND created_at > now() - interval '1 minute'`,
+    [userId],
+  );
+  if ((recent?.n ?? 0) >= MAX_MESSAGES_PER_MINUTE) return { status: "too_fast" };
+
+  const row = await queryOne<MessageRow>(
+    `WITH inserted AS (
+       INSERT INTO playlist_messages (playlist_id, author_id, body)
+       SELECT p.id, $2, $3
+         FROM playlists p
+        WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
+       RETURNING id, body, created_at
+     )
+     SELECT i.id::text AS id, i.body, i.created_at,
+            u.username_display AS author, true AS mine
+       FROM inserted i
+       JOIN users u ON u.id = $2`,
+    [playlistId, userId, body],
+  );
+  if (!row) return { status: "not_found" };
+
+  // Keep the newest MAX_MESSAGES_KEPT. Cheap on the (playlist_id, id) index,
+  // and a no-op until a chat is that long.
+  await query(
+    `DELETE FROM playlist_messages
+      WHERE playlist_id = $1
+        AND id <= (SELECT id FROM playlist_messages
+                    WHERE playlist_id = $1
+                    ORDER BY id DESC
+                    OFFSET $2 LIMIT 1)`,
+    [playlistId, MAX_MESSAGES_KEPT],
+  );
+
+  return { status: "ok", message: toMessage(row) };
+}
+
+/**
+ * Delete one message: your own, or any on a playlist you own. Everything is
+ * in the WHERE clause — the message, its playlist, your access to that
+ * playlist, and your right to this message — so any other combination
+ * deletes nothing and is a 404.
+ */
+export async function deleteMessage(
+  userId: string,
+  playlistId: string,
+  messageId: string,
+): Promise<boolean> {
+  const rows = await query<{ id: string }>(
+    `DELETE FROM playlist_messages m
+      USING playlists p
+      WHERE m.id = $3::bigint
+        AND m.playlist_id = $1
+        AND p.id = m.playlist_id
+        AND ${CAN_EDIT("p", "$2")}
+        AND (m.author_id = $2 OR p.user_id = $2)
+      RETURNING m.id::text AS id`,
+    [playlistId, userId, messageId],
+  );
+  return rows.length > 0;
 }
 
 /**

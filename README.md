@@ -613,9 +613,16 @@ playlists too.
 
 - **Amber means shared.** A playlist open to other people has an amber edge and
   says who's on it, from the moment its link is out.
-- **Everyone builds, one person owns.** Collaborators add, remove and reorder
-  records; only the owner renames it, deletes it, makes a read-only share link,
+- **Everyone builds, one person owns.** Collaborators add and reorder
+  records, and can take out the ones they added. Only the owner takes out
+  anyone else's records, renames it, deletes it, makes a read-only share link,
   or manages the join link and the people on it. Anyone can leave.
+- **Talk it through.** Every shared playlist has a chat — the running order,
+  a blend that needs work, who's bringing which record. Your messages on the
+  right, everyone else's on the left, a dot on the chat button when there's
+  something new. Up to 500 characters a message; delete your own, and the
+  owner can delete any. Plain text only: nothing typed is ever turned into
+  HTML or a link.
 - **Who brought what.** Every record remembers who added it, and the whole
   list shows it — so on the night, everyone knows which records to pack.
 - **No silent overwrites.** Each edit says which version of the list it was
@@ -803,9 +810,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 602 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 641 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 121 API tests against a running server. CodeQL
+reached the client bundle, then 139 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -1018,13 +1025,14 @@ npm run test:dig-feed   # 9
 npm run test:dig-links  # 11
 npm run test:sync-queue # 7
 npm run test:clip-drag  # 5
-npm run test:pull-list  # 6
+npm run test:pull-list  # 8
 npm run test:search-play # 4
 npm run test:invites    # 28
 npm run test:manifest   # 8
-npm run test:collab     # 12
-npm run test:collab-view # 5 — 602 offline in all
-npm run test:api        # 121 checks, needs a running server + Postgres
+npm run test:collab     # 20
+npm run test:collab-view # 7
+npm run test:chat       # 27 — 641 offline in all
+npm run test:api        # 139 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci
@@ -1065,6 +1073,15 @@ removed member, admin, invite-only and code. The database half (single use,
 revocation, removal, the 404 wall around the admin routes) is in `test-api.mjs`,
 because only Postgres can prove a row lock holds. CI runs every suite; until
 this change a dozen of the newer ones existed but were never wired into it.
+
+**`test-chat.mjs`** pins what a chat message may be: ordinary text, markup and
+SQL kept exactly as typed (they are data — escaping happens on output), bidi
+overrides and zero-width characters removed, control characters and broken
+UTF-16 gone, "Zalgo" stacks capped, 500 characters counted the way Postgres
+counts them (500 emoji fit; 501 characters are refused, never cut), and message
+ids that are positive BIGINTs and nothing else. The database half — the 404
+wall, who can delete what, a collaborator unable to take out someone else's
+record — is in `test-api.mjs`.
 
 **`test-tempo.mjs`** synthesises onset envelopes at known tempi — with jitter,
 noise, off-beat hats and backbeats — and asserts the estimator recovers them. It

@@ -113,7 +113,9 @@ import { PlaylistViewBar } from "./PlaylistViewBar";
 import { PullList } from "./PullList";
 import { InvitePanel } from "./InvitePanel";
 import { CollabPanel } from "./CollabPanel";
-import { isCollabPlaylist, collabLine } from "@/client/collabView";
+import { ChatPanel, readSeen } from "./ChatPanel";
+import { isCollabPlaylist, collabLine, canRemoveEntry } from "@/client/collabView";
+import { hasUnread } from "@/client/chatView";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
@@ -127,7 +129,7 @@ import {
 } from "@/client/adopt";
 import { DiscogsSearch } from "./DiscogsSearch";
 import type { SearchHit } from "@/lib/discogs";
-import { Compass, ListIcon, Metronome, Refresh, Search, Shuffle, Users } from "./Icons";
+import { ChatIcon, Compass, ListIcon, Metronome, Refresh, Search, Shuffle, Users } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights" | "search";
 
@@ -223,6 +225,9 @@ export function CrateApp({
   const [prepOpen, setPrepOpen] = useState(false);
   /** The playlist whose collaborate panel is open. */
   const [collabFor, setCollabFor] = useState<string | null>(null);
+  const [chatFor, setChatFor] = useState<string | null>(null);
+  // Bumped when the chat marks messages seen, so the unread dot re-reads.
+  const [chatSeenTick, setChatSeenTick] = useState(0);
   /*
    * How the open playlist is being *looked at* — never how it is stored.
    * Remembered against the playlist it was chosen for, so opening any other
@@ -1272,6 +1277,21 @@ export function CrateApp({
    * is usually against the latest version, so the 409 path stays rare.
    */
   const collabOpen = Boolean(activePlaylist && isCollabPlaylist(activePlaylist));
+
+  /*
+   * A dot on the chat button when someone has said something since you last
+   * looked. The newest id comes with the playlist (refreshed every 20s above);
+   * what you've seen is kept in this browser. chatSeenTick re-reads it after
+   * the chat marks messages seen.
+   */
+  const chatUnread = useMemo(
+    () =>
+      chatSeenTick >= 0 &&
+      Boolean(activePlaylist) &&
+      collabOpen &&
+      hasUnread(activePlaylist?.lastMessageId ?? null, readSeen(activePlaylist?.id ?? "")),
+    [activePlaylist, collabOpen, chatSeenTick],
+  );
   useEffect(() => {
     if (!collabOpen) return;
     const refresh = () => {
@@ -2275,18 +2295,34 @@ export function CrateApp({
                       <ListIcon className="h-3.5 w-3.5" />
                       List
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setCollabFor(activePlaylist.id)}
-                      aria-label={isCollabPlaylist(activePlaylist) ? "Collaborators" : "Collaborate"}
-                      className={`flex shrink-0 items-center rounded-md border px-2 py-1.5 text-xs ${
-                        isCollabPlaylist(activePlaylist)
-                          ? "border-accent-alt/60 bg-accent-alt/10 text-accent-alt"
-                          : "border-ink-700 text-neutral-300"
-                      }`}
-                    >
-                      <Users className="h-3.5 w-3.5" />
-                    </button>
+                    {/*
+                      One amber button either way. On a shared playlist it's
+                      the chat — the people are one tap further, from the
+                      chat's header — so the playlist's name keeps its room.
+                    */}
+                    {!isCollabPlaylist(activePlaylist) && (
+                      <button
+                        type="button"
+                        onClick={() => setCollabFor(activePlaylist.id)}
+                        aria-label="Collaborate"
+                        className="flex shrink-0 items-center rounded-md border border-ink-700 px-2 py-1.5 text-xs text-neutral-300"
+                      >
+                        <Users className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {isCollabPlaylist(activePlaylist) && (
+                      <button
+                        type="button"
+                        onClick={() => setChatFor(activePlaylist.id)}
+                        aria-label={chatUnread ? "Chat — new messages" : "Chat"}
+                        className="relative flex shrink-0 items-center rounded-md border border-accent-alt/60 bg-accent-alt/10 px-2 py-1.5 text-xs text-accent-alt"
+                      >
+                        <ChatIcon className="h-3.5 w-3.5" />
+                        {chatUnread && (
+                          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-accent ring-2 ring-ink-950" aria-hidden="true" />
+                        )}
+                      </button>
+                    )}
                   </>
                 )}
 
@@ -2397,15 +2433,36 @@ export function CrateApp({
               <button
                 type="button"
                 onClick={() => setCollabFor(activePlaylist.id)}
-                title="Build this set with other people"
-                className={`ml-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium ${
+                title={
+                  isCollabPlaylist(activePlaylist)
+                    ? "People on this playlist, and the join link"
+                    : "Build this set with other people"
+                }
+                className={`ml-auto flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px] font-medium ${
                   isCollabPlaylist(activePlaylist)
                     ? "border-accent-alt/60 text-accent-alt"
                     : "border-ink-700 text-neutral-200 hover:border-accent-alt/50 hover:text-accent-alt"
                 }`}
               >
                 <Users className="h-3 w-3" />
-                Collaborate
+                {/* Once it's shared, the count says more than the verb. */}
+                {isCollabPlaylist(activePlaylist)
+                  ? 1 + activePlaylist.collaborators.length
+                  : "Collaborate"}
+              </button>
+            )}
+            {activePlaylist && isCollabPlaylist(activePlaylist) && (
+              <button
+                type="button"
+                onClick={() => setChatFor(activePlaylist.id)}
+                title="Talk through the set with everyone on it"
+                className="relative flex items-center gap-1.5 whitespace-nowrap rounded-full border border-accent-alt/60 px-3 py-1.5 text-[11px] font-medium text-accent-alt hover:bg-accent-alt/10"
+              >
+                <ChatIcon className="h-3 w-3" />
+                Chat
+                {chatUnread && (
+                  <span className="h-2 w-2 rounded-full bg-accent" aria-label="new messages" />
+                )}
               </button>
             )}
             {activePlaylist && (
@@ -2413,7 +2470,7 @@ export function CrateApp({
                 type="button"
                 onClick={() => setPullListFor(activePlaylist.id)}
                 title="The whole running order at once — BPMs and every transition — and a way to tick records off as you pull them"
-                className="flex items-center gap-1.5 rounded-full border border-ink-700 px-3 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
+                className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-ink-700 px-3 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
               >
                 <ListIcon className="h-3 w-3" />
                 Whole list
@@ -2423,7 +2480,7 @@ export function CrateApp({
               <button
                 type="button"
                 onClick={() => setActivePlaylistId(null)}
-                className="text-[11px] text-neutral-500 hover:text-neutral-200"
+                className="whitespace-nowrap text-[11px] text-neutral-500 hover:text-neutral-200"
               >
                 Back to crate
               </button>
@@ -2508,6 +2565,21 @@ export function CrateApp({
                         // In a sorted view the third row is not the third entry.
                         const entry = entryIndexAt(viewOrder, index);
                         if (entry !== null) removeFromPlaylist(entry);
+                      }
+                    : undefined
+                }
+                canRemove={
+                  activePlaylist && activePlaylist.role !== "owner"
+                    ? (_item, index) => {
+                        const entry = entryIndexAt(viewOrder, index);
+                        return (
+                          entry !== null &&
+                          canRemoveEntry(
+                            activePlaylist.role,
+                            activePlaylist.entries[entry]?.addedBy,
+                            username,
+                          )
+                        );
                       }
                     : undefined
                 }
@@ -2608,6 +2680,27 @@ export function CrateApp({
             if (activePlaylistId === left) setActivePlaylistId(null);
             setPlaylists((previous) => previous.filter((p) => p.id !== left));
             say("You left that playlist.");
+          }}
+        />
+      )}
+
+      {chatFor && playlists.find((p) => p.id === chatFor) && (
+        <ChatPanel
+          playlist={playlists.find((p) => p.id === chatFor)!}
+          me={username}
+          onClose={() => setChatFor(null)}
+          onPeople={() => {
+            const id = chatFor;
+            setChatFor(null);
+            setCollabFor(id);
+          }}
+          onSeen={() => setChatSeenTick((n) => n + 1)}
+          onGone={() => {
+            const gone = chatFor;
+            setChatFor(null);
+            if (activePlaylistId === gone) setActivePlaylistId(null);
+            setPlaylists((previous) => previous.filter((p) => p.id !== gone));
+            say("You're no longer on that playlist.");
           }}
         />
       )}

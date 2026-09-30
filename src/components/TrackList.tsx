@@ -144,6 +144,7 @@ export function TrackList({
   onPlay,
   onAdd,
   onRemove,
+  canRemove,
   emptyMessage,
   emptyAction,
   reorderable = false,
@@ -157,6 +158,11 @@ export function TrackList({
   onPlay: (index: number) => void;
   onAdd?: (item: Playable) => void;
   onRemove?: (item: Playable, index: number) => void;
+  /**
+   * Whether this row may be removed. Omitted means all of them. On a shared
+   * playlist a collaborator can only take out records they added.
+   */
+  canRemove?: (item: Playable, index: number) => boolean;
   emptyMessage: string;
   /**
    * Offered beneath the empty message. An empty crate is the one moment the
@@ -460,7 +466,14 @@ export function TrackList({
                   </button>
                 )}
 
-                {onRemove && (
+                {onRemove && canRemove && !canRemove(item, index) && (
+                  <span
+                    className="h-[26px] w-[26px] shrink-0"
+                    title="Added by someone else — only the owner can take it out"
+                    aria-hidden="true"
+                  />
+                )}
+                {onRemove && (!canRemove || canRemove(item, index)) && (
                   <button
                     type="button"
                     onClick={() => onRemove(item, index)}

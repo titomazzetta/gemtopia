@@ -1217,6 +1217,91 @@ console.log("\ncollaborative playlists");
     assert.equal((await find(owner)).entries.length, 2, "the refused edit changed nothing");
   });
 
+  const asEntries = (playlist) =>
+    playlist.entries.map((e) => ({
+      clipKey: e.clipKey,
+      releaseId: e.releaseId,
+      videoId: e.videoId,
+      title: e.title,
+      artist: e.artist,
+      releaseTitle: e.releaseTitle,
+      year: e.year,
+    }));
+
+  await check("a collaborator can reorder the whole set", async () => {
+    const current = await find(friend);
+    const res = await friend.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: { entries: asEntries(current).reverse(), version: current.version },
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(
+      res.body.playlist.entries.map((e) => e.clipKey),
+      current.entries.map((e) => e.clipKey).reverse(),
+    );
+  });
+
+  await check("a collaborator cannot take out the owner's record", async () => {
+    const current = await find(friend);
+    const res = await friend.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: {
+        entries: asEntries(current).filter((e) => e.clipKey !== "5001:ccccccccccc"),
+        version: current.version,
+      },
+    });
+    assert.equal(res.status, 403);
+    assert.equal(res.body?.error?.code, "not_your_record");
+    const after = await find(owner);
+    assert.ok(after.entries.some((e) => e.clipKey === "5001:ccccccccccc"), "still there");
+    assert.equal(after.version, current.version, "nothing was written");
+  });
+
+  await check("…not even by swapping it for another record", async () => {
+    const current = await find(friend);
+    const entries = asEntries(current).map((e) =>
+      e.clipKey === "5001:ccccccccccc" ? clip(5009, "zzzzzzzzzzz") : e,
+    );
+    const res = await friend.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: { entries, version: current.version },
+    });
+    assert.equal(res.status, 403);
+  });
+
+  await check("a collaborator can take out a record they added", async () => {
+    const current = await find(friend);
+    const res = await friend.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: {
+        entries: asEntries(current).filter((e) => e.clipKey !== "5002:ddddddddddd"),
+        version: current.version,
+      },
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.playlist.entries.map((e) => e.clipKey), ["5001:ccccccccccc"]);
+  });
+
+  await check("the owner can take out anyone's record", async () => {
+    // Friend adds one back, then the owner removes it.
+    let current = await find(friend);
+    const added = await friend.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: { entries: [...asEntries(current), clip(5004, "fffffffffff")], version: current.version },
+    });
+    assert.equal(added.status, 200);
+    current = await find(owner);
+    const res = await owner.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: {
+        entries: asEntries(current).filter((e) => e.clipKey !== "5004:fffffffffff"),
+        version: current.version,
+      },
+    });
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.playlist.entries.map((e) => e.clipKey), ["5001:ccccccccccc"]);
+  });
+
   await check("a collaborator cannot rename, delete, share or manage people", async () => {
     assert.equal(
       (await friend.call(`/api/playlists/${playlistId}`, { method: "PATCH", body: { name: "Mine now" } })).status,
@@ -1248,6 +1333,107 @@ console.log("\ncollaborative playlists");
     assert.ok(await find(third));
   });
 
+  /* ---- chat ---- */
+  const chat = `/api/playlists/${playlistId}/messages`;
+  let ownerMessageId = null;
+  let friendMessageId = null;
+
+  await check("a new playlist's chat is empty, and says so", async () => {
+    const res = await owner.call(chat);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.messages, []);
+    assert.equal(res.body.hasMore, false);
+    assert.equal((await find(owner)).lastMessageId, null);
+  });
+
+  await check("strangers cannot read or post in the chat — one 404", async () => {
+    assert.equal((await stranger.call(chat)).status, 404);
+    assert.equal((await stranger.call(chat, { method: "POST", body: { body: "hi" } })).status, 404);
+    assert.equal((await stranger.call("/api/playlists/not-a-uuid/messages")).status, 404);
+  });
+
+  await check("posting needs a session and a CSRF token", async () => {
+    assert.equal((await friend.call(chat, { method: "POST", body: { body: "hi" }, cookie: "" })).status, 401);
+    assert.equal(
+      (await friend.call(chat, { method: "POST", body: { body: "hi" }, csrfToken: "wrong" })).status,
+      403,
+    );
+  });
+
+  await check("the owner and a collaborator can both post", async () => {
+    const a = await owner.call(chat, { method: "POST", body: { body: "Open with the Theo Parrish?" } });
+    assert.equal(a.status, 201);
+    assert.equal(a.body.message.author, owner.username);
+    assert.equal(a.body.message.mine, true);
+    ownerMessageId = a.body.message.id;
+    const b = await friend.call(chat, { method: "POST", body: { body: "Yes — then my Moodymann" } });
+    assert.equal(b.status, 201);
+    friendMessageId = b.body.message.id;
+    const seen = await owner.call(chat);
+    assert.deepEqual(seen.body.messages.map((m) => m.id), [friendMessageId, ownerMessageId], "newest first");
+    assert.equal(seen.body.messages[0].mine, false);
+    assert.equal(seen.body.messages[1].mine, true);
+    assert.equal((await find(friend)).lastMessageId, friendMessageId);
+  });
+
+  await check("a message is stored as text: markup and SQL stay inert", async () => {
+    const hostile = `<img src=x onerror=alert(1)>'); DROP TABLE playlist_messages; --`;
+    const res = await friend.call(chat, { method: "POST", body: { body: hostile } });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.message.body, hostile, "verbatim — escaping happens on output");
+    assert.equal((await owner.call(chat)).status, 200, "the table is still there");
+    await friend.call(`${chat}/${res.body.message.id}`, { method: "DELETE" });
+  });
+
+  await check("messages are normalised before they are stored", async () => {
+    const res = await friend.call(chat, { method: "POST", body: { body: "  pay ‮gnp.exe ​ " } });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.message.body, "pay gnp.exe");
+    await friend.call(`${chat}/${res.body.message.id}`, { method: "DELETE" });
+  });
+
+  await check("empty, too long, and wrongly shaped messages are refused", async () => {
+    assert.equal((await friend.call(chat, { method: "POST", body: { body: "   " } })).status, 400);
+    assert.equal((await friend.call(chat, { method: "POST", body: { body: "x".repeat(501) } })).status, 400);
+    assert.equal((await friend.call(chat, { method: "POST", body: { text: "hi" } })).status, 400);
+    assert.equal(
+      (await friend.call(chat, { method: "POST", body: { body: "hi", author: owner.username } })).status,
+      400,
+      "nobody posts as someone else",
+    );
+    assert.equal((await friend.call(chat, { method: "POST", body: { body: 42 } })).status, 400);
+  });
+
+  await check("a malformed cursor is refused", async () => {
+    assert.equal((await friend.call(`${chat}?before=1;DROP`)).status, 400);
+    assert.equal((await friend.call(`${chat}?before=${ownerMessageId}`)).status, 200);
+  });
+
+  await check("a collaborator cannot delete someone else's message", async () => {
+    const res = await friend.call(`${chat}/${ownerMessageId}`, { method: "DELETE" });
+    assert.equal(res.status, 404);
+    assert.ok((await owner.call(chat)).body.messages.some((m) => m.id === ownerMessageId));
+  });
+
+  await check("a message id from another playlist, or nonsense, is a 404", async () => {
+    assert.equal((await stranger.call(`${chat}/${friendMessageId}`, { method: "DELETE" })).status, 404);
+    assert.equal((await owner.call(`${chat}/abc`, { method: "DELETE" })).status, 404);
+    assert.equal((await owner.call(`${chat}/0`, { method: "DELETE" })).status, 404);
+  });
+
+  await check("the owner can delete anyone's message", async () => {
+    const res = await owner.call(`${chat}/${friendMessageId}`, { method: "DELETE" });
+    assert.equal(res.status, 200);
+    assert.ok(!(await friend.call(chat)).body.messages.some((m) => m.id === friendMessageId));
+  });
+
+  await check("anyone can delete their own message", async () => {
+    const posted = await third.call(chat, { method: "POST", body: { body: "I'll bring the 12s" } });
+    assert.equal(posted.status, 201);
+    const res = await third.call(`${chat}/${posted.body.message.id}`, { method: "DELETE" });
+    assert.equal(res.status, 200);
+  });
+
   await check("strangers still cannot see it at all", async () => {
     assert.equal((await stranger.call(`/api/playlists/${playlistId}`)).status, 404);
     assert.equal(await find(stranger), null);
@@ -1274,6 +1460,14 @@ console.log("\ncollaborative playlists");
     assert.equal(res.status, 200);
     assert.equal((await third.call(`/api/playlists/${playlistId}`)).status, 404);
     assert.equal(await find(third), null);
+  });
+
+  await check("…and the chat with it", async () => {
+    assert.equal((await third.call(`/api/playlists/${playlistId}/messages`)).status, 404);
+    assert.equal(
+      (await third.call(`/api/playlists/${playlistId}/messages`, { method: "POST", body: { body: "still here?" } })).status,
+      404,
+    );
   });
 
   await check("a collaborator can leave", async () => {

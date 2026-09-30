@@ -48,6 +48,9 @@ export type CollabRole = "owner" | "editor";
 
 export type PlaylistAction =
   | "edit-items"
+  | "remove-any-record"
+  | "chat"
+  | "delete-any-message"
   | "rename"
   | "delete"
   | "share-link"
@@ -56,13 +59,67 @@ export type PlaylistAction =
   | "leave";
 
 /**
- * Who may do what. Editors change what's in the set and its order, and can
- * leave. Everything that changes what the playlist *is* — its name, its
- * existence, who can see or join it — stays with the owner.
+ * Who may do what. Editors add records, reorder them, take out the ones
+ * they added themselves (removalsNotAllowed), chat, and can leave.
+ * Everything that changes what the playlist *is* — its name, its existence,
+ * who can see or join it — stays with the owner, and so does taking out
+ * anyone else's records or messages.
  */
 export function can(role: CollabRole, action: PlaylistAction): boolean {
   if (role === "owner") return action !== "leave";
-  return action === "edit-items" || action === "leave";
+  return action === "edit-items" || action === "chat" || action === "leave";
+}
+
+type Credited = ReadonlyArray<{ clipKey: string; addedBy: string | null }>;
+
+/** Each record's credits, by clip key, in list order. */
+function creditsByKey(previous: Credited): Map<string, Array<string | null>> {
+  const pool = new Map<string, Array<string | null>>();
+  for (const row of previous) {
+    const list = pool.get(row.clipKey) ?? [];
+    list.push(row.addedBy);
+    pool.set(row.clipKey, list);
+  }
+  return pool;
+}
+
+function countKeys(keys: ReadonlyArray<string>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
+  return counts;
+}
+
+/**
+ * How many records this edit takes out that the person making it may not.
+ *
+ * The rule for a shared set: anyone on it can add and reorder, but taking a
+ * record *out* is the owner's call — except for records you put in yourself.
+ * Records from before anyone was credited (`addedBy` null) count as the
+ * owner's.
+ *
+ * Edits arrive as the whole list, so "what was removed" is worked out here
+ * as a count per record, not trusted from the client: for each clip key, the
+ * copies that were there minus the copies that are left. A collaborator's
+ * removals of a key must be covered by copies they added. 0 means the edit
+ * may go through; anything else is refused as a whole.
+ */
+export function removalsNotAllowed(
+  previous: Credited,
+  next: ReadonlyArray<string>,
+  actorId: string,
+  isOwner: boolean,
+): number {
+  if (isOwner) return 0;
+  const pool = creditsByKey(previous);
+  const left = countKeys(next);
+  let refused = 0;
+  for (const [key, credits] of pool) {
+    const removed = credits.length - (left.get(key) ?? 0);
+    if (removed <= 0) continue;
+    const theirs = credits.filter((id) => id === actorId).length;
+    refused += Math.max(0, removed - theirs);
+  }
+  return refused;
 }
 
 /**
@@ -72,17 +129,28 @@ export function can(role: CollabRole, action: PlaylistAction): boolean {
  * every record to whoever saved last. Records already present keep their
  * credit — matched in order, so a record in the list twice keeps both — and
  * only records that are new in this edit are credited to the person making it.
+ *
+ * When a record in the list more than once loses a copy, the copy that goes
+ * is one the person editing added, if they added one. That is what
+ * removalsNotAllowed allowed, so it is what is removed: a collaborator taking
+ * out their own duplicate never strips someone else's credit.
  */
 export function carryAddedBy(
-  previous: ReadonlyArray<{ clipKey: string; addedBy: string | null }>,
+  previous: Credited,
   next: ReadonlyArray<string>,
   actorId: string,
 ): Array<string | null> {
-  const pool = new Map<string, Array<string | null>>();
-  for (const row of previous) {
-    const list = pool.get(row.clipKey) ?? [];
-    list.push(row.addedBy);
-    pool.set(row.clipKey, list);
+  const pool = creditsByKey(previous);
+  const left = countKeys(next);
+  for (const [key, credits] of pool) {
+    let excess = credits.length - (left.get(key) ?? 0);
+    for (let i = credits.length - 1; i >= 0 && excess > 0; i -= 1) {
+      if (credits[i] === actorId) {
+        credits.splice(i, 1);
+        excess -= 1;
+      }
+    }
+    if (excess > 0) credits.splice(credits.length - excess, excess);
   }
   return next.map((key) => {
     const list = pool.get(key);

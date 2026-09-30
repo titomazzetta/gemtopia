@@ -190,9 +190,10 @@ one playlist*, never what anyone can read about anyone else.
   dump yields no working link. Wrong, malformed and turned-off links are one
   indistinguishable 404. Turning the link off is permanent for that link;
   members already in stay until removed.
-- **Roles are fixed and small.** Owner: everything. Collaborator: change the
-  records and their order, and leave. The rules are one pure function
-  (`collab.can`), tested per action, and the SQL enforces the same split —
+- **Roles are fixed and small.** Owner: everything. Collaborator: add
+  records, reorder them, take out the ones they added, chat, and leave. The
+  rules are one pure function (`collab.can`), tested per action, and the SQL
+  enforces the same split —
   owner-only statements never use the membership check.
 - **Nobody can remove the owner**, because the owner is not a member row; a
   collaborator can remove only themselves; everyone else asking gets a 404.
@@ -213,6 +214,69 @@ one playlist*, never what anyone can read about anyone else.
   join — that is what a link is. The owner sees who joined, can remove them,
   and can kill the link. Collaborators' BPM catalogues stay their own, so a
   record measured by one person shows no BPM to another until they measure it.
+
+### Chat on collaborative playlists
+
+A message board for the people on one set. It is user-generated content shown
+to other users, so it is treated as the most hostile input in the app.
+
+- **Same wall as the records.** Reading, posting and deleting all carry the
+  playlist access condition (`CAN_EDIT`) in the SQL statement itself — for a
+  post, inside the `INSERT … SELECT`, so there is no gap between "may they?"
+  and "they did". A stranger, a malformed id and someone removed a second ago
+  all get one indistinguishable 404. A read-only share link never exposes the
+  chat.
+- **Injection.** Every statement is parameterised; a message is data to
+  Postgres whatever it contains. There is no hand-escaping, which would add
+  nothing and corrupt what people typed. The message id travels as a decimal
+  string, is shape-checked (`chat.isMessageId`) before any query, and is cast
+  to BIGINT inside SQL.
+- **XSS.** Messages are rendered as React text children — escaped on output.
+  No `dangerouslySetInnerHTML`, no Markdown, no auto-linked URLs (so no
+  `javascript:` links and no phishing links dressed as buttons). The CSP
+  (per-request nonce, no `unsafe-inline` scripts) is the second wall. The API
+  tests post `<img src=x onerror=…>` and a `DROP TABLE` and check both come
+  back verbatim, as text, with the table still there.
+- **Text normalisation, not "sanitising".** `chat.normaliseMessage` stores one
+  canonical form: NFC; control characters removed; bidi overrides and
+  isolates, zero-width spaces, BOMs and soft hyphens removed (the "Trojan
+  Source" trick of text that reads differently from what it is); lone UTF-16
+  surrogates replaced; stacks of combining marks capped (no "Zalgo" text drawn
+  over the rest of the chat); blank-line runs and line count capped.
+- **Length.** 500 characters, counted as code points so the client counter,
+  the server check and the database `CHECK (char_length(body) BETWEEN 1 AND
+  500)` agree. Over-long messages are refused, never silently cut. The request
+  body is capped at 16 KB before parsing, and the schema is strict: a
+  client-supplied `author` or anything else extra is a 400. The author always
+  comes from the session.
+- **Deleting.** The author, or the playlist's owner — one `DELETE … USING
+  playlists` whose WHERE clause holds the message, its playlist, the caller's
+  access and their right to that message. Any other combination deletes
+  nothing and is a 404, so ids cannot be probed.
+- **Flooding.** In-memory limits per user (10 posts / 30 s, 90 reads / min)
+  as the fast first line, and a count in the database (20 posts per person per
+  minute) that holds across every serverless instance. Each playlist keeps
+  only its newest 1,000 messages, so no one can make the database hold an
+  unbounded amount.
+- **Polling, not a realtime service.** An open chat re-reads its latest page
+  every 4 s while the tab is visible. No websocket server, third-party pub/sub
+  or extra keys — every read goes through the same session, CSRF, rate-limit
+  and access checks as the rest of the API. Re-reading the page, rather than
+  asking for "everything after id N", also picks up deletions and cannot miss
+  a message that committed out of order.
+- **Unread state stays in the browser.** The last-seen id is kept in
+  `localStorage`, only to draw a dot; it is never sent or trusted.
+
+### Removing records from a shared playlist
+
+Collaborators can add and reorder anything, but can take out only records
+they added; the owner can take out any. Edits arrive as the whole list, so the
+server works out what was removed itself — per clip key, copies before minus
+copies after, compared with who added each copy, under the playlist row lock
+(`collab.removalsNotAllowed`). It never trusts the client's idea of what it
+removed. Swapping someone's record for another counts as a removal. A refused
+edit is a 403 (`not_your_record`) and writes nothing; the UI only offers the
+remove button where it would be allowed.
 
 **Digging leaks nothing between users either.** `/api/dig` takes the seed's
 metadata and the exclusion lists from the caller, and those only shape what that

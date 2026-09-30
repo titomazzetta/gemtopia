@@ -2,6 +2,7 @@
 
 import type {
   AnalysisResult,
+  ChatMessage,
   DigResponse,
   Playlist,
   PlaylistItemRow,
@@ -155,6 +156,29 @@ export const playlistsApi = {
 /* ------------------------------------------------------------------ */
 /* BPM / key catalogue                                                 */
 /* ------------------------------------------------------------------ */
+
+/** Chat on a collaborative playlist. Owner and collaborators only. */
+export const chatApi = {
+  /** Newest first: the latest page, or the page before `before`. */
+  list: (playlistId: string, before?: string) =>
+    request<{ messages: ChatMessage[]; hasMore: boolean }>(
+      `/api/playlists/${playlistId}/messages${
+        before ? `?before=${encodeURIComponent(before)}` : ""
+      }`,
+    ),
+
+  post: (playlistId: string, body: string) =>
+    request<{ message: ChatMessage }>(`/api/playlists/${playlistId}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    }).then((r) => r.message),
+
+  remove: (playlistId: string, messageId: string) =>
+    request<{ ok: true }>(
+      `/api/playlists/${playlistId}/messages/${encodeURIComponent(messageId)}`,
+      { method: "DELETE" },
+    ),
+};
 
 export const trackMetaApi = {
   list: () =>
