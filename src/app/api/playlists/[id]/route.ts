@@ -77,6 +77,17 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         parsed.data.version,
       );
       if (result === "not_found") return fail("not_found", "No such playlist.", 404);
+      if (result === "not_yours") {
+        // A collaborator tried to take out someone else's record. Refused
+        // whole; hand back the list as it is so the client can put it back.
+        const current = await getPlaylist(auth.userId, id);
+        return fail(
+          "not_your_record",
+          "You can only take out records you added. Ask the owner to remove the others.",
+          403,
+          { playlist: current },
+        );
+      }
       if (result === "conflict") {
         // Someone else changed it first. Hand back what it is now, so the
         // client can show it and the person can redo their edit on top.

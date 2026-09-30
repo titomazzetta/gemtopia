@@ -4,7 +4,7 @@
  *   npm run test:collab-view
  */
 import assert from "node:assert/strict";
-import { collabLine, isCollabPlaylist } from "../src/client/collabView.ts";
+import { canRemoveEntry, collabLine, isCollabPlaylist } from "../src/client/collabView.ts";
 
 let ran = 0;
 let failed = 0;
@@ -46,6 +46,18 @@ check("one you joined is always marked, and names the owner first", () => {
 check("long lists are shortened", () => {
   const p = { ...mine, collaborators: ["a", "b", "c", "d"] };
   assert.equal(collabLine(p, "Tito"), "Collab with a, b +2");
+});
+
+check("the owner is offered remove on every record", () => {
+  assert.equal(canRemoveEntry("owner", "someone", "Tito"), true);
+  assert.equal(canRemoveEntry("owner", null, "Tito"), true);
+});
+
+check("a collaborator is offered remove only on their own records", () => {
+  assert.equal(canRemoveEntry("editor", "Komron", "komron"), true, "case doesn't matter");
+  assert.equal(canRemoveEntry("editor", "Tito", "komron"), false);
+  assert.equal(canRemoveEntry("editor", null, "komron"), false);
+  assert.equal(canRemoveEntry("editor", undefined, "komron"), false);
 });
 
 console.log(`\n${ran - failed}/${ran} collab view tests passed.`);

@@ -258,6 +258,25 @@ export interface Playlist {
   joinLinkOn: boolean;
   /** Bumped on every change; an edit names the version it was made against. */
   version: number;
+  /**
+   * Id of the newest chat message, or null when nobody has said anything.
+   * Lets the chat button show a dot for unread messages without loading them.
+   */
+  lastMessageId: string | null;
+}
+
+/** One message in a collaborative playlist's chat. */
+export interface ChatMessage {
+  /** Decimal BIGINT, increasing. */
+  id: string;
+  /** Discogs username, or null if that account no longer exists. */
+  author: string | null;
+  /** Plain text, already normalised. Shown as text, never as HTML. */
+  body: string;
+  /** Epoch ms. */
+  at: number;
+  /** Written by whoever is asking. */
+  mine: boolean;
 }
 
 export type BpmSource = "tap" | "auto" | "discogs" | "manual";

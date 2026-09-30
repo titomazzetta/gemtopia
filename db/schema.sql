@@ -403,3 +403,41 @@ CREATE INDEX IF NOT EXISTS playlist_members_user_idx
 
 ALTER TABLE playlist_items
   ADD COLUMN IF NOT EXISTS added_by UUID REFERENCES users(id) ON DELETE SET NULL;
+
+-- ---------------------------------------------------------------------------
+-- Chat on collaborative playlists
+--
+-- A message board for the people working on one set: which record goes
+-- where, how a blend should go, what to pull. Built to the same rules as the
+-- rest of collaboration:
+--
+--   * Only the owner and collaborators can read or post, through the same
+--     access condition as the records (repo.ts CAN_EDIT). Everyone else gets
+--     the same 404 as for the playlist itself. A read-only share link never
+--     shows the chat.
+--   * Leaving or being removed takes your access to the chat with it at
+--     once; what you wrote stays, under your name, for the others.
+--   * You can delete your own messages; the owner can delete any.
+--   * `body` is stored already normalised (src/lib/chat.ts) and the database
+--     holds the line too: 1–500 characters, whatever the application does.
+--   * Only the newest 1000 messages per playlist are kept, and one person can
+--     post at most 20 a minute (counted here, so it holds across every
+--     serverless instance, unlike the in-memory limiter).
+--   * Deleting the playlist deletes its chat.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS playlist_messages (
+  id           BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  playlist_id  UUID NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  author_id    UUID REFERENCES users(id) ON DELETE SET NULL,
+  body         TEXT NOT NULL CHECK (char_length(body) BETWEEN 1 AND 500),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Newest-first pages of one playlist's chat, and its latest id.
+CREATE INDEX IF NOT EXISTS playlist_messages_playlist_idx
+  ON playlist_messages (playlist_id, id DESC);
+
+-- "How many has this person posted in the last minute?"
+CREATE INDEX IF NOT EXISTS playlist_messages_author_idx
+  ON playlist_messages (author_id, created_at DESC);

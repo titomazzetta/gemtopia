@@ -14,6 +14,7 @@ import {
   carryAddedBy,
   hashJoinToken,
   isJoinToken,
+  removalsNotAllowed,
   safeNextPath,
 } from "../src/lib/collab.ts";
 
@@ -76,16 +77,35 @@ check("and nowhere else — no open redirect", () => {
 });
 
 check("owners can do everything but leave", () => {
-  for (const action of ["edit-items", "rename", "delete", "share-link", "manage-join-link", "remove-member"]) {
+  for (const action of [
+    "edit-items",
+    "remove-any-record",
+    "chat",
+    "delete-any-message",
+    "rename",
+    "delete",
+    "share-link",
+    "manage-join-link",
+    "remove-member",
+  ]) {
     assert.ok(can("owner", action), action);
   }
   assert.equal(can("owner", "leave"), false);
 });
 
-check("editors change the records and can leave — nothing else", () => {
+check("editors change the records, chat and can leave — nothing else", () => {
   assert.ok(can("editor", "edit-items"));
+  assert.ok(can("editor", "chat"));
   assert.ok(can("editor", "leave"));
-  for (const action of ["rename", "delete", "share-link", "manage-join-link", "remove-member"]) {
+  for (const action of [
+    "remove-any-record",
+    "delete-any-message",
+    "rename",
+    "delete",
+    "share-link",
+    "manage-join-link",
+    "remove-member",
+  ]) {
     assert.equal(can("editor", action), false, action);
   }
 });
@@ -132,6 +152,76 @@ check("removing a record drops its credit; nothing leaks onto another", () => {
   ];
   assert.deepEqual(carryAddedBy(previous, ["2:bbbbbbbbbbb"], "c"), ["b"]);
   assert.deepEqual(carryAddedBy(previous, [], "c"), []);
+});
+
+const A = "1:aaaaaaaaaaa";
+const B = "2:bbbbbbbbbbb";
+const C = "3:ccccccccccc";
+
+check("a collaborator can reorder anything", () => {
+  const previous = [
+    { clipKey: A, addedBy: "owner" },
+    { clipKey: B, addedBy: "other" },
+    { clipKey: C, addedBy: null },
+  ];
+  assert.equal(removalsNotAllowed(previous, [C, B, A], "friend", false), 0);
+});
+
+check("a collaborator can add, and take out what they added", () => {
+  const previous = [
+    { clipKey: A, addedBy: "owner" },
+    { clipKey: B, addedBy: "friend" },
+  ];
+  assert.equal(removalsNotAllowed(previous, [A, B, C], "friend", false), 0);
+  assert.equal(removalsNotAllowed(previous, [A], "friend", false), 0);
+});
+
+check("a collaborator cannot take out anyone else's record", () => {
+  const previous = [
+    { clipKey: A, addedBy: "owner" },
+    { clipKey: B, addedBy: "other" },
+    { clipKey: C, addedBy: "friend" },
+  ];
+  assert.equal(removalsNotAllowed(previous, [B, C], "friend", false), 1, "owner's");
+  assert.equal(removalsNotAllowed(previous, [A, C], "friend", false), 1, "another collaborator's");
+  assert.equal(removalsNotAllowed(previous, [], "friend", false), 2, "clearing the list");
+});
+
+check("records from before anyone was credited count as the owner's", () => {
+  const previous = [{ clipKey: A, addedBy: null }];
+  assert.equal(removalsNotAllowed(previous, [], "friend", false), 1);
+  assert.equal(removalsNotAllowed(previous, [], "owner", true), 0);
+});
+
+check("swapping someone's record for another is still a removal", () => {
+  const previous = [{ clipKey: A, addedBy: "owner" }];
+  assert.equal(removalsNotAllowed(previous, [B], "friend", false), 1);
+});
+
+check("the owner can take out anything", () => {
+  const previous = [
+    { clipKey: A, addedBy: "friend" },
+    { clipKey: B, addedBy: "other" },
+  ];
+  assert.equal(removalsNotAllowed(previous, [], "owner", true), 0);
+});
+
+check("with a record in twice, a collaborator can take out only their copy", () => {
+  const previous = [
+    { clipKey: A, addedBy: "owner" },
+    { clipKey: A, addedBy: "friend" },
+  ];
+  assert.equal(removalsNotAllowed(previous, [A], "friend", false), 0);
+  assert.equal(removalsNotAllowed(previous, [], "friend", false), 1);
+  assert.deepEqual(carryAddedBy(previous, [A], "friend"), ["owner"], "their copy is the one that goes");
+});
+
+check("with a record in twice, the owner's removal drops the last copy", () => {
+  const previous = [
+    { clipKey: A, addedBy: "friend" },
+    { clipKey: A, addedBy: "other" },
+  ];
+  assert.deepEqual(carryAddedBy(previous, [A], "owner"), ["friend"]);
 });
 
 console.log(`\n${ran - failed}/${ran} collab tests passed.`);

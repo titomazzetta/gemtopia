@@ -27,3 +27,18 @@ export function collabLine(p: CollabFields & Pick<Playlist, "owner">, me: string
   const more = others.length > 2 ? ` +${others.length - 2}` : "";
   return `Collab with ${shown}${more}`;
 }
+
+/**
+ * Whether to offer "remove" on a record. The owner can take out anything; a
+ * collaborator only what they added. The server enforces the same rule
+ * (collab.removalsNotAllowed) — this just avoids offering a button that
+ * would be refused.
+ */
+export function canRemoveEntry(
+  role: Playlist["role"],
+  addedBy: string | null | undefined,
+  me: string,
+): boolean {
+  if (role === "owner") return true;
+  return typeof addedBy === "string" && addedBy.toLowerCase() === me.toLowerCase();
+}
