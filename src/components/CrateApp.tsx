@@ -219,6 +219,8 @@ export function CrateApp({
   /** Which playlist's pull list is open, if any. An id, so it never reopens on another playlist. */
   const [pullListFor, setPullListFor] = useState<string | null>(null);
   const [invitesOpen, setInvitesOpen] = useState(false);
+  /** Phone only: whether set prep (and the view chips) are unfolded. */
+  const [prepOpen, setPrepOpen] = useState(false);
   /** The playlist whose collaborate panel is open. */
   const [collabFor, setCollabFor] = useState<string | null>(null);
   /*
@@ -2224,6 +2226,7 @@ export function CrateApp({
                   </span>
                 </button>
 
+                {!activePlaylist && (
                 <span className="shrink-0 font-mono text-[11px] text-neutral-600">
                   {silence.playable.toLocaleString()}
                   {silence.noAudio + silence.notLoaded + silence.loading > 0 && (
@@ -2235,6 +2238,7 @@ export function CrateApp({
                     </span>
                   )}
                 </span>
+                )}
 
                 <button
                   type="button"
@@ -2255,9 +2259,41 @@ export function CrateApp({
                   )}
                 </button>
 
+                {/*
+                  With a playlist open, its two most-used actions live on this
+                  row instead of a row of their own — every row above the list
+                  is a record you can't see on a phone.
+                */}
+                {activePlaylist && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setPullListFor(activePlaylist.id)}
+                      aria-label="Whole list — every record, reorder and audition"
+                      className="flex shrink-0 items-center gap-1 rounded-md border border-ink-700 px-2 py-1.5 text-xs font-medium text-neutral-200"
+                    >
+                      <ListIcon className="h-3.5 w-3.5" />
+                      List
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCollabFor(activePlaylist.id)}
+                      aria-label={isCollabPlaylist(activePlaylist) ? "Collaborators" : "Collaborate"}
+                      className={`flex shrink-0 items-center rounded-md border px-2 py-1.5 text-xs ${
+                        isCollabPlaylist(activePlaylist)
+                          ? "border-accent-alt/60 bg-accent-alt/10 text-accent-alt"
+                          : "border-ink-700 text-neutral-300"
+                      }`}
+                    >
+                      <Users className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                )}
+
                 <button
                   type="button"
                   onClick={shuffleNow}
+                  aria-label="Shuffle"
                   className="flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-ink-950"
                 >
                   <Shuffle className="h-3.5 w-3.5" />
@@ -2265,37 +2301,8 @@ export function CrateApp({
                 </button>
               </div>
 
-              {/*
-                An open playlist on a phone shares the screen with the video,
-                set prep and the player, which leaves room for a row or two.
-                These two are the way out of that: the whole list at once, and
-                bringing someone else in.
-              */}
-              {activePlaylist && (
-                <div className="flex items-center gap-2 px-3 pb-2">
-                  <button
-                    type="button"
-                    onClick={() => setPullListFor(activePlaylist.id)}
-                    className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-ink-700 text-xs font-medium text-neutral-200"
-                  >
-                    <ListIcon className="h-3.5 w-3.5" />
-                    Whole list
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCollabFor(activePlaylist.id)}
-                    className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border text-xs font-medium ${
-                      isCollabPlaylist(activePlaylist)
-                        ? "border-accent-alt/60 bg-accent-alt/10 text-accent-alt"
-                        : "border-ink-700 text-neutral-200"
-                    }`}
-                  >
-                    <Users className="h-3.5 w-3.5" />
-                    {isCollabPlaylist(activePlaylist) ? "Collab" : "Collaborate"}
-                  </button>
-                </div>
-              )}
-
+              {/* Crate search and filters mean nothing inside a playlist. */}
+              {!activePlaylist && (
               <div className="flex items-center gap-2 px-3 pb-2">
                 <input
                   type="search"
@@ -2341,6 +2348,7 @@ export function CrateApp({
                   Discogs
                 </button>
               </div>
+              )}
             </div>
           )}
 
@@ -2435,18 +2443,32 @@ export function CrateApp({
               )}
               transitionSeconds={transitionSeconds}
               onTransitionChange={changeBlend}
+              open={prepOpen}
+              onOpenChange={setPrepOpen}
+              viewLabel={
+                inYourOrder
+                  ? null
+                  : ({ artist: "artist", genre: "genre", bpm: "BPM", year: "year" } as Record<string, string>)[
+                      playlistView.view
+                    ] ?? null
+              }
             />
           )}
 
           {activePlaylist && !digTarget && activePlaylist.entries.length > 1 && (
-            <PlaylistViewBar
-              state={playlistView}
-              onChange={changePlaylistView}
-              onKeep={keepPlaylistView}
-              onUndo={undoAvailable ? undoReorder : undefined}
-              undoLabel={lastOrder?.label}
-              busy={loading}
-            />
+            // On a phone the view chips fold away with set prep; they stay
+            // out while a view other than your order is on, so a sorted list
+            // never looks like the real running order.
+            <div className={prepOpen || !inYourOrder ? "" : "hidden lg:block"}>
+              <PlaylistViewBar
+                state={playlistView}
+                onChange={changePlaylistView}
+                onKeep={keepPlaylistView}
+                onUndo={undoAvailable ? undoReorder : undefined}
+                undoLabel={lastOrder?.label}
+                busy={loading}
+              />
+            </div>
           )}
 
           <div className="min-h-0 flex-1">
