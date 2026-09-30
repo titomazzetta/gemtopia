@@ -67,3 +67,29 @@ export function prunePulled(pulled: Iterable<string>, items: readonly Playable[]
   const present = new Set(items.map((item) => item.key));
   return new Set([...pulled].filter((key) => present.has(key)));
 }
+
+/**
+ * Where a dragged row lands.
+ *
+ * While dragging, the pointer sits in a gap between rows — a *slot*, 0 to n,
+ * counted in the list as it was before the drag. Moving a row is remove-then-
+ * insert (see playlistOrder.moveEntry), so dropping it below where it started
+ * lands one index earlier than the slot. Dropping it into either gap next to
+ * itself is not a move at all.
+ */
+export function slotToIndex(from: number, slot: number): number {
+  return slot > from ? slot - 1 : slot;
+}
+
+/**
+ * Which slot a pointer is over, from the vertical middle of each row. Above
+ * the first middle is slot 0; below the last is slot n.
+ */
+export function slotAt(pointerY: number, rowMiddles: readonly number[]): number {
+  let slot = 0;
+  for (const middle of rowMiddles) {
+    if (pointerY > middle) slot += 1;
+    else break;
+  }
+  return slot;
+}

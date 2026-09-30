@@ -123,7 +123,7 @@ A few ideas every feature is held to. They're why the app looks the way it does.
 </tr>
 <tr>
 <td><sub><b>Will it mix?</b> Every transition checked against your decks' pitch range.</sub></td>
-<td><sub><b>Pull list.</b> The set as a list to take to the shelves.</sub></td>
+<td><sub><b>Whole list.</b> Every record, every transition — audition, reorder, tick off as you pull.</sub></td>
 </tr>
 </table>
 
@@ -179,7 +179,7 @@ There's nothing to download or update: it is always the live version.
 | **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
 | **Hear the whole record** | Something grabs you on shuffle: tap the artist or the record and the whole release opens in running order — every track, the one playing marked, the ones with no audio still listed. Play it through, then drop straight back into your shuffle where you left it. |
 | **Dig from anything** | Hit `D` (or **Dig from this** on a phone) on whatever's playing and pivot on any field. Two halves: what else you own, and what exists beyond it — other versions, the remixer or producer, the artist, the label, the style and the era. No lane dead-ends: each one ends in **More** or **Dig deeper**. |
-| **Playlists that follow you** | Stored against your Discogs account. Private by default, always. On a desktop, drag any record from the crate or a dig lane straight onto a playlist (hover the Playlists tab and it opens); on a phone it's the + button. Drag to reorder, play in order or shuffled. **Pull list** opens the whole running order full-screen — numbered, one sleeve per record, tick them off as they go in the bag. View by artist, genre, BPM or year without losing the order you built. |
+| **Playlists that follow you** | Stored against your Discogs account. Private by default, always. On a desktop, drag any record from the crate or a dig lane straight onto a playlist (hover the Playlists tab and it opens); on a phone it's the + button. Drag to reorder, play in order or shuffled. **Whole list** opens the entire running order at once — every record's BPM and the pitch each transition needs, compact enough to see a dozen at a time on a phone. Tap a record to hear it (the list stays open, with the player bar under it), drag the grip to move it, tap its number to tick it off as it goes in the bag. On a phone, set prep folds to one line — length, how the transitions look, your deck range — and opens with a tap. View by artist, genre, BPM or year without losing the order you built. |
 | **BPM catalogue** | Detect tempo from the audio as it plays — with a live beat meter showing exactly what it hears — or tap it in with `T`. Genre-aware: a record Discogs tags as drum & bass is counted at 174, not 87. **Measure** plays through everything on screen unattended, skipping what is already done. |
 | **Share a set** | One tap mints a read-only link to a playlist that anyone can open and play — no account, no route back to yours. Turn sharing off and the link is dead, not dormant. See [the one exception](#the-one-exception-and-why-it-looks-like-one). |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **out of range**. Flags the hard ones before you pack the bag. |

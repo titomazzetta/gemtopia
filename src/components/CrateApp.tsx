@@ -2604,10 +2604,11 @@ export function CrateApp({
           transitions={transitions}
           addedBy={activePlaylist.entries.map((e) => e.addedBy ?? null)}
           collab={isCollabPlaylist(activePlaylist)}
-          onPlay={(index) => {
-            playFrom(playlistItems, index);
-            setPullListFor(null);
-          }}
+          playingKey={current?.key ?? null}
+          // Audition without losing your place: the list stays open and the
+          // player bar sits just below it.
+          onPlay={(index) => playFrom(playlistItems, index)}
+          onReorder={reorderPlaylist}
         />
       )}
 
@@ -2626,7 +2627,11 @@ export function CrateApp({
         onToggle={api.toggle}
         onPrev={() => (api.currentTime > 4 ? api.seek(0) : advance(-1))}
         onNext={() => advance(1)}
-        onExpand={() => setSheet("player")}
+        onExpand={() => {
+          // The player sheet opens underneath the whole list, so step out of it.
+          setPullListFor(null);
+          setSheet("player");
+        }}
       />
 
       {/* ---- mobile: find a record that is not in the crate yet ---- */}
