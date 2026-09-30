@@ -152,13 +152,16 @@ Server logs record error context only, never tokens.
 Playlists are private, and the design makes that structural rather than
 conventional:
 
-1. **No public route exists.** There is no share endpoint, no token-based link,
-   no `/public/*` namespace. `test-api.mjs` probes the three obvious shapes and
-   asserts they 404.
-2. **Every read filters by owner.** `listPlaylists`, `getPlaylist`,
-   `replaceItems`, `renamePlaylist` and `deletePlaylist` all take `userId` as
-   their first argument and put it in the `WHERE` clause. There is no overload
-   that omits it.
+1. **Two openings, both deliberate, both narrow.** A read-only share link
+   (one function reads by token, and it returns the tracks and nothing else),
+   and collaboration (below). There is no `/public/*` namespace, and
+   `test-api.mjs` probes the obvious shapes and asserts they 404.
+2. **Every read filters by access.** `listPlaylists`, `getPlaylist` and
+   `replaceItems` take the caller's `userId` from the session and put "owns it
+   or is a member of it" in the `WHERE` clause, written once as `CAN_EDIT` in
+   `repo.ts`. `renamePlaylist`, `deletePlaylist`, the share link and the join
+   link keep the stricter `user_id = $n`: owner only. There is no overload
+   that omits the user.
 3. **A foreign playlist 404s rather than 403s**, so the response does not
    confirm the id exists.
 4. **`visibility` is `NOT NULL DEFAULT 'private'`** with a CHECK constraint, and
@@ -169,6 +172,47 @@ The column exists so that a future opt-in share feature has to be written as a
 new repository function that *deliberately* drops the `user_id` predicate. That
 is a change that stands out in review, which is the entire point of putting the
 flag there before the feature.
+
+### Collaborative playlists
+
+Collaboration is the second deliberate widening, and it widens *who can edit
+one playlist*, never what anyone can read about anyone else.
+
+- **Membership, not tokens, grants access.** The join link only gets you to a
+  page with a Join button. Pressing it (a POST, with Origin and CSRF checks)
+  inserts a `playlist_members` row; from then on access is that row, checked
+  in SQL on every request. Previewing a link adds nobody, and shows the name,
+  owner and size — not the records.
+- **The link.** 32 bytes of CSPRNG output. Stored as its SHA-256 for lookup (a
+  256-bit random value has nothing to brute-force from its hash) and, so the
+  owner can copy it again without minting a new one, sealed with AES-256-GCM
+  under the server key — the same protection as a session cookie. A database
+  dump yields no working link. Wrong, malformed and turned-off links are one
+  indistinguishable 404. Turning the link off is permanent for that link;
+  members already in stay until removed.
+- **Roles are fixed and small.** Owner: everything. Collaborator: change the
+  records and their order, and leave. The rules are one pure function
+  (`collab.can`), tested per action, and the SQL enforces the same split —
+  owner-only statements never use the membership check.
+- **Nobody can remove the owner**, because the owner is not a member row; a
+  collaborator can remove only themselves; everyone else asking gets a 404.
+- **Concurrent edits cannot silently clobber.** `playlists.version` is checked
+  under the row lock in `replaceItems`; an edit made against an older version
+  is a 409 and changes nothing.
+- **Sign-in round trip.** A join link survives signing in via `?next=`, which
+  accepts exactly one shape (`/join/<43-char token>`, `collab.safeNextPath`),
+  travels sealed in the OAuth handshake cookie, and is re-validated before the
+  redirect. It cannot be turned into an open redirect.
+- **Invite-only still decides who has an account.** A join link is not an
+  invite code; someone without an account signs in and meets the same door as
+  anyone else.
+- **Abuse limits.** 50 collaborators per playlist (checked under the same lock
+  as the insert); join attempts, link changes and member changes are rate
+  limited per user.
+- **What it does not do.** Anyone holding a live link who has an account can
+  join — that is what a link is. The owner sees who joined, can remove them,
+  and can kill the link. Collaborators' BPM catalogues stay their own, so a
+  record measured by one person shows no BPM to another until they measure it.
 
 **Digging leaks nothing between users either.** `/api/dig` takes the seed's
 metadata and the exclusion lists from the caller, and those only shape what that

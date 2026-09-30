@@ -168,6 +168,13 @@ const handshakeSchema = z.object({
    * appear in the callback URL.
    */
   ih: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  /**
+   * Where to land after signing in, if not "/". Only ever a join link — see
+   * collab.safeNextPath — and it is re-checked on the way out, so even a
+   * tampered value (which the seal already rules out) could not redirect
+   * anywhere else.
+   */
+  nx: z.string().max(64).optional(),
 });
 
 export type Handshake = z.infer<typeof handshakeSchema>;
@@ -184,12 +191,14 @@ export async function setHandshake(data: {
   requestToken: string;
   requestSecret: string;
   inviteHash?: string;
+  next?: string;
 }): Promise<void> {
   const payload: Handshake = {
     rt: data.requestToken,
     rs: data.requestSecret,
     iat: Math.floor(Date.now() / 1000),
     ...(data.inviteHash ? { ih: data.inviteHash } : {}),
+    ...(data.next ? { nx: data.next } : {}),
   };
   const jar = await cookies();
   jar.set(HANDSHAKE_COOKIE, seal(payload), {

@@ -4,6 +4,7 @@ import { consumeHandshake, createSession } from "@/lib/session";
 import { ensureUser, findMember, redeemInvite } from "@/lib/repo";
 import { admit } from "@/lib/invite-code";
 import { INVITE_ONLY, isAdmin } from "@/lib/invites";
+import { safeNextPath } from "@/lib/collab";
 import { safeEqual } from "@/lib/crypto";
 import { env } from "@/lib/env";
 import { callerId, rateLimit } from "@/lib/ratelimit";
@@ -109,7 +110,11 @@ export async function GET(request: NextRequest) {
       sessionVersion,
     });
 
-    return NextResponse.redirect(new URL("/", env.APP_ORIGIN), { status: 302 });
+    // Back to the join link that sent them to sign in, if there was one.
+    // Re-validated here: the seal already stops tampering, but the rule for
+    // where a redirect may go should not depend on only one check.
+    const next = safeNextPath(handshake.data.nx) ?? "/";
+    return NextResponse.redirect(new URL(next, env.APP_ORIGIN), { status: 302 });
   } catch (error) {
     console.error("[auth/callback]", error);
     return back("failed");

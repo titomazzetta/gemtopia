@@ -3,7 +3,7 @@ import { Mark } from "@/components/Mark";
 const FEATURES = [
   ["Shuffle the crate", "Fisher–Yates across every clip Discogs has for your collection, spread so the same release never lands back to back."],
   ["Filter, then shuffle", "Style, label, artist, country, decade, tempo — every option counted from your own records. Cut the crate down, then shuffle what's left."],
-  ["Playlists on the fly", "Tap + (or A) while something plays. Reorder by drag, view by artist, genre, BPM or year, play in order or shuffled. Private to your account."],
+  ["Playlists on the fly", "Tap + (or A) while something plays. Reorder by drag, view by artist, genre, BPM or year, play in order or shuffled. Private to you — or build one together with collaborators you invite."],
   ["Know it'll beatmatch", "Tap the BPM in as you listen, or let it detect. Every transition in a playlist checked against your decks' pitch range."],
   ["Dig from anything", "Dig from any record (D on a keyboard): the whole EP, everything you own that connects to it, and the versions, remixers and labels you don't own yet."],
   ["Both lists, both ways", "Shuffle the wantlist like a crate. Search Discogs for a record that just arrived and put it in your collection. Adding is the only thing this app writes."],
@@ -77,11 +77,18 @@ export function SignIn({
   error,
   errorCode = null,
   inviteOnly = false,
+  next,
+  notice,
 }: {
   error: string | null;
   errorCode?: string | null;
   inviteOnly?: boolean;
+  /** A join link to come back to after signing in. Validated server-side. */
+  next?: string;
+  /** A line above the button explaining why they're here (e.g. a join link). */
+  notice?: string;
 }) {
+  const loginHref = next ? `/api/auth/login?next=${encodeURIComponent(next)}` : "/api/auth/login";
   const inviteError = errorCode !== null && INVITE_ERRORS.has(errorCode);
   const showCodeField = inviteOnly || inviteError;
   const openCodeField = errorCode === "not_invited" || errorCode === "invite_invalid";
@@ -114,8 +121,14 @@ export function SignIn({
         </p>
       )}
 
+      {notice && (
+        <p className="mb-4 rounded-md border border-accent-alt/40 bg-accent-alt/10 px-3 py-2 text-sm text-neutral-200">
+          {notice}
+        </p>
+      )}
+
       <a
-        href="/api/auth/login"
+        href={loginHref}
         className="mb-8 inline-flex items-center justify-center rounded-md bg-accent px-4 py-2.5 text-sm font-semibold text-ink-950 transition-transform hover:scale-[1.02]"
       >
         Sign in with Discogs
@@ -133,6 +146,7 @@ export function SignIn({
             Works with JavaScript off.
           */}
           <form method="post" action="/api/auth/login" className="mt-3 flex gap-2">
+            {next && <input type="hidden" name="next" value={next} />}
             <label htmlFor="invite-code" className="sr-only">
               Invite code
             </label>
@@ -189,7 +203,8 @@ export function SignIn({
           else — never in a database. Your collection index stays in this
           browser and is never uploaded. Playlists and your BPM catalogue are
           stored against your account so they follow you between devices; they
-          are private, and no route serves them to anyone but you.
+          are private: no route serves them to anyone but you and the
+          collaborators you choose to let in.
         </p>
         <p>
           <strong className="font-medium text-neutral-400">

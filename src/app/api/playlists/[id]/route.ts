@@ -70,12 +70,24 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
 
     if (parsed.data.entries !== undefined) {
-      const ok = await replaceItems(
+      const result = await replaceItems(
         auth.userId,
         id,
         parsed.data.entries.map((e, i) => ({ ...e, position: i })),
+        parsed.data.version,
       );
-      if (!ok) return fail("not_found", "No such playlist.", 404);
+      if (result === "not_found") return fail("not_found", "No such playlist.", 404);
+      if (result === "conflict") {
+        // Someone else changed it first. Hand back what it is now, so the
+        // client can show it and the person can redo their edit on top.
+        const current = await getPlaylist(auth.userId, id);
+        return fail(
+          "playlist_changed",
+          "Someone else just changed this playlist. It's been refreshed — try that again.",
+          409,
+          { playlist: current },
+        );
+      }
     }
 
     const playlist = await getPlaylist(auth.userId, id);

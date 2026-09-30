@@ -149,7 +149,7 @@ export function MobileBar({
         is the track length gives one step per second — coarse enough that on a
         six-minute rip you cannot land on the drop.
       */}
-      <div className="px-3 pt-2">
+      <div className="px-4 pt-2">
         <input
           type="range"
           min={0}
@@ -177,7 +177,13 @@ export function MobileBar({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 px-3 pb-2 pt-1">
+      {/*
+        The bottom row sits above the home indicator and inside the screen's
+        rounded corners: in the installed iPhone app the page runs to the very
+        edge, and at 12px in from the corner the title's first letter and the
+        BPM box were being cut by the curve of the glass.
+      */}
+      <div className="flex items-center gap-2 px-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-1">
         {/*
           Tapping the track info expands the full player sheet — the standard
           gesture, and it keeps the bar itself to controls.

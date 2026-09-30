@@ -9,7 +9,7 @@
  * would duplicate a lane that already exists.
  */
 import assert from "node:assert/strict";
-import { creditRank, pickCredits, roleWord, versionReason } from "../src/lib/digLinks.ts";
+import { artistLabels, creditRank, labelForPage, pickCredits, roleWord, versionReason } from "../src/lib/digLinks.ts";
 
 let ran = 0, failed = 0;
 const check = (name, fn) => {
@@ -78,6 +78,35 @@ check("a version says what makes it different", () => {
     versionReason({ id: 1, title: "t", label: null, country: null, format: null, released: null, thumb: "" }),
     "Another version of this record",
   );
+});
+
+check("the artist's labels, most-used first, the seed's own left out", () => {
+  const rows = [
+    { label: "Strictly Rhythm" },
+    { label: "Nervous" },
+    { label: "strictly rhythm" },
+    { label: "Seed Label" },
+    { label: "Not On Label (Kerri Chandler Self-released)" },
+    { label: null },
+    { label: "Nervous" },
+    { label: "Nervous" },
+    { label: "King Street" },
+  ];
+  assert.deepEqual(artistLabels(rows, ["seed label"]), ["Nervous", "Strictly Rhythm", "King Street"]);
+});
+
+check("no labels, no lane", () => {
+  assert.deepEqual(artistLabels([{ label: "Not On Label" }, { label: null }], []), []);
+  assert.equal(labelForPage([], 1), null);
+});
+
+check("dig deeper walks through the labels, then comes round a page further", () => {
+  const labels = ["A", "B", "C"];
+  assert.deepEqual(labelForPage(labels, 1), { label: "A", page: 1 });
+  assert.deepEqual(labelForPage(labels, 2), { label: "B", page: 1 });
+  assert.deepEqual(labelForPage(labels, 3), { label: "C", page: 1 });
+  assert.deepEqual(labelForPage(labels, 4), { label: "A", page: 2 });
+  assert.deepEqual(labelForPage(labels, 0), { label: "A", page: 1 });
 });
 
 console.log(`${ran - failed}/${ran} dig link tests passed`);

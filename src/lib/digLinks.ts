@@ -105,3 +105,61 @@ export function versionReason(version: MasterVersion): string {
   );
   return parts.length > 0 ? `Another version — ${parts.join(", ")}` : "Another version of this record";
 }
+
+/* ------------------------------------------------------------------ */
+/* The labels an artist has released on                               */
+/* ------------------------------------------------------------------ */
+
+/** Not a label anyone digs through — Discogs' marker for self-released. */
+const NOT_A_LABEL = /^(not on label|no label|self[- ]?released|unknown|white label)\b/i;
+
+/**
+ * The other labels an artist has put records out on, most-used first.
+ *
+ * These are where their world is: the label that signed them twice, the one
+ * that picked up their remix, the crew they came up with. Digging a label
+ * the artist trusts, through records by *other* artists, is how a DJ finds
+ * the next name — so the labels come from the artist's discography, and the
+ * records come from the label.
+ *
+ * The seed's own labels are left out (there is already a lane for those), as
+ * are "Not On Label" and friends. Names are compared case-insensitively
+ * because Discogs spells the same label differently across releases.
+ */
+export function artistLabels(
+  rows: ReadonlyArray<{ label: string | null }>,
+  seedLabels: ReadonlyArray<string>,
+): string[] {
+  const skip = new Set(seedLabels.map((name) => name.trim().toLowerCase()));
+  const counts = new Map<string, { name: string; count: number; first: number }>();
+  rows.forEach((row, index) => {
+    const name = row.label?.trim();
+    if (!name || NOT_A_LABEL.test(name)) return;
+    const key = name.toLowerCase();
+    if (skip.has(key)) return;
+    const entry = counts.get(key);
+    if (entry) entry.count += 1;
+    else counts.set(key, { name, count: 1, first: index });
+  });
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count || a.first - b.first)
+    .map((entry) => entry.name);
+}
+
+/**
+ * Which of those labels this dig follows, and which page of it.
+ *
+ * One label per dig keeps a dig inside its upstream budget. "Dig deeper"
+ * moves to the next label rather than further down the same one, so a few
+ * presses walk the artist's whole label history; once every label has had a
+ * turn, it comes round again one page further in.
+ */
+export function labelForPage(
+  labels: ReadonlyArray<string>,
+  page: number,
+): { label: string; page: number } | null {
+  if (labels.length === 0) return null;
+  const turn = Math.max(0, Math.floor(page) - 1);
+  const label = labels[turn % labels.length];
+  return label ? { label, page: Math.floor(turn / labels.length) + 1 } : null;
+}

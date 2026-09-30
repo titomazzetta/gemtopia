@@ -335,3 +335,71 @@ ALTER TABLE users
 
 ALTER TABLE users
   ADD COLUMN IF NOT EXISTS access_revoked_at TIMESTAMPTZ;
+
+-- ---------------------------------------------------------------------------
+-- Collaborative playlists
+--
+-- The second deliberate widening of the ownership model, after share links,
+-- and built the same way: narrow, opt-in, revocable, and visible.
+--
+--   * A playlist still has exactly one owner (`playlists.user_id`). Only the
+--     owner can rename it, delete it, make a read-only share link, turn the
+--     join link on or off, or remove people.
+--   * Collaborators are rows in `playlist_members`. They can read the
+--     playlist and change what is in it and in what order — nothing else.
+--     Every other user still gets a 404 for it, exactly as before.
+--   * People join through a link the owner creates. The link is 32 random
+--     bytes; it is looked up by its SHA-256 (`collab_token_hash`) and kept
+--     otherwise only sealed with the server key, so a copy of this table does
+--     not yield a working link. Turning the link off (NULL)
+--     kills it for good; members already in stay until removed or they leave.
+--   * Joining needs a Gemtopia account — invite-only still decides who has
+--     one — and an explicit "Join" press on the link's page. Nobody is added
+--     to anything without doing that themselves.
+--   * `version` makes edits safe with more than one editor: every change says
+--     which version it was made against, and a stale one is refused (409)
+--     instead of silently overwriting someone else's work.
+--   * `added_by` records who put each record in, so a back-to-back set knows
+--     whose crate each record comes out of.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE playlists
+  ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1;
+
+ALTER TABLE playlists
+  ADD COLUMN IF NOT EXISTS collab_token_hash TEXT;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlists_collab_token_hash_shape'
+  ) THEN
+    ALTER TABLE playlists
+      ADD CONSTRAINT playlists_collab_token_hash_shape
+      CHECK (collab_token_hash IS NULL OR collab_token_hash ~ '^[0-9a-f]{64}$');
+  END IF;
+END $$;
+
+-- The same token, sealed with the server key (AES-256-GCM, like the session
+-- cookie), so the owner can copy the link again later without minting a new
+-- one and breaking the copy they already sent. Useless without SESSION_SECRET.
+ALTER TABLE playlists
+  ADD COLUMN IF NOT EXISTS collab_token_sealed TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS playlists_collab_token_hash_key
+  ON playlists (collab_token_hash)
+  WHERE collab_token_hash IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS playlist_members (
+  playlist_id  UUID NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  joined_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (playlist_id, user_id)
+);
+
+-- "Which playlists am I a collaborator on?" is asked on every playlist load.
+CREATE INDEX IF NOT EXISTS playlist_members_user_idx
+  ON playlist_members (user_id);
+
+ALTER TABLE playlist_items
+  ADD COLUMN IF NOT EXISTS added_by UUID REFERENCES users(id) ON DELETE SET NULL;

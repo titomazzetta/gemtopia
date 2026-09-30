@@ -93,7 +93,12 @@ export const playlistsApi = {
 
   update: (
     id: string,
-    patch: { name?: string; entries?: Omit<PlaylistItemRow, "position">[] },
+    patch: {
+      name?: string;
+      entries?: Omit<PlaylistItemRow, "position">[];
+      /** The version this edit was made against. See repo.replaceItems. */
+      version?: number;
+    },
   ) =>
     request<{ playlist: Playlist }>(`/api/playlists/${id}`, {
       method: "PATCH",
@@ -102,6 +107,24 @@ export const playlistsApi = {
 
   remove: (id: string) =>
     request<{ ok: true }>(`/api/playlists/${id}`, { method: "DELETE" }),
+
+  /** Owner only: the join link, to copy again. `url` is null when it's off. */
+  joinLink: (id: string) =>
+    request<{ on: boolean; url: string | null }>(`/api/playlists/${id}/collab`),
+
+  /** Owner only: `on` mints a new join link (the old one dies); off turns it off. */
+  setJoinLink: (id: string, on: boolean) =>
+    request<{ on: boolean; url: string | null }>(`/api/playlists/${id}/collab`, {
+      method: "POST",
+      body: JSON.stringify({ on }),
+    }),
+
+  /** Owner removes anyone; a collaborator removes only themselves (leaving). */
+  removeCollaborator: (id: string, username: string) =>
+    request<{ ok: true }>(`/api/playlists/${id}/members`, {
+      method: "DELETE",
+      body: JSON.stringify({ username }),
+    }),
 
   /**
    * Mint or revoke a read-only share link.
@@ -149,6 +172,18 @@ export const trackMetaApi = {
       method: "DELETE",
       body: JSON.stringify({ clipKey }),
     }),
+};
+
+/* ------------------------------------------------------------------ */
+/* Joining a collaborative playlist                                    */
+/* ------------------------------------------------------------------ */
+
+export const joinApi = {
+  join: (token: string) =>
+    request<{ status: "joined" | "already"; playlistId: string }>(
+      `/api/join/${encodeURIComponent(token)}`,
+      { method: "POST" },
+    ),
 };
 
 /* ------------------------------------------------------------------ */

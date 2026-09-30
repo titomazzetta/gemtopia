@@ -112,6 +112,8 @@ import { SetPrepBar } from "./SetPrepBar";
 import { PlaylistViewBar } from "./PlaylistViewBar";
 import { PullList } from "./PullList";
 import { InvitePanel } from "./InvitePanel";
+import { CollabPanel } from "./CollabPanel";
+import { isCollabPlaylist, collabLine } from "@/client/collabView";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
@@ -125,7 +127,7 @@ import {
 } from "@/client/adopt";
 import { DiscogsSearch } from "./DiscogsSearch";
 import type { SearchHit } from "@/lib/discogs";
-import { Compass, Metronome, Refresh, Search, Shuffle } from "./Icons";
+import { Compass, ListIcon, Metronome, Refresh, Search, Shuffle, Users } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights" | "search";
 
@@ -217,6 +219,8 @@ export function CrateApp({
   /** Which playlist's pull list is open, if any. An id, so it never reopens on another playlist. */
   const [pullListFor, setPullListFor] = useState<string | null>(null);
   const [invitesOpen, setInvitesOpen] = useState(false);
+  /** The playlist whose collaborate panel is open. */
+  const [collabFor, setCollabFor] = useState<string | null>(null);
   /*
    * How the open playlist is being *looked at* — never how it is stored.
    * Remembered against the playlist it was chosen for, so opening any other
@@ -702,6 +706,22 @@ export function CrateApp({
         if (cancelled) return;
 
         setPlaylists(serverPlaylists);
+        // Arriving from a join link: open the playlist that was just joined.
+        // Only an id that is in this person's own list is honoured.
+        try {
+          const url = new URL(window.location.href);
+          const wanted = url.searchParams.get("playlist");
+          if (wanted && serverPlaylists.some((p) => p.id === wanted)) {
+            setActivePlaylistId(wanted);
+            setRail("playlists");
+          }
+          if (wanted) {
+            url.searchParams.delete("playlist");
+            window.history.replaceState(null, "", url.pathname + url.search);
+          }
+        } catch {
+          // No URL API: open the crate as usual.
+        }
         setTrackMeta(new Map(meta.map((m) => [m.clipKey, m])));
         setPitchPercent(prefs.pitchPercent);
         crate.setSync(state);
@@ -1243,6 +1263,30 @@ export function CrateApp({
     setPlaylists(await playlistsApi.list());
   }, []);
 
+  /*
+   * Collaborative playlists change while you look at them. While one is open,
+   * pick up other people's edits when the app comes back into view and every
+   * 20 seconds otherwise — cheap (one request), and it means an edit you make
+   * is usually against the latest version, so the 409 path stays rare.
+   */
+  const collabOpen = Boolean(activePlaylist && isCollabPlaylist(activePlaylist));
+  useEffect(() => {
+    if (!collabOpen) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        playlistsApi.list().then(setPlaylists).catch(() => {});
+      }
+    };
+    const timer = window.setInterval(refresh, 20_000);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [collabOpen]);
+
   const createPlaylist = useCallback(
     async (name: string, seed?: Playable) => {
       if (seed && seed.videoId === null) {
@@ -1280,6 +1324,7 @@ export function CrateApp({
       try {
         const updated = await playlistsApi.update(playlistId, {
           entries: [...playlist.entries.map(reEntry), entry],
+          version: playlist.version,
         });
         setPlaylists((previous) =>
           previous.map((p) => (p.id === updated.id ? updated : p)),
@@ -1287,6 +1332,10 @@ export function CrateApp({
         say(`Added to "${playlist.name}"`);
       } catch (error) {
         say(error instanceof ApiError ? error.message : "Could not add that.");
+        // A collaborator changed it first, or it's gone: show what's true now.
+        if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
+          playlistsApi.list().then(setPlaylists).catch(() => {});
+        }
       }
     },
     [playlists, say],
@@ -1314,7 +1363,10 @@ export function CrateApp({
   const mutateEntries = useCallback(
     async (playlist: Playlist, entries: NewEntry[]) => {
       try {
-        const updated = await playlistsApi.update(playlist.id, { entries });
+        const updated = await playlistsApi.update(playlist.id, {
+          entries,
+          version: playlist.version,
+        });
         setPlaylists((previous) =>
           previous.map((p) => (p.id === updated.id ? updated : p)),
         );
@@ -1821,14 +1873,20 @@ export function CrateApp({
   const deletePlaylist = useCallback(
     async (id: string) => {
       try {
-        await playlistsApi.remove(id);
+        const target = playlists.find((p) => p.id === id);
+        if (target && target.role === "editor") {
+          // Not yours to delete — "delete" from a collaborator means leave.
+          await playlistsApi.removeCollaborator(id, username);
+        } else {
+          await playlistsApi.remove(id);
+        }
         if (activePlaylistId === id) setActivePlaylistId(null);
         setPlaylists((previous) => previous.filter((p) => p.id !== id));
       } catch {
         say("Could not delete that playlist.");
       }
     },
-    [activePlaylistId, say],
+    [activePlaylistId, playlists, username, say],
   );
 
   const renamePlaylist = useCallback(
@@ -1875,7 +1933,7 @@ export function CrateApp({
   return (
     <div className="flex h-full flex-col">
       {showKeys && <Shortcuts onClose={() => setShowKeys(false)} />}
-      <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 py-2.5">
+      <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
         {/*
           20px lands in the text cut, which is the drawing meant for this size.
           On a phone the wordmark is hidden and the mark stands alone, so it
@@ -2105,6 +2163,8 @@ export function CrateApp({
                 onShare={(id, shared) => void sharePlaylist(id, shared)}
                 sharedIds={sharedIds}
                 onImport={(file) => void importPlaylists(file)}
+                me={username}
+                onCollaborate={setCollabFor}
                 onDropClip={(playlistId, key) => {
                   // The key only ever looks up a record already on this
                   // device; an unknown one is ignored, never sent anywhere.
@@ -2205,6 +2265,37 @@ export function CrateApp({
                 </button>
               </div>
 
+              {/*
+                An open playlist on a phone shares the screen with the video,
+                set prep and the player, which leaves room for a row or two.
+                These two are the way out of that: the whole list at once, and
+                bringing someone else in.
+              */}
+              {activePlaylist && (
+                <div className="flex items-center gap-2 px-3 pb-2">
+                  <button
+                    type="button"
+                    onClick={() => setPullListFor(activePlaylist.id)}
+                    className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border border-ink-700 text-xs font-medium text-neutral-200"
+                  >
+                    <ListIcon className="h-3.5 w-3.5" />
+                    Whole list
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCollabFor(activePlaylist.id)}
+                    className={`flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md border text-xs font-medium ${
+                      isCollabPlaylist(activePlaylist)
+                        ? "border-accent-alt/60 bg-accent-alt/10 text-accent-alt"
+                        : "border-ink-700 text-neutral-200"
+                    }`}
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    {isCollabPlaylist(activePlaylist) ? "Collab" : "Collaborate"}
+                  </button>
+                </div>
+              )}
+
               <div className="flex items-center gap-2 px-3 pb-2">
                 <input
                   type="search"
@@ -2289,14 +2380,35 @@ export function CrateApp({
                 </>
               )}
             </span>
+            {activePlaylist && isCollabPlaylist(activePlaylist) && (
+              <span className="truncate text-[11px] text-accent-alt/90">
+                {collabLine(activePlaylist, username)}
+              </span>
+            )}
+            {activePlaylist && (
+              <button
+                type="button"
+                onClick={() => setCollabFor(activePlaylist.id)}
+                title="Build this set with other people"
+                className={`ml-auto flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-medium ${
+                  isCollabPlaylist(activePlaylist)
+                    ? "border-accent-alt/60 text-accent-alt"
+                    : "border-ink-700 text-neutral-200 hover:border-accent-alt/50 hover:text-accent-alt"
+                }`}
+              >
+                <Users className="h-3 w-3" />
+                Collaborate
+              </button>
+            )}
             {activePlaylist && (
               <button
                 type="button"
                 onClick={() => setPullListFor(activePlaylist.id)}
-                title="The whole running order, big enough to pull records from"
-                className="ml-auto rounded-full border border-ink-700 px-3 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
+                title="The whole running order at once — BPMs and every transition — and a way to tick records off as you pull them"
+                className="flex items-center gap-1.5 rounded-full border border-ink-700 px-3 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
               >
-                Pull list
+                <ListIcon className="h-3 w-3" />
+                Whole list
               </button>
             )}
             {activePlaylist && (
@@ -2462,6 +2574,22 @@ export function CrateApp({
         />
       </div>
 
+      {collabFor && playlists.find((p) => p.id === collabFor) && (
+        <CollabPanel
+          playlist={playlists.find((p) => p.id === collabFor)!}
+          me={username}
+          onClose={() => setCollabFor(null)}
+          onChanged={() => void refreshPlaylists()}
+          onLeft={() => {
+            const left = collabFor;
+            setCollabFor(null);
+            if (activePlaylistId === left) setActivePlaylistId(null);
+            setPlaylists((previous) => previous.filter((p) => p.id !== left));
+            say("You left that playlist.");
+          }}
+        />
+      )}
+
       {canInvite && invitesOpen && (
         <InvitePanel username={username} onClose={() => setInvitesOpen(false)} />
       )}
@@ -2473,6 +2601,9 @@ export function CrateApp({
           name={activePlaylist.name}
           items={playlistItems}
           onClose={() => setPullListFor(null)}
+          transitions={transitions}
+          addedBy={activePlaylist.entries.map((e) => e.addedBy ?? null)}
+          collab={isCollabPlaylist(activePlaylist)}
           onPlay={(index) => {
             playFrom(playlistItems, index);
             setPullListFor(null);
@@ -2575,6 +2706,11 @@ export function CrateApp({
             onImport={(file) => void importPlaylists(file)}
             onShare={(id, shared) => void sharePlaylist(id, shared)}
             sharedIds={sharedIds}
+            me={username}
+            onCollaborate={(id) => {
+              setSheet("none");
+              setCollabFor(id);
+            }}
           />
         </div>
       </Sheet>

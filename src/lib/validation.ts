@@ -35,6 +35,14 @@ export const updatePlaylistSchema = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
     entries: z.array(playlistItemSchema).max(1000).optional(),
+    /**
+     * The version the client was looking at when it made this edit. With
+     * collaborators, an edit made against an older version is refused (409)
+     * rather than overwriting someone else's change. Optional only so a tab
+     * opened before this shipped keeps working; the current client always
+     * sends it.
+     */
+    version: z.number().int().positive().optional(),
   })
   .strict()
   .refine((v) => v.name !== undefined || v.entries !== undefined, {

@@ -80,6 +80,7 @@ export type DigLane =
   | "credits"
   | "same-artist"
   | "same-label"
+  | "artist-labels"
   | "same-style"
   | "same-era"
   | "similar-tempo";
@@ -89,6 +90,7 @@ export const DIG_LANE_LABELS: Record<DigLane, string> = {
   credits: "Credits",
   "same-artist": "More by this artist",
   "same-label": "More on this label",
+  "artist-labels": "Labels they've released on",
   "same-style": "Same style",
   "same-era": "Same era",
   "similar-tempo": "Mixable tempo",
@@ -211,6 +213,12 @@ export interface PlaylistItemRow {
   releaseTitle: string;
   year: number | null;
   position: number;
+  /**
+   * Discogs username of whoever put this record in. Read-only: filled in by
+   * the server on the way out, never accepted on the way in (the request
+   * schemas are strict and do not have it).
+   */
+  addedBy?: string | null;
 }
 
 /**
@@ -234,6 +242,22 @@ export interface Playlist {
   items: string[];
   /** Full denormalised rows, in order. */
   entries: PlaylistItemRow[];
+  /** "owner" for your own playlists, "editor" for one you joined. */
+  role: "owner" | "editor";
+  /** The owner's Discogs username. */
+  owner: string;
+  /**
+   * Everyone who has joined, by Discogs username, owner excluded. Non-empty
+   * means the playlist is being worked on together.
+   */
+  collaborators: string[];
+  /**
+   * Owner only: whether the join link is on. Always false for an editor —
+   * they have no business knowing, and nothing to do with it.
+   */
+  joinLinkOn: boolean;
+  /** Bumped on every change; an edit names the version it was made against. */
+  version: number;
 }
 
 export type BpmSource = "tap" | "auto" | "discogs" | "manual";

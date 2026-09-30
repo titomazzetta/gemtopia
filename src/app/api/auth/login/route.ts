@@ -6,6 +6,7 @@ import { handleError, originAllowed } from "@/lib/api";
 import { callerId, rateLimit } from "@/lib/ratelimit";
 import { inviteHash } from "@/lib/invites";
 import { inviteUsable } from "@/lib/repo";
+import { safeNextPath } from "@/lib/collab";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,9 +37,14 @@ function back(reason: string) {
   return NextResponse.redirect(url, { status: 303 });
 }
 
-async function begin(inviteHash?: string) {
+async function begin(inviteHash?: string, next?: string | null) {
   const { token, tokenSecret } = await requestToken(CALLBACK_URL);
-  await setHandshake({ requestToken: token, requestSecret: tokenSecret, inviteHash });
+  await setHandshake({
+    requestToken: token,
+    requestSecret: tokenSecret,
+    inviteHash,
+    next: next ?? undefined,
+  });
   return NextResponse.redirect(authorizeUrl(token), { status: 303 });
 }
 
@@ -52,7 +58,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    return await begin();
+    // `?next=` lets a join link survive the trip to Discogs and back. Only a
+    // join link is accepted (collab.safeNextPath); anything else is dropped.
+    return await begin(undefined, safeNextPath(request.nextUrl.searchParams.get("next")));
   } catch (error) {
     return handleError("auth/login", error);
   }
@@ -71,9 +79,11 @@ export async function POST(request: NextRequest) {
   if (!limit.ok) return back("rate_limited");
 
   let hash: string | null = null;
+  let next: string | null = null;
   try {
     const form = await request.formData();
     hash = inviteHash(form.get("code"));
+    next = safeNextPath(form.get("next"));
   } catch {
     return back("invite_invalid");
   }
@@ -81,7 +91,7 @@ export async function POST(request: NextRequest) {
 
   try {
     if (!(await inviteUsable(hash))) return back("invite_invalid");
-    return await begin(hash);
+    return await begin(hash, next);
   } catch (error) {
     return handleError("auth/login", error);
   }

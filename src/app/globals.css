@@ -9,6 +9,18 @@
 html,
 body {
   height: 100%;
+  /*
+   * Nothing on any screen should scroll sideways. `clip`, not `hidden`: it
+   * stops a stray wide element from widening the page without turning the
+   * body into a scroll container, which would break sticky headers.
+   */
+  overflow-x: clip;
+}
+
+/* Keep content inside the screen's safe area in landscape on notched phones. */
+body {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 body {
