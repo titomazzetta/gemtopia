@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Playable } from "@/lib/types";
-import { formatBpm, type MixCheck } from "@/lib/mixing";
+import { STRAIN_META, VERDICT_META, formatBpm, type MixCheck } from "@/lib/mixing";
 import { TransitionStrip } from "./TrackList";
 import {
   prunePulled,
@@ -167,6 +167,116 @@ export function PullList({
     setDrag(null);
   };
 
+  /*
+   * Press and hold anywhere on a record to pick it up — the same drag as the
+   * grip, for people who reach for the record rather than the handle.
+   *
+   * Touch events rather than pointer events, on purpose: once iOS decides a
+   * touch is a scroll it cancels pointer events, and the only way to keep a
+   * finger that is *holding a record* from scrolling the list is a
+   * non-passive touchmove that calls preventDefault. So: a touch that moves
+   * before 350ms is a scroll and is left alone; one that holds still for
+   * 350ms becomes a drag, and from then on its moves are ours.
+   */
+  const suppressClick = useRef(false);
+  const handlers = useRef({ slotFor, endDrag, cancelDrag });
+  useEffect(() => {
+    handlers.current = { slotFor, endDrag, cancelDrag };
+  });
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || !onReorder) return;
+    let timer: number | null = null;
+    let start: { x: number; y: number; index: number } | null = null;
+    let active = false;
+
+    const clear = () => {
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+    };
+
+    const onStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      const target = event.target as HTMLElement | null;
+      if (!touch || event.touches.length > 1 || !target) return;
+      if (target.closest("[data-grip]")) return; // the grip handles itself
+      const row = target.closest<HTMLElement>("[data-index]");
+      if (!row) return;
+      start = { x: touch.clientX, y: touch.clientY, index: Number(row.dataset.index) };
+      clear();
+      timer = window.setTimeout(() => {
+        if (!start) return;
+        active = true;
+        const next = { from: start.index, slot: start.index };
+        dragRef.current = next;
+        setDrag(next);
+        navigator.vibrate?.(12);
+      }, 350);
+    };
+
+    const onMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch || !start) return;
+      if (!active) {
+        if (Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 10) {
+          clear(); // it's a scroll
+          start = null;
+        }
+        return;
+      }
+      event.preventDefault();
+      const box = list.getBoundingClientRect();
+      if (touch.clientY < box.top + 48) list.scrollTop -= 12;
+      else if (touch.clientY > box.bottom - 48) list.scrollTop += 12;
+      const current = dragRef.current;
+      if (!current) return;
+      const slot = handlers.current.slotFor(touch.clientY);
+      if (slot !== current.slot) {
+        const next = { ...current, slot };
+        dragRef.current = next;
+        setDrag(next);
+      }
+    };
+
+    const onEnd = () => {
+      clear();
+      start = null;
+      if (active) {
+        active = false;
+        // The finger lifting off also "clicks" the row; that click is not a play.
+        suppressClick.current = true;
+        // …and if no click follows (finger lifted off the row), forget it,
+        // so the next real tap still plays.
+        window.setTimeout(() => {
+          suppressClick.current = false;
+        }, 400);
+        handlers.current.endDrag();
+      }
+    };
+
+    const onCancel = () => {
+      clear();
+      start = null;
+      if (active) {
+        active = false;
+        handlers.current.cancelDrag();
+      }
+    };
+
+    list.addEventListener("touchstart", onStart, { passive: true });
+    list.addEventListener("touchmove", onMove, { passive: false });
+    list.addEventListener("touchend", onEnd);
+    list.addEventListener("touchcancel", onCancel);
+    return () => {
+      clear();
+      list.removeEventListener("touchstart", onStart);
+      list.removeEventListener("touchmove", onMove);
+      list.removeEventListener("touchend", onEnd);
+      list.removeEventListener("touchcancel", onCancel);
+    };
+  }, [onReorder]);
+
   const closeRef = useRef<HTMLButtonElement | null>(null);
   /*
    * The parent re-renders several times a second while something plays, and
@@ -214,14 +324,36 @@ export function PullList({
               )}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={toggleDense}
-            aria-pressed={dense}
-            className="mt-1 h-9 shrink-0 rounded-full border border-ink-700 px-3 text-[11px] text-neutral-300 hover:border-accent/50 hover:text-accent"
+          {/*
+            Two clearly different views, not one toggle that names the other.
+            Compact: one line per record plus a pitch chip — the whole set on
+            one screen. Detailed: the transition strip between every pair, the
+            release and the label.
+          */}
+          <div
+            role="radiogroup"
+            aria-label="List density"
+            className="mt-1 flex h-9 shrink-0 overflow-hidden rounded-full border border-ink-700 text-[11px]"
           >
-            {dense ? "Roomy" : "Compact"}
-          </button>
+            {([true, false] as const).map((value) => (
+              <button
+                key={String(value)}
+                type="button"
+                role="radio"
+                aria-checked={dense === value}
+                onClick={() => {
+                  if (dense !== value) toggleDense();
+                }}
+                className={`px-3 ${
+                  dense === value
+                    ? "bg-accent font-semibold text-ink-950"
+                    : "text-neutral-400 hover:text-neutral-100"
+                }`}
+              >
+                {value ? "Compact" : "Detailed"}
+              </button>
+            ))}
+          </div>
           {pulled.size > 0 && (
             <button
               type="button"
@@ -261,16 +393,19 @@ export function PullList({
               return (
                 <li
                   key={`${row.key}:${index}`}
+                  data-index={index}
                   ref={(el) => {
                     rowRefs.current[index] = el;
                   }}
-                  className={`relative border-b border-ink-850 ${dragging ? "opacity-40" : ""} ${
-                    playing ? "bg-accent/10" : ""
-                  }`}
+                  // No text selection or iOS callout on a long press — that
+                  // press is picking the record up.
+                  className={`relative select-none border-b border-ink-850 [-webkit-touch-callout:none] ${
+                    dragging ? "bg-accent/15 opacity-60 ring-1 ring-inset ring-accent/60" : ""
+                  } ${playing && !dragging ? "bg-accent/10" : ""}`}
                 >
                   {dropAbove && <span aria-hidden="true" className="absolute inset-x-0 -top-px z-10 h-0.5 bg-accent" />}
                   {/* The transition *into* this record, so the list reads as a set. */}
-                  {check && <TransitionStrip check={check} />}
+                  {check && !dense && <TransitionStrip check={check} />}
                   <div className="flex items-stretch">
                     {/* The number ticks the record off as pulled. */}
                     <button
@@ -285,8 +420,14 @@ export function PullList({
                     {/* The row plays from here — and the list stays open. */}
                     <button
                       type="button"
-                      onClick={() => onPlay(index)}
-                      aria-label={`Play from ${row.number}. ${row.title}`}
+                      onClick={() => {
+                        if (suppressClick.current) {
+                          suppressClick.current = false;
+                          return;
+                        }
+                        onPlay(index);
+                      }}
+                      aria-label={`Play from ${row.number}. ${row.title}. Press and hold to move it.`}
                       className={`flex min-w-0 flex-1 items-start gap-3 pl-2 pr-1 text-left ${
                         dense ? "py-1.5" : "py-3"
                       } ${done ? "opacity-45" : ""}`}
@@ -315,10 +456,21 @@ export function PullList({
                           </span>
                         )}
                       </span>
-                      <span className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5 font-mono text-[11px] tabular-nums text-neutral-500">
-                        {row.position && <span>{row.position}</span>}
-                        {row.bpm !== null && <span className="text-neutral-300">{formatBpm(row.bpm)}</span>}
-                      </span>
+                      {dense ? (
+                        // Compact: BPM, and the pitch the move *into* this
+                        // record needs, coloured by how comfortable it is.
+                        <span className="flex shrink-0 items-center gap-2 font-mono text-[11px] tabular-nums">
+                          {check && <PitchChip check={check} />}
+                          <span className="w-8 text-right text-neutral-200">
+                            {row.bpm !== null ? formatBpm(row.bpm) : "–"}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5 font-mono text-[11px] tabular-nums text-neutral-500">
+                          {row.position && <span>{row.position}</span>}
+                          {row.bpm !== null && <span className="text-neutral-300">{formatBpm(row.bpm)}</span>}
+                        </span>
+                      )}
                     </button>
                     {/*
                       Drag handle. Touch-first: pointer events, captured, with
@@ -329,6 +481,7 @@ export function PullList({
                       <span
                         role="button"
                         tabIndex={-1}
+                        data-grip=""
                         aria-label={`Drag to move ${row.title}`}
                         onPointerDown={(event) => startDrag(event, index)}
                         onPointerMove={moveDrag}
@@ -362,5 +515,34 @@ function GripIcon() {
       <circle cx="9" cy="18" r="1.6" />
       <circle cx="15" cy="18" r="1.6" />
     </svg>
+  );
+}
+
+const CHIP_TONE: Record<string, string> = {
+  good: "border-accent/40 text-accent",
+  warn: "border-amber-400/50 text-amber-300",
+  bad: "border-red-400/50 text-red-300",
+  muted: "border-ink-700 text-neutral-600",
+};
+
+/**
+ * The transition into a record, in five characters: the pitch each deck
+ * moves to meet ("±1.8"), ×2 / ÷2 when it's a double- or half-time blend, and
+ * the comfort tier as colour *and* as the title text — never colour alone.
+ */
+function PitchChip({ check }: { check: MixCheck }) {
+  const tone = STRAIN_META[check.strain].tone;
+  const pitch = check.outgoingPitch === null ? null : Math.abs(check.outgoingPitch);
+  const shift = check.verdict === "double-time" || check.verdict === "half-time"
+    ? VERDICT_META[check.verdict].short
+    : "";
+  return (
+    <span
+      title={`${STRAIN_META[check.strain].label} — ${check.summary}`}
+      className={`rounded border px-1 py-px text-[10px] leading-none ${CHIP_TONE[tone] ?? CHIP_TONE.muted}`}
+    >
+      {shift}
+      {pitch === null ? "no BPM" : `±${pitch.toFixed(1)}%`}
+    </span>
   );
 }

@@ -31,6 +31,9 @@ export function SetPrepBar({
   length,
   transitionSeconds,
   onTransitionChange,
+  open: openProp,
+  onOpenChange,
+  viewLabel = null,
 }: {
   report: SequenceReport;
   pitchPercent: number;
@@ -40,6 +43,11 @@ export function SetPrepBar({
   length: SetLength;
   transitionSeconds: number;
   onTransitionChange: (seconds: number) => void;
+  /** Phone fold, when the parent wants to fold other things with it. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** A view other than your order ("bpm", "artist"…), named in the summary. */
+  viewLabel?: string | null;
 }) {
   /*
    * On a phone this bar is folded to one line by default. Opened up it is
@@ -48,7 +56,12 @@ export function SetPrepBar({
    * summary line keeps the two numbers you glance at; the rest is a tap away.
    * Desktop has the room and always shows it all.
    */
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = openProp ?? ownOpen;
+  const setOpen = (next: boolean) => {
+    if (onOpenChange) onOpenChange(next);
+    else setOwnOpen(next);
+  };
   const total = report.steps.length;
   if (total === 0) {
     return (
@@ -87,7 +100,7 @@ export function SetPrepBar({
     <div className="border-b border-ink-800 bg-ink-900 px-4 py-2">
       <button
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setOpen(!open)}
         aria-expanded={open}
         className="flex w-full items-center gap-2 text-left lg:hidden"
       >
@@ -109,6 +122,7 @@ export function SetPrepBar({
             ))
           )}
           <span className="text-neutral-600"> · ±{pitchPercent}%</span>
+          {viewLabel && <span className="text-sky-300/80"> · by {viewLabel}</span>}
         </span>
         <span className="shrink-0 text-[11px] text-neutral-500">
           {open ? "Less ▴" : "Set prep ▾"}
