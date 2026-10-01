@@ -30,3 +30,9 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    groups:
+      # init and analyze must run the same CodeQL version, or the analyze step
+      # fails ("Loaded a configuration file for version X, but running Y").
+      # Bumped one at a time they each break CI, so they move together.
+      codeql:
+        patterns: ["github/codeql-action*"]
