@@ -264,6 +264,17 @@ to other users, so it is treated as the most hostile input in the app.
   and access checks as the rest of the API. Re-reading the page, rather than
   asking for "everything after id N", also picks up deletions and cannot miss
   a message that committed out of order.
+- **Activity notes cannot be forged.** "komron added Shiva — Kerri Chandler"
+  lines are rows with `kind` ≠ `text` and a small `meta` object, written only
+  by the server inside the same transaction as the edit, join or leave they
+  describe. The POST schema accepts `{ body }` and nothing else, so no request
+  can set `kind` or `meta`, and the database requires `meta` to be absent on a
+  text message and a bounded object (≤ 2 KB) on a note. Titles and artists in
+  notes come from people's earlier edits, so they go through the same
+  normalisation as messages (`chat.cleanLabel`) and are drawn as text. A note
+  shares exactly one thing a collaborator would not otherwise see: the BPM the
+  person adding the record had measured — deliberately, since they are adding
+  it to a shared set. Notes do not count towards the posting limit.
 - **Unread state stays in the browser.** The last-seen id is kept in
   `localStorage`, only to draw a dot; it is never sent or trusted.
 

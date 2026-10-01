@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ChatMessage, Playlist } from "@/lib/types";
 import { ApiError, chatApi } from "@/client/api";
-import { groupRuns, mergeLatest, prependOlder } from "@/client/chatView";
+import {
+  describeNote,
+  groupRuns,
+  mergeLatest,
+  prependOlder,
+  type KnownRecord,
+} from "@/client/chatView";
 import { useFinePointer } from "@/client/useFinePointer";
 import { MAX_MESSAGE_CHARS, canDeleteMessage, messageLength } from "@/lib/chat";
 import { ChatIcon, SendIcon, Users } from "./Icons";
@@ -60,6 +66,8 @@ export function ChatPanel({
   onPeople,
   onSeen,
   onGone,
+  lookup,
+  onPlayRecord,
 }: {
   playlist: Playlist;
   me: string;
@@ -70,6 +78,10 @@ export function ChatPanel({
   onSeen: () => void;
   /** This person no longer has the playlist (removed, or it was deleted). */
   onGone: () => void;
+  /** Length and BPM this browser knows for a record, to fill in notes. */
+  lookup?: (clipKey: string) => KnownRecord | null;
+  /** Play a record from the set — tapping its name in a note. */
+  onPlayRecord?: (clipKey: string) => void;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -347,6 +359,50 @@ export function ChatPanel({
                   </span>
                 </div>
               )}
+              {run.note ? (
+                <div className="my-2 flex flex-col items-center gap-1">
+                  {run.messages.map((message) => {
+                    const note = describeNote(
+                      message,
+                      message.meta?.clipKey ? lookup?.(message.meta.clipKey) : null,
+                    );
+                    const playable =
+                      note.clipKey !== null && onPlayRecord !== undefined && lookup?.(note.clipKey) != null;
+                    return (
+                      <div
+                        key={message.id}
+                        className="max-w-[92%] rounded-xl bg-ink-900 px-3 py-1.5 text-center text-[11px] leading-snug text-neutral-400 ring-1 ring-ink-800"
+                      >
+                        <span className="font-medium text-accent-alt/90">{note.who}</span> {note.verb}
+                        {note.title && (
+                          <>
+                            {" "}
+                            {playable ? (
+                              <button
+                                type="button"
+                                onClick={() => onPlayRecord?.(note.clipKey!)}
+                                title="Play it"
+                                className="font-medium text-neutral-100 underline decoration-ink-600 underline-offset-2 hover:text-accent"
+                              >
+                                {note.title}
+                              </button>
+                            ) : (
+                              <span className="font-medium text-neutral-200">{note.title}</span>
+                            )}
+                            {note.artist && <span> — {note.artist}</span>}
+                          </>
+                        )}
+                        <span className="ml-1.5 text-[10px] text-neutral-600">{time(message.at)}</span>
+                        {note.details.length > 0 && (
+                          <span className="mt-0.5 block font-mono text-[10px] tabular-nums text-neutral-500">
+                            {note.details.join(" · ")}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
               <div className={`mb-2 flex flex-col ${run.mine ? "items-end" : "items-start"}`}>
                 {!run.mine && (
                   <span className="mb-0.5 ml-2 text-[11px] font-medium text-accent-alt/90">
@@ -391,6 +447,7 @@ export function ChatPanel({
                   );
                 })}
               </div>
+              )}
             </div>
           ))}
         </div>

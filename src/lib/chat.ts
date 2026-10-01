@@ -119,3 +119,138 @@ export function isMessageId(value: unknown): value is string {
 export function canDeleteMessage(role: "owner" | "editor", mine: boolean): boolean {
   return mine || role === "owner";
 }
+
+/* ------------------------------------------------------------------ */
+/* Activity notes                                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Small centred lines in the chat — "komron added Shiva — Kerri Chandler" —
+ * written by the server when the set changes or someone joins or leaves.
+ * Nobody can post one: the POST schema takes only { body }, and `kind` and
+ * `meta` are set in repo.ts from rows the server already holds. What they
+ * name (titles, artists) did come from people's edits once, so it is cleaned
+ * here the same way a message is, and it is drawn as text like a message.
+ */
+
+export type ActivityKind = "added" | "removed" | "joined" | "left";
+export type MessageKind = "text" | ActivityKind;
+
+export interface ActivityMeta {
+  /** One record: what it is. */
+  clipKey?: string;
+  title?: string;
+  artist?: string;
+  year?: number | null;
+  /** BPM from the catalogue of whoever added it, when they had measured it. */
+  bpm?: number | null;
+  /** removed: whose record it was. */
+  addedBy?: string | null;
+  /** Several records in one edit: how many. */
+  count?: number;
+  /** left: taken off by the owner, rather than leaving. */
+  removed?: boolean;
+}
+
+/** More records than this in one edit become one "added 12 records" line. */
+export const ACTIVITY_SINGLE_MAX = 3;
+
+/**
+ * A record's title or artist, made safe to show in a one-line note: the same
+ * cleaning as a message, on one line, and cut to `max` characters (a label
+ * may be shortened; a message never is).
+ */
+export function cleanLabel(input: unknown, max = 120): string {
+  if (typeof input !== "string") return "";
+  // Cut first (by code point, so no emoji is split) to well under the
+  // message limit, so cleaning can only fail on "nothing left".
+  const oneLine = Array.from(input.replace(/[\r\n]+/g, " ")).slice(0, 400).join("");
+  const cleaned = normaliseMessage(oneLine);
+  if (!cleaned.ok) return "";
+  const chars = Array.from(cleaned.body);
+  return chars.length > max ? `${chars.slice(0, max - 1).join("")}…` : cleaned.body;
+}
+
+export interface RecordRef {
+  clipKey: string;
+  title: string;
+  artist: string;
+  year: number | null;
+  /** Username of whoever added it, where known. */
+  addedBy?: string | null;
+}
+
+/**
+ * What an edit added and removed, as records — a multiset difference by clip
+ * key, so a reorder is neither, and a record in the list twice that loses a
+ * copy is one removal.
+ */
+export function diffRecords(
+  previous: readonly RecordRef[],
+  next: readonly RecordRef[],
+): { added: RecordRef[]; removed: RecordRef[] } {
+  const before = new Map<string, number>();
+  for (const r of previous) before.set(r.clipKey, (before.get(r.clipKey) ?? 0) + 1);
+  const after = new Map<string, number>();
+  for (const r of next) after.set(r.clipKey, (after.get(r.clipKey) ?? 0) + 1);
+
+  const added: RecordRef[] = [];
+  const seenNext = new Map<string, number>();
+  for (const r of next) {
+    const n = (seenNext.get(r.clipKey) ?? 0) + 1;
+    seenNext.set(r.clipKey, n);
+    if (n > (before.get(r.clipKey) ?? 0)) added.push(r);
+  }
+
+  const removed: RecordRef[] = [];
+  const seenPrev = new Map<string, number>();
+  for (const r of previous) {
+    const n = (seenPrev.get(r.clipKey) ?? 0) + 1;
+    seenPrev.set(r.clipKey, n);
+    if (n > (after.get(r.clipKey) ?? 0)) removed.push(r);
+  }
+  return { added, removed };
+}
+
+export interface ActivityNote {
+  kind: ActivityKind;
+  /** Plain-text summary, for screen readers and anything that can't draw meta. */
+  body: string;
+  meta: ActivityMeta;
+}
+
+function recordNote(
+  kind: "added" | "removed",
+  r: RecordRef,
+  bpm: number | null,
+): ActivityNote {
+  const title = cleanLabel(r.title) || "Untitled";
+  const artist = cleanLabel(r.artist);
+  const meta: ActivityMeta = { clipKey: r.clipKey, title, artist, year: r.year ?? null };
+  if (kind === "added") meta.bpm = bpm;
+  if (kind === "removed") meta.addedBy = r.addedBy ? cleanLabel(r.addedBy, 64) : null;
+  return { kind, body: artist ? `${title} — ${artist}` : title, meta };
+}
+
+/**
+ * The notes one edit produces: a line per record for a few, one summary
+ * line for many (an import or a big paste should not flood the chat).
+ */
+export function activityNotes(
+  added: readonly RecordRef[],
+  removed: readonly RecordRef[],
+  bpmByKey: ReadonlyMap<string, number> = new Map(),
+): ActivityNote[] {
+  const notes: ActivityNote[] = [];
+  if (added.length > ACTIVITY_SINGLE_MAX) {
+    notes.push({ kind: "added", body: `${added.length} records`, meta: { count: added.length } });
+  } else {
+    for (const r of added) notes.push(recordNote("added", r, bpmByKey.get(r.clipKey) ?? null));
+  }
+  if (removed.length > ACTIVITY_SINGLE_MAX) {
+    notes.push({ kind: "removed", body: `${removed.length} records`, meta: { count: removed.length } });
+  } else {
+    for (const r of removed) notes.push(recordNote("removed", r, null));
+  }
+  return notes;
+}

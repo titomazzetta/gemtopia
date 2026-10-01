@@ -145,6 +145,8 @@ export function TrackList({
   onAdd,
   onRemove,
   canRemove,
+  addedBy,
+  phoneMeta = false,
   emptyMessage,
   emptyAction,
   reorderable = false,
@@ -163,6 +165,16 @@ export function TrackList({
    * playlist a collaborator can only take out records they added.
    */
   canRemove?: (item: Playable, index: number) => boolean;
+  /**
+   * On a shared playlist: who put this record in ("you" for yourself), shown
+   * as a small amber tag on the row.
+   */
+  addedBy?: (item: Playable, index: number) => string | null;
+  /**
+   * On a phone the year / BPM / length columns don't fit; with this, the
+   * second line carries them instead of the release title.
+   */
+  phoneMeta?: boolean;
   emptyMessage: string;
   /**
    * Offered beneath the empty message. An empty crate is the one moment the
@@ -387,7 +399,28 @@ export function TrackList({
                       ) : null}
                       {item.title}
                     </span>
-                    <span className="block truncate text-[11px] text-neutral-500">
+                    {phoneMeta && (
+                      <span className="block truncate text-[11px] text-neutral-500 sm:hidden">
+                        {item.artist}
+                        {[
+                          item.year ? String(item.year) : null,
+                          item.bpm !== null && item.bpm !== undefined ? `${formatBpm(item.bpm)} BPM` : null,
+                          item.duration ? formatTime(item.duration) : null,
+                        ]
+                          .filter(Boolean)
+                          .map((part, i) => (
+                            <span key={i} className="font-mono text-[10px] text-neutral-600">
+                              {" · "}
+                              {part}
+                            </span>
+                          ))}
+                      </span>
+                    )}
+                    <span
+                      className={`truncate text-[11px] text-neutral-500 ${
+                        phoneMeta ? "hidden sm:block" : "block"
+                      }`}
+                    >
                       {item.artist}
                       <span className="text-neutral-700"> — {item.releaseTitle}</span>
                       {silent && (
@@ -452,6 +485,24 @@ export function TrackList({
                     </span>
                   </span>
                 </button>
+
+                {addedBy && (
+                  // A fixed-width slot, so a long name doesn't push the BPM
+                  // and runtime columns out of line with the rows around it.
+                  <span className="flex w-16 shrink-0 justify-end">
+                    {(() => {
+                      const who = addedBy(item, index);
+                      return who ? (
+                        <span
+                          className="max-w-full truncate rounded-full bg-accent-alt/10 px-1.5 py-0.5 text-[10px] text-accent-alt/90"
+                          title={`Added by ${who}`}
+                        >
+                          {who}
+                        </span>
+                      ) : null;
+                    })()}
+                  </span>
+                )}
 
                 <ShareButton track={item} />
 

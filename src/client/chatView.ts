@@ -47,6 +47,8 @@ export interface MessageRun {
   key: string;
   author: string | null;
   mine: boolean;
+  /** A run of activity notes ("komron added …"), drawn centred and small. */
+  note: boolean;
   messages: ChatMessage[];
   /** Set on the first run of a new day, e.g. "Today", "Yesterday", "Mon 28 Sep". */
   day: string | null;
@@ -83,12 +85,14 @@ export function groupRuns(messages: readonly ChatMessage[], now: number = Date.n
     const day = dayKey(message.at);
     const newDay = day !== lastDay;
     lastDay = day;
+    const note = message.kind !== undefined && message.kind !== "text";
     const previous = runs[runs.length - 1];
     const last = previous?.messages[previous.messages.length - 1];
     if (
       previous &&
       last &&
       !newDay &&
+      previous.note === note &&
       previous.author === message.author &&
       previous.mine === message.mine &&
       message.at - last.at <= RUN_GAP_MS
@@ -100,9 +104,79 @@ export function groupRuns(messages: readonly ChatMessage[], now: number = Date.n
       key: message.id,
       author: message.author,
       mine: message.mine,
+      note,
       messages: [message],
       day: newDay ? dayLabel(message.at, now) : null,
     });
   }
   return runs;
+}
+
+/** What this browser knows about a record, to fill in a note. */
+export interface KnownRecord {
+  /** Seconds. */
+  duration: number | null;
+  bpm: number | null;
+}
+
+export interface NoteView {
+  /** "You", the person's name, or "Former member". */
+  who: string;
+  /** "added", "took out", "joined" … */
+  verb: string;
+  title: string | null;
+  artist: string | null;
+  /** Small print under the line: year · BPM · length, or whose it was. */
+  details: string[];
+  /** The record the note is about, when it is one record. */
+  clipKey: string | null;
+}
+
+function length(seconds: number): string {
+  const s = Math.round(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/**
+ * How an activity note reads. The BPM is the one the person who added the
+ * record had measured, if they had; otherwise your own, if you have. The
+ * length comes from what this browser already knows about the record.
+ */
+export function describeNote(message: ChatMessage, known?: KnownRecord | null): NoteView {
+  const meta = message.meta ?? {};
+  const who = message.mine ? "You" : (message.author ?? "Former member");
+  const base = { who, title: null, artist: null, details: [] as string[], clipKey: null };
+
+  switch (message.kind) {
+    case "joined":
+      return { ...base, verb: "joined" };
+    case "left":
+      return { ...base, verb: meta.removed ? "was taken off the playlist" : "left" };
+    case "added":
+    case "removed": {
+      const verb = message.kind === "added" ? "added" : "took out";
+      if (typeof meta.count === "number") {
+        return { ...base, verb: `${verb} ${meta.count} records` };
+      }
+      const details: string[] = [];
+      if (message.kind === "added") {
+        if (meta.year) details.push(String(meta.year));
+        const bpm = meta.bpm ?? known?.bpm ?? null;
+        if (bpm) details.push(`${Math.round(bpm)} BPM`);
+        if (known?.duration) details.push(length(known.duration));
+      } else if (meta.addedBy && meta.addedBy !== message.author) {
+        details.push(`added by ${meta.addedBy}`);
+      }
+      return {
+        who,
+        verb,
+        title: meta.title ?? null,
+        artist: meta.artist || null,
+        details,
+        clipKey: meta.clipKey ?? null,
+      };
+    }
+    default:
+      return { ...base, verb: "" };
+  }
 }
