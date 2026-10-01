@@ -478,6 +478,33 @@ BEGIN
   END IF;
 END $$;
 
+-- The set's BPM: one reading per record per playlist, shared by everyone on
+-- it, so a back-to-back partner sees your tempos (and set prep agrees on both
+-- screens) whether or not they own the record. Written by the server from
+-- the BPM catalogue of someone on the playlist (repo.shareBpmWithSets); the
+-- latest wins, except an auto-detect never replaces a tap or typed value.
+-- Kept with the playlist, so it stays if the person who logged it leaves.
+ALTER TABLE playlist_items
+  ADD COLUMN IF NOT EXISTS bpm NUMERIC(5,1)
+    CHECK (bpm IS NULL OR bpm BETWEEN 40 AND 260);
+ALTER TABLE playlist_items
+  ADD COLUMN IF NOT EXISTS bpm_source TEXT
+    CHECK (bpm_source IS NULL OR bpm_source IN ('tap','auto','discogs','manual'));
+ALTER TABLE playlist_items
+  ADD COLUMN IF NOT EXISTS bpm_by UUID REFERENCES users(id) ON DELETE SET NULL;
+
+-- Fill the sets from the catalogues that already exist: the person who added
+-- each record, else the playlist's owner. Only where a set has no BPM yet,
+-- so re-running it changes nothing.
+UPDATE playlist_items i
+   SET bpm = tm.bpm, bpm_source = tm.bpm_source, bpm_by = tm.user_id
+  FROM playlists p, track_meta tm
+ WHERE p.id = i.playlist_id
+   AND i.bpm IS NULL
+   AND tm.clip_key = i.clip_key
+   AND tm.bpm IS NOT NULL
+   AND tm.user_id = COALESCE(i.added_by, p.user_id);
+
 -- ---------------------------------------------------------------------------
 -- Record-only tracks
 --

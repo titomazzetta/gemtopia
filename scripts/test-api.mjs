@@ -1579,6 +1579,72 @@ console.log("\ncollaborative playlists");
     );
   });
 
+  /* ---- the set's BPM ---- */
+  const bpmOf = async (who, key) =>
+    (await find(who)).entries.find((e) => e.clipKey === key) ?? null;
+  const logBpm = (who, clipKey, bpm, bpmSource) =>
+    who.call("/api/track-meta", { method: "PUT", body: { entries: [{ clipKey, bpm, bpmSource }] } });
+
+  await check("a collaborator's BPM becomes the set's, for a record they don't own", async () => {
+    assert.equal((await logBpm(friend, "5001:ccccccccccc", 128, "tap")).status, 200);
+    const seen = await bpmOf(owner, "5001:ccccccccccc");
+    assert.equal(seen.bpm, 128);
+    assert.equal(seen.bpmBy, friend.username);
+    assert.equal((await bpmOf(friend, "5001:ccccccccccc")).bpm, 128, "the same number on both screens");
+  });
+
+  await check("an auto-detect doesn't replace someone's tap", async () => {
+    await logBpm(owner, "5001:ccccccccccc", 131, "auto");
+    assert.equal((await bpmOf(owner, "5001:ccccccccccc")).bpm, 128);
+  });
+
+  await check("a later tap does", async () => {
+    await logBpm(owner, "5001:ccccccccccc", 127, "tap");
+    const seen = await bpmOf(friend, "5001:ccccccccccc");
+    assert.equal(seen.bpm, 127);
+    assert.equal(seen.bpmBy, owner.username);
+  });
+
+  await check("someone not on the playlist can't touch its BPMs", async () => {
+    await logBpm(stranger, "5001:ccccccccccc", 99, "tap");
+    assert.equal((await bpmOf(owner, "5001:ccccccccccc")).bpm, 127);
+  });
+
+  await check("a record comes in with the BPM its adder logged", async () => {
+    await logBpm(friend, "5010:jjjjjjjjjjj", 122, "tap");
+    const current = await find(friend);
+    const res = await friend.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: { entries: [...asEntries(current), clip(5010, "jjjjjjjjjjj")], version: current.version },
+    });
+    assert.equal(res.status, 200);
+    const added = res.body.playlist.entries.find((e) => e.clipKey === "5010:jjjjjjjjjjj");
+    assert.equal(added.bpm, 122);
+    assert.equal(added.bpmBy, friend.username);
+  });
+
+  await check("the set's BPMs survive a reorder", async () => {
+    const current = await find(owner);
+    const res = await owner.call(`/api/playlists/${playlistId}`, {
+      method: "PATCH",
+      body: { entries: asEntries(current).reverse(), version: current.version },
+    });
+    assert.equal(res.status, 200);
+    const byKey = new Map(res.body.playlist.entries.map((e) => [e.clipKey, e.bpm]));
+    assert.equal(byKey.get("5001:ccccccccccc"), 127);
+    assert.equal(byKey.get("5010:jjjjjjjjjjj"), 122);
+  });
+
+  await check("taking your reading back takes it off the set — not anyone else's", async () => {
+    const res = await owner.call("/api/track-meta", {
+      method: "DELETE",
+      body: { clipKey: "5001:ccccccccccc" },
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await bpmOf(friend, "5001:ccccccccccc")).bpm, null);
+    assert.equal((await bpmOf(friend, "5010:jjjjjjjjjjj")).bpm, 122);
+  });
+
   await check("a collaborator can leave", async () => {
     const res = await friend.call(`/api/playlists/${playlistId}/members`, {
       method: "DELETE",
@@ -1591,6 +1657,12 @@ console.log("\ncollaborative playlists");
     assert.equal(last.kind, "left");
     assert.equal(last.author, friend.username);
     assert.equal(last.meta.removed, false);
+  });
+
+  await check("a BPM stays with the set after the person who logged it leaves", async () => {
+    const kept = (await find(owner)).entries.find((e) => e.clipKey === "5010:jjjjjjjjjjj");
+    assert.equal(kept.bpm, 122);
+    assert.equal(kept.bpmBy, friend.username);
   });
 
   await check("the owner deleting it takes it from everyone", async () => {
