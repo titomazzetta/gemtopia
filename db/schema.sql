@@ -58,9 +58,10 @@ CREATE TABLE IF NOT EXISTS playlist_items (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   playlist_id   UUID NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
   position      INTEGER NOT NULL CHECK (position >= 0),
-  clip_key      TEXT NOT NULL CHECK (clip_key ~ '^[0-9]+:[A-Za-z0-9_-]{11}$'),
+  clip_key      TEXT NOT NULL CHECK (clip_key ~ '^[0-9]+:([A-Za-z0-9_-]{11}|t\.[A-Za-z0-9-]{1,16})$'),
   release_id    BIGINT NOT NULL CHECK (release_id > 0),
-  video_id      TEXT NOT NULL CHECK (video_id ~ '^[A-Za-z0-9_-]{11}$'),
+  -- NULL for a record-only track (see "Record-only tracks" at the end).
+  video_id      TEXT CHECK (video_id ~ '^[A-Za-z0-9_-]{11}$'),
   title         TEXT NOT NULL CHECK (length(title) <= 400),
   artist        TEXT NOT NULL CHECK (length(artist) <= 400),
   release_title TEXT NOT NULL DEFAULT '' CHECK (length(release_title) <= 400),
@@ -80,7 +81,7 @@ CREATE INDEX IF NOT EXISTS playlist_items_playlist_position_idx
 
 CREATE TABLE IF NOT EXISTS track_meta (
   user_id        UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  clip_key       TEXT NOT NULL CHECK (clip_key ~ '^[0-9]+:[A-Za-z0-9_-]{11}$'),
+  clip_key       TEXT NOT NULL CHECK (clip_key ~ '^[0-9]+:([A-Za-z0-9_-]{11}|t\.[A-Za-z0-9-]{1,16})$'),
   bpm            NUMERIC(5,1) CHECK (bpm IS NULL OR bpm BETWEEN 40 AND 260),
   bpm_source     TEXT CHECK (bpm_source IS NULL OR
                              bpm_source IN ('tap','auto','discogs','manual')),
@@ -474,5 +475,52 @@ BEGIN
         OR (kind <> 'text' AND jsonb_typeof(meta) = 'object'
             AND octet_length(meta::text) <= 2000)
       );
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Record-only tracks
+--
+-- A track from a release's Discogs tracklist that YouTube has no clip for.
+-- It is keyed `<release id>:t.<position>` (e.g. `123456:t.B2`; src/lib/
+-- clipKey.ts) instead of `<release id>:<11-char video id>`. The `t.` prefix
+-- can't collide with a clip: YouTube ids never contain a dot. It can go in a
+-- playlist and carry a BPM; it has no video, and the player skips it.
+--
+-- For databases created before this, widen the two clip-key CHECKs, let
+-- playlist_items.video_id be NULL, and tie the two together: a row has a
+-- video exactly when its key is a clip key. Every statement is a no-op on a
+-- second run.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE playlist_items ALTER COLUMN video_id DROP NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'playlist_items_clip_key_check'
+       AND position('|t' in pg_get_constraintdef(oid)) > 0
+  ) THEN
+    ALTER TABLE playlist_items DROP CONSTRAINT IF EXISTS playlist_items_clip_key_check;
+    ALTER TABLE playlist_items ADD CONSTRAINT playlist_items_clip_key_check
+      CHECK (clip_key ~ '^[0-9]+:([A-Za-z0-9_-]{11}|t\.[A-Za-z0-9-]{1,16})$');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'track_meta_clip_key_check'
+       AND position('|t' in pg_get_constraintdef(oid)) > 0
+  ) THEN
+    ALTER TABLE track_meta DROP CONSTRAINT IF EXISTS track_meta_clip_key_check;
+    ALTER TABLE track_meta ADD CONSTRAINT track_meta_clip_key_check
+      CHECK (clip_key ~ '^[0-9]+:([A-Za-z0-9_-]{11}|t\.[A-Za-z0-9-]{1,16})$');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlist_items_video_matches_key'
+  ) THEN
+    ALTER TABLE playlist_items ADD CONSTRAINT playlist_items_video_matches_key
+      CHECK ((video_id IS NULL) = (clip_key ~ ':t\.'));
   END IF;
 END $$;

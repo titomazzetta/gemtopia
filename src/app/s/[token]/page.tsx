@@ -84,9 +84,11 @@ export default async function SharedPlaylistPage({
         )}
       </header>
 
-      {playlist.items.length > 0 && (
+      {/* Record-only tracks are listed below but have nothing to play. */}
+      {playlist.items.some((item) => item.videoId !== null) && (
         <SharedPlayer
-          tracks={playlist.items.map((item) => ({
+          tracks={playlist.items.flatMap((item) =>
+            item.videoId === null ? [] : [{
             clipKey: item.clipKey,
             videoId: item.videoId,
             releaseId: item.releaseId,
@@ -94,7 +96,7 @@ export default async function SharedPlaylistPage({
             artist: item.artist,
             releaseTitle: item.releaseTitle,
             year: item.year,
-          }))}
+          }])}
         />
       )}
 
@@ -106,6 +108,14 @@ export default async function SharedPlaylistPage({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] text-neutral-200">
+                {item.videoId === null && (
+                  <span
+                    className="mr-1.5 rounded border border-neutral-700 px-1 align-middle text-[9px] uppercase tracking-wide text-neutral-500"
+                    title="No YouTube clip — play it from the record"
+                  >
+                    record only
+                  </span>
+                )}
                 {item.title}
               </span>
               <span className="block truncate text-[11px] text-neutral-500">

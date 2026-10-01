@@ -388,7 +388,7 @@ interface ItemRow {
   position: number;
   clip_key: string;
   release_id: string;
-  video_id: string;
+  video_id: string | null;
   title: string;
   artist: string;
   release_title: string;

@@ -18,6 +18,7 @@ import {
   playableOnly,
   queueFrom,
 } from "../src/client/playables.ts";
+import { isClipKey, isTrackOnlyKey, trackOnlyKey } from "../src/lib/clipKey.ts";
 
 /** A real /releases/{id} fetch always carries marketplace data. */
 const MARKET = { forSale: 3, lowestPrice: 12.5, have: 400, want: 900 };
@@ -214,7 +215,13 @@ check("same runtime and near-identical title collapses across groups", () => {
       ],
     }),
   ]);
-  assert.equal(items.length, 1);
+  const clips = items.filter((i) => i.videoId !== null);
+  assert.equal(clips.length, 1);
+  // The reprise has no clip of its own, so it is listed from the tracklist.
+  assert.deepEqual(
+    items.filter((i) => i.videoId === null).map((i) => [i.key, i.silence]),
+    [["1001:t.A2", "record-only"]],
+  );
 });
 
 check("same runtime but genuinely different titles are kept apart", () => {
@@ -444,6 +451,7 @@ check("countSilence splits the two kinds, because they lead somewhere different"
     noAudio: 1,
     notLoaded: 2,
     loading: 0,
+    recordOnly: 0,
   });
 });
 
@@ -473,7 +481,7 @@ check("a record already detailed never also appears as loading", () => {
 
 check("countSilence reports loading separately from not synced", () => {
   const items = [...pendingPlayables([summary(), summary({ id: 503 })], new Set())];
-  assert.deepEqual(countSilence(items), { playable: 0, noAudio: 0, notLoaded: 0, loading: 2 });
+  assert.deepEqual(countSilence(items), { playable: 0, noAudio: 0, notLoaded: 0, loading: 2, recordOnly: 0 });
 });
 
 check("every emitted key is unique", () => {
@@ -522,6 +530,125 @@ check("distinct keeps the first spelling and drops blanks", () => {
 });
 
 /* ------------------------------------------------------------------------ */
+
+
+/* -- record-only tracks ---------------------------------------------------- */
+
+const EP = [
+  track("A1", "Rise", "6:10"),
+  track("A2", "Fall", "5:02"),
+  track("B1", "Drift", "7:30"),
+  track("B2", "Home", "4:45"),
+];
+
+check("a record with no clips lists its tracklist, record only", () => {
+  const items = buildPlayables([release({ id: 77, tracks: EP, videos: [], market: MARKET })]);
+  assert.deepEqual(
+    items.map((i) => [i.key, i.position, i.title, i.duration, i.silence, i.videoId]),
+    [
+      ["77:t.A1", "A1", "Rise", 370, "record-only", null],
+      ["77:t.A2", "A2", "Fall", 302, "record-only", null],
+      ["77:t.B1", "B1", "Drift", 450, "record-only", null],
+      ["77:t.B2", "B2", "Home", 285, "record-only", null],
+    ],
+  );
+  assert.ok(items.every((i) => i.matchKind === "track"));
+});
+
+check("a record with no clips and no tracklist is still one 'no audio' row", () => {
+  const items = buildPlayables([release({ id: 78, tracks: [], videos: [], market: MARKET })]);
+  assert.deepEqual(items.map((i) => [i.key, i.silence]), [["78:silent", "no-audio"]]);
+});
+
+check("a record the sync never reached stays 'not synced', not record only", () => {
+  const items = buildPlayables([release({ id: 79, tracks: EP, videos: [], market: null })]);
+  assert.deepEqual(items.map((i) => i.silence), ["not-loaded"]);
+});
+
+check("a partly covered record lists the tracks YouTube doesn't have", () => {
+  const items = buildPlayables([
+    release({ id: 80, tracks: EP, videos: [video("Artist - Rise", 370), video("Drift", 450)] }),
+  ]);
+  assert.equal(items.filter((i) => i.videoId !== null).length, 2);
+  assert.deepEqual(
+    items.filter((i) => i.silence === "record-only").map((i) => i.key),
+    ["80:t.A2", "80:t.B2"],
+  );
+});
+
+check("a side-long rip covers the record, so nothing is listed as missing", () => {
+  const items = buildPlayables([
+    release({ id: 81, tracks: EP, videos: [video("Artist - Full EP", 1400)] }),
+  ]);
+  assert.equal(items.filter((i) => i.silence === "record-only").length, 0);
+});
+
+check("an unrecognised clip that runs as long as a missing track covers it", () => {
+  const items = buildPlayables([
+    release({
+      id: 82,
+      tracks: EP,
+      videos: [video("Rise", 370), video("Fall", 302), video("Untitled B-side", 451)],
+    }),
+  ]);
+  assert.deepEqual(
+    items.filter((i) => i.silence === "record-only").map((i) => i.position),
+    ["B2"],
+    "Drift (7:30) is the 7:31 clip; Home is still missing",
+  );
+});
+
+check("as many unrecognised clips as missing tracks: assume they're those tracks", () => {
+  const items = buildPlayables([
+    release({
+      id: 83,
+      tracks: [track("A", "Rise", null), track("B", "Fall", null)],
+      videos: [video("xyz upload one", null), video("abc upload two", null)],
+    }),
+  ]);
+  assert.equal(items.filter((i) => i.silence === "record-only").length, 0);
+});
+
+check("a record-only track keeps a BPM you tapped for it", () => {
+  const items = buildPlayables(
+    [release({ id: 84, tracks: EP, videos: [], market: MARKET })],
+    new Map([["84:t.B1", 124]]),
+  );
+  assert.equal(items.find((i) => i.key === "84:t.B1").bpm, 124);
+});
+
+check("the player never gets a record-only track", () => {
+  const items = buildPlayables([
+    release({ id: 85, tracks: EP, videos: [video("Rise", 370)] }),
+  ]);
+  assert.ok(playableOnly(items).every((i) => i.videoId !== null));
+  const at = items.findIndex((i) => i.silence === "record-only");
+  assert.equal(queueFrom(items, at), null, "tapping one doesn't start the player");
+  const plan = queueFrom(items, items.findIndex((i) => i.videoId !== null));
+  assert.equal(plan.queue.length, 1);
+});
+
+check("record-only keys: positions are cleaned, blanks numbered, clashes split", () => {
+  const taken = new Set();
+  assert.equal(trackOnlyKey(9, "A1", 0, taken), "9:t.A1");
+  assert.equal(trackOnlyKey(9, "A1", 1, taken), "9:t.A1-2", "same printed position");
+  assert.equal(trackOnlyKey(9, "", 2, taken), "9:t.n3");
+  assert.equal(trackOnlyKey(9, "CD 1.4 <b>", 3, taken), "9:t.CD14b");
+  assert.equal(trackOnlyKey(9, "Ⅳ", 4, taken), "9:t.n5", "nothing usable left");
+  for (const key of taken) assert.ok(isClipKey(key) && isTrackOnlyKey(key), key);
+});
+
+check("the two key shapes, and nothing else", () => {
+  assert.ok(isClipKey("123:dQw4w9WgXcQ"));
+  assert.ok(!isTrackOnlyKey("123:dQw4w9WgXcQ"));
+  assert.ok(isClipKey("123:t.B2") && isTrackOnlyKey("123:t.B2"));
+  for (const bad of [
+    "123:silent", "0123:t.A1", "123:t.", "123:t.A 1", "123:t.ABCDEFGHIJKLMNOPQ",
+    "123:t.A1;drop", "123:dQw4w9WgXc", "x:t.A1", "123:t.A1\n", null, 42,
+  ]) {
+    assert.equal(isClipKey(bad), false, String(bad));
+  }
+});
 
 if (failed > 0) {
   console.error(`\n${failed} of ${ran} playable tests failed.`);

@@ -143,15 +143,24 @@ export interface DigResponse {
  * well on Discogs is the kind of confident wrong answer that makes people
  * stop believing the rest of the app.
  */
-export type SilenceReason = "no-audio" | "not-loaded" | "loading";
+export type SilenceReason = "no-audio" | "not-loaded" | "loading" | "record-only";
 /*
+ * `record-only` is a single track from the release's Discogs tracklist that
+ * YouTube has no clip for. Unlike the others it is a real, addressable track
+ * (key `123:t.B2`): it can go in a playlist and carry a BPM, and the player
+ * skips it. You play it from the record.
+ *
  * `loading` is the third, and the most temporary: the record is in the
  * listing, but the sync has not reached it yet this session. Tapping one
  * moves it to the front of the queue (client/syncQueue.ts).
  */
 
 export interface Playable {
-  /** Stable key: `${releaseId}:${videoId}`, or `${releaseId}:silent`. */
+  /**
+   * Stable key: `${releaseId}:${videoId}` for a clip, `${releaseId}:t.<pos>`
+   * for a record-only track (lib/clipKey.ts), or `${releaseId}:silent` for a
+   * record shown as one row (still loading, or no tracklist).
+   */
   key: string;
   releaseId: number;
   /**
@@ -207,7 +216,8 @@ export interface Playable {
 export interface PlaylistItemRow {
   clipKey: string;
   releaseId: number;
-  videoId: string;
+  /** Null for a record-only track: in the set, but nothing to play. */
+  videoId: string | null;
   title: string;
   artist: string;
   releaseTitle: string;

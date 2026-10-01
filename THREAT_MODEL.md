@@ -85,7 +85,7 @@ a database breach would yield.
 | Parameter tampering | Every route parses input with a `.strict()` Zod schema — an unexpected property is a **rejected request**, not a silently ignored one. Covered by "rejects an unknown property". |
 | Malicious playlist import | Size-capped at 5 MB, then validated field by field by the same server-side schema as any other write. |
 | Malicious YouTube URI from Discogs | `youtubeId()` parses with `URL`, checks the host against an allow-list, and requires `^[A-Za-z0-9_-]{11}$`. |
-| Bad data reaching the database | Constraints are duplicated in SQL: `clip_key ~ '^[0-9]+:[A-Za-z0-9_-]{11}$'`, `bpm BETWEEN 40 AND 260`, length checks on every text column. Zod is the first line; the database is the last. |
+| Bad data reaching the database | Constraints are duplicated in SQL: `clip_key ~ '^[0-9]+:([A-Za-z0-9_-]{11}\|t\.[A-Za-z0-9-]{1,16})$'` (a clip, or a record-only track — `lib/clipKey.ts`), a playlist row has a video exactly when its key is a clip's (`playlist_items_video_matches_key`), `bpm BETWEEN 40 AND 260`, length checks on every text column. Zod is the first line — and also checks a clip's key ends in its own video id — the database is the last. |
 | **A hallucinated record reaching the UI** | The LLM may only reorder candidates the graph found. Every `releaseId` in its response is looked up in the request set; anything else is discarded. See §5. |
 
 ### Repudiation
