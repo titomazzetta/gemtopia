@@ -2568,6 +2568,17 @@ export function CrateApp({
                       }
                     : undefined
                 }
+                phoneMeta={Boolean(activePlaylist)}
+                addedBy={
+                  activePlaylist && isCollabPlaylist(activePlaylist)
+                    ? (_item, index) => {
+                        const entry = entryIndexAt(viewOrder, index);
+                        const by = entry === null ? null : activePlaylist.entries[entry]?.addedBy;
+                        if (!by) return null;
+                        return by.toLowerCase() === username.toLowerCase() ? "you" : by;
+                      }
+                    : undefined
+                }
                 canRemove={
                   activePlaylist && activePlaylist.role !== "owner"
                     ? (_item, index) => {
@@ -2695,6 +2706,16 @@ export function CrateApp({
             setCollabFor(id);
           }}
           onSeen={() => setChatSeenTick((n) => n + 1)}
+          lookup={(clipKey) => {
+            if (activePlaylist?.id !== chatFor) return null;
+            const item = playlistItems.find((p) => p.key === clipKey);
+            return item ? { duration: item.duration, bpm: item.bpm } : null;
+          }}
+          onPlayRecord={(clipKey) => {
+            if (activePlaylist?.id !== chatFor) return;
+            const index = playlistItems.findIndex((p) => p.key === clipKey);
+            if (index >= 0) playFrom(playlistItems, index);
+          }}
           onGone={() => {
             const gone = chatFor;
             setChatFor(null);

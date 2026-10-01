@@ -9,14 +9,18 @@
  */
 import assert from "node:assert/strict";
 import {
+  ACTIVITY_SINGLE_MAX,
   MAX_MESSAGE_CHARS,
   MAX_MESSAGE_LINES,
+  activityNotes,
   canDeleteMessage,
+  cleanLabel,
+  diffRecords,
   isMessageId,
   messageLength,
   normaliseMessage,
 } from "../src/lib/chat.ts";
-import { groupRuns, hasUnread, mergeLatest, prependOlder } from "../src/client/chatView.ts";
+import { describeNote, groupRuns, hasUnread, mergeLatest, prependOlder } from "../src/client/chatView.ts";
 
 let ran = 0;
 let failed = 0;
@@ -214,6 +218,126 @@ check("each day gets one divider", () => {
   const yesterday = T - 86_400_000;
   const runs = groupRuns([msg(1, "a", yesterday), msg(2, "b", yesterday + 1000), msg(3, "a", T)], T);
   assert.deepEqual(runs.map((r) => r.day), ["Yesterday", null, "Today"]);
+});
+
+
+/* ---------------- activity notes ---------------- */
+
+const rec = (key, title = `T${key}`, addedBy = null) => ({
+  clipKey: `${key}:aaaaaaaaaaa`,
+  title,
+  artist: `A${key}`,
+  year: 1998,
+  addedBy,
+});
+
+check("a reorder adds and removes nothing", () => {
+  const { added, removed } = diffRecords([rec(1), rec(2), rec(3)], [rec(3), rec(1), rec(2)]);
+  assert.equal(added.length, 0);
+  assert.equal(removed.length, 0);
+});
+
+check("adds and removals are found by record, not position", () => {
+  const { added, removed } = diffRecords([rec(1), rec(2, "Two", "tito")], [rec(3), rec(1)]);
+  assert.deepEqual(added.map((r) => r.clipKey), ["3:aaaaaaaaaaa"]);
+  assert.deepEqual(removed.map((r) => r.clipKey), ["2:aaaaaaaaaaa"]);
+  assert.equal(removed[0].addedBy, "tito");
+});
+
+check("a second copy of a record is an add; losing one is a removal", () => {
+  assert.equal(diffRecords([rec(1)], [rec(1), rec(1)]).added.length, 1);
+  assert.equal(diffRecords([rec(1), rec(1)], [rec(1)]).removed.length, 1);
+});
+
+check("a few records get a line each, with what they are", () => {
+  const notes = activityNotes([rec(1, "Shiva")], [], new Map([["1:aaaaaaaaaaa", 124]]));
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].kind, "added");
+  assert.equal(notes[0].body, "Shiva — A1");
+  assert.deepEqual(notes[0].meta, {
+    clipKey: "1:aaaaaaaaaaa",
+    title: "Shiva",
+    artist: "A1",
+    year: 1998,
+    bpm: 124,
+  });
+});
+
+check("many records in one edit are one line, not a flood", () => {
+  const many = Array.from({ length: ACTIVITY_SINGLE_MAX + 5 }, (_, i) => rec(i + 1));
+  const notes = activityNotes(many, many.slice(0, 1));
+  assert.equal(notes.length, 2);
+  assert.deepEqual(notes[0].meta, { count: ACTIVITY_SINGLE_MAX + 5 });
+  assert.equal(notes[1].kind, "removed");
+});
+
+check("a removal says whose record it was", () => {
+  const [note] = activityNotes([], [rec(2, "Two", "komron")]);
+  assert.equal(note.kind, "removed");
+  assert.equal(note.meta.addedBy, "komron");
+  assert.ok(!("bpm" in note.meta));
+});
+
+check("titles in notes are cleaned like messages, and kept short", () => {
+  assert.equal(cleanLabel("Pay\u202Emp3.exe\nline two"), "Paymp3.exe line two");
+  assert.equal(cleanLabel("<b>x</b>"), "<b>x</b>", "still just text");
+  const long = cleanLabel("x".repeat(1000));
+  assert.equal(Array.from(long).length, 120);
+  assert.ok(long.endsWith("…"));
+  assert.equal(cleanLabel(null), "");
+  const [note] = activityNotes([rec(1, "\u200B\u202E")], []);
+  assert.equal(note.meta.title, "Untitled");
+});
+
+const note = (id, kind, meta, author = "komron", mine = false) => ({
+  id: String(id),
+  kind,
+  meta,
+  author,
+  body: "x",
+  at: T,
+  mine,
+});
+
+check("an added note reads as who, what, and the details", () => {
+  const v = describeNote(
+    note(1, "added", { clipKey: "1:aaaaaaaaaaa", title: "Shiva", artist: "Kerri Chandler", year: 1998, bpm: 124.4 }),
+    { duration: 372, bpm: 120 },
+  );
+  assert.equal(v.who, "komron");
+  assert.equal(v.verb, "added");
+  assert.equal(v.title, "Shiva");
+  assert.deepEqual(v.details, ["1998", "124 BPM", "6:12"], "their BPM wins over yours");
+});
+
+check("without their BPM, yours fills in; unknown details are left out", () => {
+  const v = describeNote(note(1, "added", { clipKey: "k", title: "S", artist: "A", year: null, bpm: null }), {
+    duration: null,
+    bpm: 118,
+  });
+  assert.deepEqual(v.details, ["118 BPM"]);
+});
+
+check("your own note says You; summaries, joins and leaves read plainly", () => {
+  assert.equal(describeNote(note(1, "joined", {}, "tito", true)).who, "You");
+  assert.equal(describeNote(note(1, "added", { count: 12 })).verb, "added 12 records");
+  assert.equal(describeNote(note(1, "left", { removed: false })).verb, "left");
+  assert.equal(describeNote(note(1, "left", { removed: true })).verb, "was taken off the playlist");
+  const r = describeNote(note(1, "removed", { title: "S", artist: "A", addedBy: "tito" }, "komron"));
+  assert.equal(r.verb, "took out");
+  assert.deepEqual(r.details, ["added by tito"]);
+});
+
+check("notes are their own runs, never folded into someone's messages", () => {
+  const runs = groupRuns(
+    [
+      { ...msg(1, "a", T), kind: "text" },
+      { ...msg(2, "a", T + 1000), kind: "added", meta: {} },
+      { ...msg(3, "a", T + 2000), kind: "text" },
+    ],
+    T,
+  );
+  assert.deepEqual(runs.map((r) => r.note), [false, true, false]);
 });
 
 console.log(`\n${ran - failed}/${ran} chat tests passed.`);

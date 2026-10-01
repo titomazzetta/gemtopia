@@ -259,14 +259,22 @@ export interface Playlist {
   /** Bumped on every change; an edit names the version it was made against. */
   version: number;
   /**
-   * Id of the newest chat message, or null when nobody has said anything.
-   * Lets the chat button show a dot for unread messages without loading them.
+   * Id of the newest chat message or note from someone *else*, or null.
+   * Lets the chat button show a dot for unread messages without loading
+   * them — and not for your own.
    */
   lastMessageId: string | null;
 }
 
 /** One message in a collaborative playlist's chat. */
 export interface ChatMessage {
+  /**
+   * "text" for something someone wrote; otherwise a note the server left
+   * when the set changed or someone joined or left. Notes cannot be posted.
+   */
+  kind: import("./chat").MessageKind;
+  /** What a note is about. Null for a text message. */
+  meta: import("./chat").ActivityMeta | null;
   /** Decimal BIGINT, increasing. */
   id: string;
   /** Discogs username, or null if that account no longer exists. */

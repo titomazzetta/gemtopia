@@ -1338,12 +1338,33 @@ console.log("\ncollaborative playlists");
   let ownerMessageId = null;
   let friendMessageId = null;
 
-  await check("a new playlist's chat is empty, and says so", async () => {
+  await check("what happened to the set is in its chat, as notes", async () => {
     const res = await owner.call(chat);
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.messages, []);
     assert.equal(res.body.hasMore, false);
-    assert.equal((await find(owner)).lastMessageId, null);
+    const notes = [...res.body.messages].reverse();
+    assert.ok(notes.every((m) => m.kind !== "text"), "nobody has typed anything yet");
+    assert.deepEqual(
+      notes.map((m) => [m.kind, m.author, m.meta?.clipKey ?? null]),
+      [
+        ["joined", friend.username, null],
+        ["added", friend.username, "5002:ddddddddddd"],
+        ["removed", friend.username, "5002:ddddddddddd"],
+        ["added", friend.username, "5004:fffffffffff"],
+        ["removed", owner.username, "5004:fffffffffff"],
+        ["joined", third.username, null],
+      ],
+      "joins, adds and removals — and nothing for reorders, refused edits, or edits before anyone joined",
+    );
+    assert.equal(notes[1].meta.title, "Test Track");
+    assert.equal(notes[4].meta.addedBy, friend.username, "whose record the owner took out");
+  });
+
+  await check("the unread marker counts other people's activity, not your own", async () => {
+    const res = await owner.call(chat);
+    const newestByOther = res.body.messages.find((m) => m.author !== owner.username);
+    assert.equal((await find(owner)).lastMessageId, newestByOther.id);
+    assert.equal((await find(friend)).lastMessageId, res.body.messages[0].id, "third's join");
   });
 
   await check("strangers cannot read or post in the chat — one 404", async () => {
@@ -1369,11 +1390,13 @@ console.log("\ncollaborative playlists");
     const b = await friend.call(chat, { method: "POST", body: { body: "Yes — then my Moodymann" } });
     assert.equal(b.status, 201);
     friendMessageId = b.body.message.id;
-    const seen = await owner.call(chat);
-    assert.deepEqual(seen.body.messages.map((m) => m.id), [friendMessageId, ownerMessageId], "newest first");
-    assert.equal(seen.body.messages[0].mine, false);
-    assert.equal(seen.body.messages[1].mine, true);
-    assert.equal((await find(friend)).lastMessageId, friendMessageId);
+    const seen = (await owner.call(chat)).body.messages.filter((m) => m.kind === "text");
+    assert.deepEqual(seen.map((m) => m.id), [friendMessageId, ownerMessageId], "newest first");
+    assert.equal(seen[0].mine, false);
+    assert.equal(seen[1].mine, true);
+    assert.equal(seen[0].meta, null);
+    assert.equal((await find(owner)).lastMessageId, friendMessageId);
+    assert.equal((await find(friend)).lastMessageId, ownerMessageId, "your own message is not unread");
   });
 
   await check("a message is stored as text: markup and SQL stay inert", async () => {
@@ -1402,6 +1425,11 @@ console.log("\ncollaborative playlists");
       "nobody posts as someone else",
     );
     assert.equal((await friend.call(chat, { method: "POST", body: { body: 42 } })).status, 400);
+    assert.equal(
+      (await friend.call(chat, { method: "POST", body: { body: "hi", kind: "added", meta: {} } })).status,
+      400,
+      "nobody can post a note",
+    );
   });
 
   await check("a malformed cursor is refused", async () => {
@@ -1462,6 +1490,14 @@ console.log("\ncollaborative playlists");
     assert.equal(await find(third), null);
   });
 
+  await check("the chat notes who was taken off", async () => {
+    const res = await owner.call(`/api/playlists/${playlistId}/messages`);
+    const last = res.body.messages[0];
+    assert.equal(last.kind, "left");
+    assert.equal(last.author, third.username);
+    assert.equal(last.meta.removed, true);
+  });
+
   await check("…and the chat with it", async () => {
     assert.equal((await third.call(`/api/playlists/${playlistId}/messages`)).status, 404);
     assert.equal(
@@ -1478,6 +1514,10 @@ console.log("\ncollaborative playlists");
     assert.equal(res.status, 200);
     assert.equal((await friend.call(`/api/playlists/${playlistId}`)).status, 404);
     assert.deepEqual((await find(owner)).collaborators, []);
+    const last = (await owner.call(`/api/playlists/${playlistId}/messages`)).body.messages[0];
+    assert.equal(last.kind, "left");
+    assert.equal(last.author, friend.username);
+    assert.equal(last.meta.removed, false);
   });
 
   await check("the owner deleting it takes it from everyone", async () => {

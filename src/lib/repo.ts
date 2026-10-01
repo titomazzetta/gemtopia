@@ -13,6 +13,11 @@ import {
   MAX_MESSAGES_KEPT,
   MAX_MESSAGES_PER_MINUTE,
   MESSAGE_PAGE,
+  activityNotes,
+  diffRecords,
+  type ActivityMeta,
+  type ActivityNote,
+  type MessageKind,
 } from "./chat";
 import type { ChatMessage, Playlist, PlaylistItemRow, TrackMeta } from "./types";
 
@@ -416,7 +421,8 @@ const PLAYLIST_COLUMNS = `
      FROM playlist_members m JOIN users u ON u.id = m.user_id
     WHERE m.playlist_id = p.id) AS collaborators,
   (SELECT max(c.id)::text FROM playlist_messages c
-    WHERE c.playlist_id = p.id) AS last_message_id`;
+    WHERE c.playlist_id = p.id
+      AND c.author_id IS DISTINCT FROM $1) AS last_message_id`;
 
 function toEntry(i: ItemRow): PlaylistItemRow {
   return {
@@ -647,9 +653,19 @@ export async function replaceItems(
       return "conflict";
     }
 
-    const previous = await client.query<{ clip_key: string; added_by: string | null }>(
-      `SELECT clip_key, added_by FROM playlist_items
-        WHERE playlist_id = $1 ORDER BY position`,
+    const previous = await client.query<{
+      clip_key: string;
+      added_by: string | null;
+      added_by_name: string | null;
+      title: string;
+      artist: string;
+      year: number | null;
+    }>(
+      `SELECT i.clip_key, i.added_by, u.username_display AS added_by_name,
+              i.title, i.artist, i.year
+         FROM playlist_items i
+         LEFT JOIN users u ON u.id = i.added_by
+        WHERE i.playlist_id = $1 ORDER BY i.position`,
       [playlistId],
     );
     const credited = previous.rows.map((r) => ({
@@ -670,6 +686,38 @@ export async function replaceItems(
       `UPDATE playlists SET updated_at = now(), version = version + 1 WHERE id = $1`,
       [playlistId],
     );
+
+    // On a shared set, say what changed in its chat. Reorders say nothing —
+    // they happen in drags of one, and would bury the conversation.
+    if (await hasCollaborators(client, playlistId)) {
+      const { added, removed } = diffRecords(
+        previous.rows.map((r) => ({
+          clipKey: r.clip_key,
+          title: r.title,
+          artist: r.artist,
+          year: r.year,
+          addedBy: r.added_by_name,
+        })),
+        entries.map((e) => ({
+          clipKey: e.clipKey,
+          title: e.title,
+          artist: e.artist,
+          year: e.year,
+        })),
+      );
+      // The BPM the person adding it has measured, if any — the one reading
+      // of theirs a collaborator gets to see, because they're sharing it.
+      const bpms = new Map<string, number>();
+      if (added.length > 0) {
+        const rows = await client.query<{ clip_key: string; bpm: string }>(
+          `SELECT clip_key, bpm::text AS bpm FROM track_meta
+            WHERE user_id = $1 AND clip_key = ANY($2::text[]) AND bpm IS NOT NULL`,
+          [userId, added.map((r) => r.clipKey)],
+        );
+        for (const r of rows.rows) bpms.set(r.clip_key, Number(r.bpm));
+      }
+      await writeNotes(client, playlistId, userId, activityNotes(added, removed, bpms));
+    }
     return "ok";
   });
 }
@@ -819,6 +867,9 @@ export async function joinPlaylist(userId: string, token: string): Promise<JoinR
     await client.query(`UPDATE playlists SET updated_at = now() WHERE id = $1`, [
       playlist.id,
     ]);
+    await writeNotes(client, playlist.id, userId, [
+      { kind: "joined", body: "joined the playlist", meta: {} },
+    ]);
     return { status: "joined", playlistId: playlist.id };
   });
 }
@@ -836,18 +887,32 @@ export async function removeCollaborator(
   playlistId: string,
   username: string,
 ): Promise<boolean> {
-  const row = await queryOne<{ id: string }>(
-    `DELETE FROM playlist_members m
-      USING playlists p, users u
-      WHERE m.playlist_id = p.id
-        AND m.user_id = u.id
-        AND p.id = $1
-        AND u.username_key = lower($3)
-        AND (p.user_id = $2 OR m.user_id = $2)
-      RETURNING m.user_id AS id`,
-    [playlistId, actorId, username],
-  );
-  return row !== null;
+  return tx(async (client) => {
+    const deleted = await client.query<{ id: string }>(
+      `DELETE FROM playlist_members m
+        USING playlists p, users u
+        WHERE m.playlist_id = p.id
+          AND m.user_id = u.id
+          AND p.id = $1
+          AND u.username_key = lower($3)
+          AND (p.user_id = $2 OR m.user_id = $2)
+        RETURNING m.user_id AS id`,
+      [playlistId, actorId, username],
+    );
+    const gone = deleted.rows[0];
+    if (!gone) return false;
+    // Signed by the person who is gone, so it reads "komron left"; `removed`
+    // says the owner did it.
+    const removed = gone.id !== actorId;
+    await writeNotes(client, playlistId, gone.id, [
+      {
+        kind: "left",
+        body: removed ? "was taken off the playlist" : "left the playlist",
+        meta: { removed },
+      },
+    ]);
+    return true;
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -874,6 +939,8 @@ export interface SharedPlaylist {
 
 interface MessageRow {
   id: string;
+  kind: MessageKind;
+  meta: ActivityMeta | null;
   body: string;
   created_at: Date;
   author: string | null;
@@ -883,6 +950,8 @@ interface MessageRow {
 function toMessage(row: MessageRow): ChatMessage {
   return {
     id: row.id,
+    kind: row.kind,
+    meta: row.meta,
     author: row.author,
     body: row.body,
     at: row.created_at.getTime(),
@@ -911,7 +980,7 @@ export async function listMessages(
   if (!access) return null;
 
   const rows = await query<MessageRow>(
-    `SELECT m.id::text AS id, m.body, m.created_at,
+    `SELECT m.id::text AS id, m.kind, m.meta, m.body, m.created_at,
             u.username_display AS author,
             (m.author_id IS NOT DISTINCT FROM $2::uuid) AS mine
        FROM playlist_messages m
@@ -948,7 +1017,8 @@ export async function postMessage(
 ): Promise<PostResult> {
   const recent = await queryOne<{ n: number }>(
     `SELECT count(*)::int AS n FROM playlist_messages
-      WHERE author_id = $1 AND created_at > now() - interval '1 minute'`,
+      WHERE author_id = $1 AND kind = 'text'
+        AND created_at > now() - interval '1 minute'`,
     [userId],
   );
   if ((recent?.n ?? 0) >= MAX_MESSAGES_PER_MINUTE) return { status: "too_fast" };
@@ -959,9 +1029,9 @@ export async function postMessage(
        SELECT p.id, $2, $3
          FROM playlists p
         WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
-       RETURNING id, body, created_at
+       RETURNING id, kind, meta, body, created_at
      )
-     SELECT i.id::text AS id, i.body, i.created_at,
+     SELECT i.id::text AS id, i.kind, i.meta, i.body, i.created_at,
             u.username_display AS author, true AS mine
        FROM inserted i
        JOIN users u ON u.id = $2`,
@@ -969,19 +1039,56 @@ export async function postMessage(
   );
   if (!row) return { status: "not_found" };
 
-  // Keep the newest MAX_MESSAGES_KEPT. Cheap on the (playlist_id, id) index,
-  // and a no-op until a chat is that long.
-  await query(
-    `DELETE FROM playlist_messages
-      WHERE playlist_id = $1
-        AND id <= (SELECT id FROM playlist_messages
-                    WHERE playlist_id = $1
-                    ORDER BY id DESC
-                    OFFSET $2 LIMIT 1)`,
-    [playlistId, MAX_MESSAGES_KEPT],
-  );
-
+  await query(PRUNE_MESSAGES, [playlistId, MAX_MESSAGES_KEPT]);
   return { status: "ok", message: toMessage(row) };
+}
+
+/**
+ * Keep the newest MAX_MESSAGES_KEPT of a playlist's chat. Cheap on the
+ * (playlist_id, id) index, and a no-op until a chat is that long.
+ */
+const PRUNE_MESSAGES = `
+  DELETE FROM playlist_messages
+   WHERE playlist_id = $1
+     AND id <= (SELECT id FROM playlist_messages
+                 WHERE playlist_id = $1
+                 ORDER BY id DESC
+                 OFFSET $2 LIMIT 1)`;
+
+/**
+ * Leave activity notes in a playlist's chat, inside the caller's transaction.
+ * `kind` and `meta` are only ever written here, from what the server holds —
+ * there is no path from a request body to either.
+ */
+async function writeNotes(
+  client: Queryable,
+  playlistId: string,
+  authorId: string,
+  notes: readonly ActivityNote[],
+): Promise<void> {
+  if (notes.length === 0) return;
+  await client.query(
+    `INSERT INTO playlist_messages (playlist_id, author_id, kind, body, meta)
+     SELECT $1, $2, n.kind, n.body, n.meta
+       FROM unnest($3::text[], $4::text[], $5::jsonb[]) AS n(kind, body, meta)`,
+    [
+      playlistId,
+      authorId,
+      notes.map((n) => n.kind),
+      notes.map((n) => n.body),
+      notes.map((n) => JSON.stringify(n.meta)),
+    ],
+  );
+  await client.query(PRUNE_MESSAGES, [playlistId, MAX_MESSAGES_KEPT]);
+}
+
+/** True when anyone besides the owner is on the playlist — someone to tell. */
+async function hasCollaborators(client: Queryable, playlistId: string): Promise<boolean> {
+  const rows = await client.query<{ one: number }>(
+    `SELECT 1 AS one FROM playlist_members WHERE playlist_id = $1 LIMIT 1`,
+    [playlistId],
+  );
+  return rows.rows.length > 0;
 }
 
 /**

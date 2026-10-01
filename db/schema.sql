@@ -420,6 +420,8 @@ ALTER TABLE playlist_items
 --   * You can delete your own messages; the owner can delete any.
 --   * `body` is stored already normalised (src/lib/chat.ts) and the database
 --     holds the line too: 1–500 characters, whatever the application does.
+--   * Adding or removing records, joining and leaving leave a short note in
+--     the chat (kind/meta, below), written by the server.
 --   * Only the newest 1000 messages per playlist are kept, and one person can
 --     post at most 20 a minute (counted here, so it holds across every
 --     serverless instance, unlike the in-memory limiter).
@@ -441,3 +443,36 @@ CREATE INDEX IF NOT EXISTS playlist_messages_playlist_idx
 -- "How many has this person posted in the last minute?"
 CREATE INDEX IF NOT EXISTS playlist_messages_author_idx
   ON playlist_messages (author_id, created_at DESC);
+
+-- Activity notes in the chat: "komron added Shiva — Kerri Chandler",
+-- "tito joined". Written only by the server (repo.ts), never posted: the API
+-- accepts { body } and nothing else, so `kind` and `meta` cannot come from a
+-- request. `meta` is a small object built from rows the server already holds;
+-- a text message never has one, a note always does.
+ALTER TABLE playlist_messages
+  ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'text';
+
+ALTER TABLE playlist_messages
+  ADD COLUMN IF NOT EXISTS meta JSONB;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_kind_check'
+  ) THEN
+    ALTER TABLE playlist_messages
+      ADD CONSTRAINT playlist_messages_kind_check
+      CHECK (kind IN ('text', 'added', 'removed', 'joined', 'left'));
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_meta_check'
+  ) THEN
+    ALTER TABLE playlist_messages
+      ADD CONSTRAINT playlist_messages_meta_check
+      CHECK (
+        (kind = 'text' AND meta IS NULL)
+        OR (kind <> 'text' AND jsonb_typeof(meta) = 'object'
+            AND octet_length(meta::text) <= 2000)
+      );
+  END IF;
+END $$;

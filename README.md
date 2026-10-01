@@ -623,6 +623,13 @@ playlists too.
   something new. Up to 500 characters a message; delete your own, and the
   owner can delete any. Plain text only: nothing typed is ever turned into
   HTML or a link.
+- **The chat keeps score.** Adding or taking out a record, joining and leaving
+  leave a small note in the chat — "komron added *Shiva* — Kerri Chandler ·
+  1998 · 124 BPM · 6:12" — and tapping the record's name plays it. A big
+  import is one line, not a flood; reorders say nothing.
+- **Who added what, on every row.** On a shared playlist each record carries a
+  small amber tag with who put it in ("you" for yours), and on a phone the row
+  shows the year, BPM and length that don't fit as columns.
 - **Who brought what.** Every record remembers who added it, and the whole
   list shows it — so on the night, everyone knows which records to pack.
 - **No silent overwrites.** Each edit says which version of the list it was
@@ -810,9 +817,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 641 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 652 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 139 API tests against a running server. CodeQL
+reached the client bundle, then 141 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -1031,8 +1038,8 @@ npm run test:invites    # 28
 npm run test:manifest   # 8
 npm run test:collab     # 20
 npm run test:collab-view # 7
-npm run test:chat       # 27 — 641 offline in all
-npm run test:api        # 139 checks, needs a running server + Postgres
+npm run test:chat       # 38 — 652 offline in all
+npm run test:api        # 141 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci
