@@ -7,6 +7,7 @@ import { formatBpm } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { positionOf, secondsOf, SCRUB_STEPS } from "@/client/scrub";
 import { Next, Pause, Play, Plus, Prev } from "./Icons";
+import { WantButton, type WantHeart } from "./WantButton";
 import { ShareButton } from "./ShareButton";
 
 /**
@@ -47,6 +48,7 @@ export function MobileBar({
   duration,
   onSeek,
   onAddToPlaylist,
+  want = null,
   onTap,
   detour = null,
   onBackToShuffle,
@@ -63,6 +65,8 @@ export function MobileBar({
   duration: number;
   onSeek: (seconds: number) => void;
   onAddToPlaylist: () => void;
+  /** The wantlist heart, when what's playing isn't in your collection. */
+  want?: WantHeart | null;
   /**
    * `at` is the pointer event's own timestamp. Typed to take it on purpose:
    * this was `() => void`, which let the click event itself slip through at
@@ -252,7 +256,17 @@ export function MobileBar({
           */}
           <span className="mx-0.5 h-5 w-px bg-ink-700" aria-hidden="true" />
 
-          <ShareButton track={current} className="text-neutral-400 active:bg-ink-800" />
+          {/*
+            A record you don't own swaps Share for the heart. Seven controls
+            would squeeze the title to a dozen letters at 390px; share moves
+            to the player sheet for those records, and the heart is the thing
+            you reach for when a dig preview grabs you.
+          */}
+          {want ? (
+            <WantButton want={want} variant="icon" />
+          ) : (
+            <ShareButton track={current} className="text-neutral-400 active:bg-ink-800" />
+          )}
 
           <button
             type="button"

@@ -28,6 +28,24 @@ body {
   font-feature-settings: "tnum" 1;
 }
 
+/*
+ * No zoom-on-type on a touch screen. iOS zooms the page in on any field whose
+ * text is under 16px the moment it takes focus, and doesn't zoom back out —
+ * in the installed app that left the add-to-playlist sheet blown up until you
+ * pinched it. The fix is the text size, not `maximum-scale=1`, which would
+ * also take pinch-zoom away from everyone who needs it.
+ *
+ * `!important` because it has to beat the `text-xs` on each field, and only
+ * on a coarse pointer, so the desktop keeps its compact inputs.
+ */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
 /* Focus rings that are actually visible on a dark UI, and only for keyboard. */
 :where(a, button, input, select, [tabindex]):focus-visible {
   @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-ink-950;

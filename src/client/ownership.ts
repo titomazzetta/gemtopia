@@ -104,3 +104,23 @@ export function confirmAddMessage(state: OwnershipState): string {
     ? "You already have this. Add a second copy?"
     : "Add this to your collection?";
 }
+
+/**
+ * The wantlist heart on the player: whether to show it, and filled or not.
+ *
+ * Shown for anything you are not known to own — a dig preview, a Discogs
+ * search preview, a friend's record on a shared playlist, a record you are
+ * playing from your own wantlist. That is the moment the heart is for: a
+ * track grabs you, it isn't yours, one tap and it's on the list.
+ *
+ * Hidden only when the collection index *says* you own it. An unsynced index
+ * (`null`) still shows the heart, the opposite way round from the labels
+ * above, because the cost of the two mistakes is the opposite way round too:
+ * a heart on a record you own adds a want you can take off again with the
+ * same tap, while no heart on a record you don't own is exactly the bug this
+ * exists to fix.
+ */
+export function wantlistHeart(state: OwnershipState): { wanted: boolean } | null {
+  if (state.inCollection === true) return null;
+  return { wanted: state.onWantlist === true };
+}

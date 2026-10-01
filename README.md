@@ -199,7 +199,7 @@ There's nothing to download or update: it is always the live version.
 | **Share a set** | One tap mints a read-only link to a playlist that anyone can open and play — no account, no route back to yours. Turn sharing off and the link is dead, not dormant. See [the one exception](#the-one-exception-and-why-it-looks-like-one). |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **out of range**. Flags the hard ones before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
-| **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. |
+| **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. Anything playing that you don't own (a dig preview, a search preview, a friend's record on a shared set) gets a **heart right on the player**, the phone bar included, or press **W**. |
 | **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. **Tap a record you own and it plays** — from the track you searched for, if you searched by track — with its tracklist open to jump around; open any other result to preview its tracks. What you add is playable immediately, not after the next sync. |
 | **Newest first, by default** | Your collection and wantlist both open in the order you added to them, newest at the top — the same way Discogs presents them. No button to press and nothing to keep in sync: the dates come off the collection and wantlist endpoints, which we already read. Sortable both ways as an **Added** column. |
 | **Record-only tracks** | Most vinyl has no YouTube clip for every track. Those tracks are listed from the Discogs tracklist anyway — a disc on the artwork, a *record only* tag, side and length. Tap one for a tap pad: put the record on, tap along, and its BPM is in your catalogue. Add it to a playlist like any other track, so you can **write the set list from the shelf** while listening to the real records. The player and shuffle skip them. |
@@ -220,7 +220,8 @@ There's nothing to download or update: it is always the live version.
 | <kbd>J</kbd> <kbd>L</kbd> | Back / forward 10s | | <kbd>A</kbd> | Add to a playlist |
 | <kbd>S</kbd> | Shuffle what's on screen | | <kbd>B</kbd> | Back to shuffle, after exploring a record |
 | <kbd>R</kbd> | Repeat | | <kbd>/</kbd> | Search |
-| <kbd>?</kbd> | How it works, and every shortcut | | <kbd>Esc</kbd> | Close |
+| <kbd>W</kbd> | Wantlist heart, for a record you don't own | | <kbd>?</kbd> | How it works, and every shortcut |
+| <kbd>Esc</kbd> | Close | | | |
 
 ---
 

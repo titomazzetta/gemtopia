@@ -23,6 +23,7 @@ import {
   Waveform,
 } from "./Icons";
 import { ShareButton } from "./ShareButton";
+import { WantButton, type WantHeart } from "./WantButton";
 
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -355,6 +356,7 @@ export function NowPlaying({
   onNext,
   onAddToPlaylist,
   onDig,
+  want,
   detour,
   onBackToShuffle,
   idle,
@@ -374,6 +376,8 @@ export function NowPlaying({
   onNext: () => void;
   onAddToPlaylist: () => void;
   onDig: () => void;
+  /** The wantlist heart, when what's playing isn't in your collection. */
+  want: WantHeart | null;
   /** Set while exploring a record away from the shuffle. */
   detour: { label: string } | null;
   onBackToShuffle: () => void;
@@ -500,6 +504,7 @@ export function NowPlaying({
                 >
                   {current.matchKind === "track" ? "track" : "release"}
                 </span>
+                {want && <WantButton want={want} variant="chip" />}
               </div>
               {/*
                 The artist and the record are buttons: the natural thing to

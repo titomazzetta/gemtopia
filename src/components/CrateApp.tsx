@@ -124,6 +124,10 @@ import { PlaylistPanel } from "./PlaylistPanel";
 import { TrackList } from "./TrackList";
 import { Sheet } from "./Sheet";
 import { MobileBar } from "./MobileBar";
+import { WantButton, type WantHeart } from "./WantButton";
+import { ShareButton } from "./ShareButton";
+import { useFinePointer } from "@/client/useFinePointer";
+import { ownershipFrom, wantlistHeart } from "@/client/ownership";
 import { promote, orderByRecent } from "@/client/recentPlaylists";
 import {
   describeAdoption,
@@ -1879,6 +1883,61 @@ export function CrateApp({
     [applyWantlistChange],
   );
 
+  /**
+   * The heart on the player, for whatever is playing that you don't own: a
+   * dig preview, a search preview, a friend's record on a shared set.
+   *
+   * Pessimistic, like every other Discogs write here: the heart fills when
+   * Discogs says yes, not when you tap. A ref, not just the state, guards the
+   * double tap — two taps inside one render would otherwise both see "not
+   * busy" and send an add and then a remove.
+   */
+  const finePointer = useFinePointer();
+  const [wantBusy, setWantBusy] = useState(false);
+  const wantBusyRef = useRef(false);
+  const toggleWant = useCallback(
+    async (releaseId: number, wanted: boolean) => {
+      if (wantBusyRef.current) return;
+      wantBusyRef.current = true;
+      setWantBusy(true);
+      try {
+        if (wanted) {
+          await wantlistApi.remove(releaseId);
+          applyWantlistChange(releaseId, false);
+          say("Removed from your Discogs wantlist.");
+        } else {
+          await wantlistApi.add(releaseId);
+          applyWantlistChange(releaseId, true);
+          say("Added to your Discogs wantlist.");
+        }
+      } catch (caught) {
+        say(caught instanceof ApiError ? caught.message : "Wantlist update failed.");
+      } finally {
+        wantBusyRef.current = false;
+        setWantBusy(false);
+      }
+    },
+    [applyWantlistChange, say],
+  );
+
+  const currentWant = useMemo<WantHeart | null>(() => {
+    if (!current) return null;
+    const heart = wantlistHeart(ownershipFrom(sourceIds, current.releaseId));
+    if (!heart) return null;
+    const releaseId = current.releaseId;
+    return {
+      wanted: heart.wanted,
+      busy: wantBusy,
+      onToggle: () => void toggleWant(releaseId, heart.wanted),
+    };
+  }, [current, sourceIds, wantBusy, toggleWant]);
+
+  // For the W key, which is wired once and reads the latest heart through this.
+  const currentWantRef = useRef<WantHeart | null>(null);
+  useEffect(() => {
+    currentWantRef.current = currentWant;
+  }, [currentWant]);
+
   /* ================= auth ================= */
 
   const signOut = useCallback(async () => {
@@ -1975,6 +2034,13 @@ export function CrateApp({
         case "a":
           event.preventDefault();
           queueForPlaylist(currentRef.current);
+          break;
+        case "w":
+          // Only when there is a heart to press: a record you own has none.
+          if (currentWantRef.current && !currentWantRef.current.busy) {
+            event.preventDefault();
+            currentWantRef.current.onToggle();
+          }
           break;
         case "b":
         case "B":
@@ -2851,6 +2917,7 @@ export function CrateApp({
           onNext={() => advance(1)}
           onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
           onDig={() => setDigTarget(current)}
+          want={currentWant}
           detour={detour ? { label: detour.label } : null}
           onBackToShuffle={endDetour}
           digging={Boolean(digTarget)}
@@ -2983,6 +3050,7 @@ export function CrateApp({
         duration={api.duration}
         onSeek={api.seek}
         onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
+        want={currentWant}
         onTap={handleTap}
         detour={detour ? { label: detour.label } : null}
         onBackToShuffle={endDetour}
@@ -3162,6 +3230,17 @@ export function CrateApp({
                   Dig from this
                 </button>
               </div>
+
+              {/*
+                Not yours: the heart, at full size. The bar gave up its share
+                button to make room for the heart, so share comes here.
+              */}
+              {currentWant && (
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <WantButton want={currentWant} variant="wide" />
+                  <ShareButton track={current} variant="wide" />
+                </div>
+              )}
 
               {/*
                 The rest of the record, right here. Tapping a track plays the
@@ -3364,10 +3443,18 @@ export function CrateApp({
               }}
               className="flex gap-1.5 border-t border-ink-800 pt-3"
             >
+              {/*
+                Focused on open only with a mouse. On a phone, focusing it
+                threw the keyboard up over the list you opened this to pick
+                from — and iOS zoomed in on the field as it did. The playlists
+                are the main event; typing a new name is the fallback.
+              */}
               <input
                 name="name"
-                autoFocus
+                autoFocus={finePointer}
                 maxLength={80}
+                enterKeyHint="done"
+                autoCapitalize="words"
                 placeholder="…or a new playlist"
                 className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-850 px-2 py-1.5 text-xs"
                 aria-label="New playlist name"
