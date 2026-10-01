@@ -122,8 +122,28 @@ export function sortItems(items: readonly Playable[], sort: SortState): Playable
   });
 }
 
-/** Stable, direction-independent tiebreak so sorting is deterministic. */
+/**
+ * Stable, direction-independent tiebreak so sorting is deterministic.
+ *
+ * Tracks off the same record stay together and in running order — A1, A2,
+ * B1, B2 — rather than alphabetical by title, which scattered an EP's sides
+ * when they all share one "added" date. (Every track of a record does: the
+ * date is the record's.) Between records, the record's title decides.
+ */
 function tieBreak(a: Playable, b: Playable): number {
+  if (a.releaseId !== b.releaseId) {
+    const byRecord = (textKey(a.releaseTitle) ?? "").localeCompare(textKey(b.releaseTitle) ?? "");
+    if (byRecord !== 0) return byRecord;
+    return a.releaseId - b.releaseId;
+  }
+  const pa = a.position?.trim() || null;
+  const pb = b.position?.trim() || null;
+  if (pa !== pb) {
+    if (pa === null) return 1;
+    if (pb === null) return -1;
+    const byPosition = pa.localeCompare(pb, undefined, { numeric: true, sensitivity: "base" });
+    if (byPosition !== 0) return byPosition;
+  }
   const byTitle = (textKey(a.title) ?? "").localeCompare(textKey(b.title) ?? "");
   if (byTitle !== 0) return byTitle;
   return a.key.localeCompare(b.key);

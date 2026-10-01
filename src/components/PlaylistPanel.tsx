@@ -168,7 +168,8 @@ export function PlaylistPanel({
                           ) : (
                             <Lock className="h-2.5 w-2.5" />
                           )}
-                          {playlist.items.length} clip
+                          {/* "tracks": a set can hold record-only tracks, not just clips. */}
+                          {playlist.items.length} track
                           {playlist.items.length === 1 ? "" : "s"}
                           {line && <span className="truncate text-accent-alt/80">· {line}</span>}
                         </span>

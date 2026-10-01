@@ -273,4 +273,35 @@ check("clearing a sort lands on the default, not on an arbitrary order", () => {
   assert.equal(cleared, null);
 });
 
+check("tracks off one record keep running order when their sort keys tie", () => {
+  const at = "2026-09-20T10:00:00Z";
+  const ep = [
+    item({ releaseId: 9, position: "B2", title: "Deeper In The Tones", addedAt: at }),
+    item({ releaseId: 9, position: "A2", title: "Don't You Forget", addedAt: at }),
+    item({ releaseId: 9, position: "B1", title: "Take You Higher", addedAt: at }),
+    item({ releaseId: 9, position: "A1", title: "When The Voices Come", addedAt: at }),
+    item({ releaseId: 9, position: "A10", title: "Bonus", addedAt: at }),
+  ];
+  for (const direction of ["desc", "asc"]) {
+    const sorted = sortItems(ep, { key: "added", direction });
+    assert.deepEqual(sorted.map((i) => i.position), ["A1", "A2", "A10", "B1", "B2"], direction);
+  }
+});
+
+check("records with tied keys don't interleave their tracks", () => {
+  const sorted = sortItems(
+    [
+      item({ releaseId: 1, releaseTitle: "Zed", position: "A1", year: 1996 }),
+      item({ releaseId: 2, releaseTitle: "Alpha", position: "B1", year: 1996 }),
+      item({ releaseId: 1, releaseTitle: "Zed", position: "A2", year: 1996 }),
+      item({ releaseId: 2, releaseTitle: "Alpha", position: "A1", year: 1996 }),
+    ],
+    { key: "year", direction: "desc" },
+  );
+  assert.deepEqual(
+    sorted.map((i) => `${i.releaseTitle} ${i.position}`),
+    ["Alpha A1", "Alpha B1", "Zed A1", "Zed A2"],
+  );
+});
+
 console.log(`All ${ran} sorting tests passed.`);
