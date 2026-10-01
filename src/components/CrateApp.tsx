@@ -2590,13 +2590,18 @@ export function CrateApp({
                       }
                     : undefined
                 }
-                phoneMeta={Boolean(activePlaylist)}
+                // BPM and length are sortable from the header on a phone too, so
+                // the rows show them there, in place of the release title.
+                phoneMeta
                 addedBy={
                   activePlaylist && isCollabPlaylist(activePlaylist)
                     ? (_item, index) => {
                         const entry = entryIndexAt(viewOrder, index);
-                        const by = entry === null ? null : activePlaylist.entries[entry]?.addedBy;
-                        if (!by) return null;
+                        if (entry === null) return null;
+                        // Records from before anyone was credited are the
+                        // owner's — the same rule the server applies to
+                        // who may take them out.
+                        const by = activePlaylist.entries[entry]?.addedBy ?? activePlaylist.owner;
                         return by.toLowerCase() === username.toLowerCase() ? "you" : by;
                       }
                     : undefined
@@ -2629,7 +2634,7 @@ export function CrateApp({
                 }
                 emptyMessage={
                   activePlaylist
-                    ? "This playlist is empty. Add clips with the + button or the A key."
+                    ? "This playlist is empty. Add tracks with the + button or the A key."
                     : syncing
                       ? "Still pulling your crate from Discogs…"
                       : pool.length === 0
@@ -2785,7 +2790,7 @@ export function CrateApp({
           items={playlistItems}
           onClose={() => setPullListFor(null)}
           transitions={transitions}
-          addedBy={activePlaylist.entries.map((e) => e.addedBy ?? null)}
+          addedBy={activePlaylist.entries.map((e) => e.addedBy ?? activePlaylist.owner)}
           collab={isCollabPlaylist(activePlaylist)}
           playingKey={current?.key ?? null}
           // Audition without losing your place: the list stays open and the

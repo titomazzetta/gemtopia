@@ -432,20 +432,19 @@ export function TrackList({
                       {item.title}
                     </span>
                     {phoneMeta && (
-                      <span className="block truncate text-[11px] text-neutral-500 sm:hidden">
-                        {item.artist}
-                        {[
-                          item.year ? String(item.year) : null,
-                          item.bpm !== null && item.bpm !== undefined ? `${formatBpm(item.bpm)} BPM` : null,
-                          item.duration ? formatTime(item.duration) : null,
-                        ]
-                          .filter(Boolean)
-                          .map((part, i) => (
-                            <span key={i} className="font-mono text-[10px] text-neutral-600">
-                              {" · "}
-                              {part}
-                            </span>
-                          ))}
+                      // The numbers a DJ reads first, held at the right so a
+                      // long artist name truncates instead of pushing them off.
+                      <span className="flex min-w-0 items-baseline gap-1.5 text-[11px] text-neutral-500 sm:hidden">
+                        <span className="min-w-0 truncate">{item.artist}</span>
+                        <span className="shrink-0 font-mono text-[10px] tabular-nums text-neutral-600">
+                          {[
+                            item.bpm !== null && item.bpm !== undefined ? `${formatBpm(item.bpm)} BPM` : null,
+                            item.duration ? formatTime(item.duration) : null,
+                            item.year ? String(item.year) : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
                       </span>
                     )}
                     <span

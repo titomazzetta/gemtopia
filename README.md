@@ -845,7 +845,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-`npm audit --audit-level=high`, 663 offline tests, the schema applied to a
+`npm audit --audit-level=high`, 665 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 145 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -1036,7 +1036,7 @@ npm run test           # everything below
 npm run test:env        # 44 cases, no server needed
 npm run test:headers    # 24
 npm run test:playables  # 45
-npm run test:sorting    # 24
+npm run test:sorting    # 26
 npm run test:share      # 28
 npm run test:scrub      # 12
 npm run test:ownership  # 22
@@ -1066,7 +1066,7 @@ npm run test:invites    # 28
 npm run test:manifest   # 8
 npm run test:collab     # 20
 npm run test:collab-view # 7
-npm run test:chat       # 38 — 663 offline in all
+npm run test:chat       # 38 — 665 offline in all
 npm run test:api        # 145 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
