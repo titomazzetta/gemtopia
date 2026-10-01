@@ -180,3 +180,16 @@ export function describeNote(message: ChatMessage, known?: KnownRecord | null): 
       return { ...base, verb: "" };
   }
 }
+
+/** Unread chat across every playlist you're on. */
+export function totalUnread(playlists: ReadonlyArray<{ unread?: number }>): number {
+  return playlists.reduce((n, p) => n + (p.unread ?? 0), 0);
+}
+
+/**
+ * The number on a badge. The server stops counting at 99 per playlist
+ * (chat.UNREAD_CAP), so 99 or more reads "99+".
+ */
+export function unreadBadge(count: number): string {
+  return count >= 99 ? "99+" : String(Math.max(0, Math.floor(count)));
+}

@@ -203,7 +203,7 @@ There's nothing to download or update: it is always the live version.
 | **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. Every result says whether you already own it. **Tap a record you own and it plays** — from the track you searched for, if you searched by track — with its tracklist open to jump around; open any other result to preview its tracks. What you add is playable immediately, not after the next sync. |
 | **Newest first, by default** | Your collection and wantlist both open in the order you added to them, newest at the top — the same way Discogs presents them. No button to press and nothing to keep in sync: the dates come off the collection and wantlist endpoints, which we already read. Sortable both ways as an **Added** column. |
 | **Record-only tracks** | Most vinyl has no YouTube clip for every track. Those tracks are listed from the Discogs tracklist anyway — a disc on the artwork, a *record only* tag, side and length. Tap one for a tap pad: put the record on, tap along, and its BPM is in your catalogue. Add it to a playlist like any other track, so you can **write the set list from the shelf** while listening to the real records. The player and shuffle skip them. |
-| **Build a set together (B2B)** | Turn any playlist into a shared one with a join link — anyone with a Gemtopia account presses **Join**. Everyone adds and reorders; you take out only what you added, and the owner has the last word. Shared playlists are edged in amber, and every row says who brought the record. A **chat** on every shared playlist, Telegram-style, with small notes when the set changes — *komron added Shiva — Kerri Chandler · 1998 · 124 BPM* — and a dot when there's something new. |
+| **Build a set together (B2B)** | Turn any playlist into a shared one with a join link — anyone with a Gemtopia account presses **Join**. Everyone adds and reorders; you take out only what you added, and the owner has the last word. Shared playlists are edged in amber, and every row says who brought the record. A **chat** on every shared playlist, Telegram-style, with small notes when the set changes — *komron added Shiva — Kerri Chandler · 1998 · 124 BPM* — and an unread count, like a messenger, on the chat button, on the playlist and by the logo — the same on your phone and laptop. A tempo anyone logs becomes the set's BPM for everyone on it. |
 | **Install it as an app** | Add to Home Screen on an iPhone, **Install** in Chrome or Edge, **Add to Dock** in Safari on a Mac. Full screen, its own icon, safe-area aware on iPhones. |
 | **Invite-only** | New accounts need a one-time code from an admin — an hour or a day, single use. Everyone already in keeps their access. |
 | **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, marked, instead of silently not existing — track by track where Discogs has a tracklist. On a first sync every record shows up within a minute as *loading* — tap one and it's fetched next. The header splits the count: what plays, what's record only, what Discogs has no audio for, what's still loading, and what hasn't finished syncing — the last of which is a button. |
@@ -649,8 +649,9 @@ playlists too.
   or manages the join link and the people on it. Anyone can leave.
 - **Talk it through.** Every shared playlist has a chat — the running order,
   a blend that needs work, who's bringing which record. Your messages on the
-  right, everyone else's on the left, a dot on the chat button when there's
-  something new. Up to 500 characters a message; delete your own, and the
+  right, everyone else's on the left, and an unread count — on the chat button,
+  on the playlist in your list, and by the logo — that matches on every device
+  you're signed in on. Up to 500 characters a message; delete your own, and the
   owner can delete any. Plain text only: nothing typed is ever turned into
   HTML or a link.
 - **The chat keeps score.** Adding or taking out a record, joining and leaving
