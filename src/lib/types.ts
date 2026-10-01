@@ -229,6 +229,14 @@ export interface PlaylistItemRow {
    * schemas are strict and do not have it).
    */
   addedBy?: string | null;
+  /**
+   * The set's BPM for this record: the latest reading anyone on the playlist
+   * logged (a tap beats an auto-detect), kept with the playlist so everyone
+   * on it sees the same number, owned or not. Read-only, like addedBy.
+   */
+  bpm?: number | null;
+  /** Discogs username of whoever logged `bpm`. */
+  bpmBy?: string | null;
 }
 
 /**

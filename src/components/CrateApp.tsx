@@ -374,6 +374,26 @@ export function CrateApp({
 
   /* ================= BPM catalogue ================= */
 
+  /*
+   * A BPM you log also becomes the set's BPM on every playlist you're on that
+   * holds that record (server: repo.shareBpmWithSets). Those playlists show
+   * the set's number, so reload them once the tapping settles — not on every
+   * tap — and only when the record is actually in one.
+   */
+  const playlistsRef = useRef<Playlist[]>([]);
+  useEffect(() => {
+    playlistsRef.current = playlists;
+  }, [playlists]);
+  const setBpmRefresh = useRef<number | null>(null);
+  const refreshSetBpm = useCallback((clipKey: string) => {
+    if (!playlistsRef.current.some((p) => p.items.includes(clipKey))) return;
+    if (setBpmRefresh.current !== null) window.clearTimeout(setBpmRefresh.current);
+    setBpmRefresh.current = window.setTimeout(() => {
+      setBpmRefresh.current = null;
+      playlistsApi.list().then(setPlaylists).catch(() => {});
+    }, 1500);
+  }, []);
+
   const saveMeta = useCallback(
     async (entry: TrackMeta) => {
       // Optimistic: the DB has precedence rules that may reject the write
@@ -385,6 +405,7 @@ export function CrateApp({
       });
       try {
         await trackMetaApi.save([entry]);
+        if (entry.bpm !== null) refreshSetBpm(entry.clipKey);
       } catch (error) {
         console.warn("[bpm] save failed", error);
         if (error instanceof ApiError && error.status !== 429) {
@@ -392,7 +413,7 @@ export function CrateApp({
         }
       }
     },
-    [say],
+    [say, refreshSetBpm],
   );
 
   // Mirrored so clearBpm can restore a failed delete without depending on
@@ -698,6 +719,7 @@ export function CrateApp({
     void (async () => {
       try {
         await trackMetaApi.forget(item.key);
+        refreshSetBpm(item.key);
         say("Reading cleared. Play it through, or tap T.");
       } catch (error) {
         // Put it back rather than leave the UI claiming something the server
@@ -714,7 +736,7 @@ export function CrateApp({
         );
       }
     })();
-  }, [say]);
+  }, [say, refreshSetBpm]);
 
   /* ================= boot ================= */
 
@@ -884,8 +906,12 @@ export function CrateApp({
   const playlistItems = useMemo(() => {
     if (!activePlaylist) return [];
     return activePlaylist.entries.map((entry): Playable => {
+      // The set's BPM — the same number everyone on a shared playlist sees —
+      // over your own catalogue's, when the set has one.
       const cached = byKey.get(entry.clipKey);
-      if (cached) return cached;
+      if (cached) {
+        return entry.bpm !== null && entry.bpm !== undefined ? { ...cached, bpm: entry.bpm } : cached;
+      }
       return {
         key: entry.clipKey,
         releaseId: entry.releaseId,
@@ -910,7 +936,7 @@ export function CrateApp({
         duration: null,
         // A record-only key carries its tracklist position: `123:t.B2`.
         position: entry.videoId === null ? (entry.clipKey.split(":t.")[1] ?? null) : null,
-        bpm: bpmByClip.get(entry.clipKey) ?? null,
+        bpm: entry.bpm ?? bpmByClip.get(entry.clipKey) ?? null,
         matchKind: entry.videoId === null ? "track" : "release",
       };
     });
