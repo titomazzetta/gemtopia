@@ -25,6 +25,7 @@ export const SHORTCUTS: ReadonlyArray<{ keys: string[]; action: string }> = [
   { keys: ["D"], action: "Dig from this track — the whole record, and what it connects to" },
   { keys: ["B"], action: "Back to shuffle, after exploring a record" },
   { keys: ["A"], action: "Add to a playlist" },
+  { keys: ["W"], action: "Wantlist heart, for a record you don't own" },
   { keys: ["/"], action: "Search the crate" },
   { keys: ["?"], action: "How it works, and this list" },
   { keys: ["Esc"], action: "Close" },
