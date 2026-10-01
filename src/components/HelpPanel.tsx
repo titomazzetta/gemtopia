@@ -107,7 +107,7 @@ export const HELP: ReadonlyArray<Section> = [
     body: () => (
       <>
         Every shared playlist has a chat for the order and the blends, with small notes when records
-        are added or taken out. A dot means something new.
+        are added or taken out. The number on the chat button, the playlist and by the logo is what&apos;s new since you last read it — on any device.
       </>
     ),
   },

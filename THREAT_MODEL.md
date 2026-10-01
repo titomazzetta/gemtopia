@@ -284,8 +284,13 @@ to other users, so it is treated as the most hostile input in the app.
   carries the BPM the person adding the record had measured — the same
   reading the set itself now shares (above). Notes do not count towards the
   posting limit.
-- **Unread state stays in the browser.** The last-seen id is kept in
-  `localStorage`, only to draw a dot; it is never sent or trusted.
+- **Unread counts come from the server, and only count up to now.** How far
+  you've read each shared playlist's chat is one row per person per playlist
+  (`playlist_reads`), written through the same access condition as the chat,
+  moved forward only, and clamped to the newest message that exists — so a
+  client can't mark the future read and swallow messages yet to come. The
+  count is capped at 99 and covers other people's messages and notes only.
+  It goes when the playlist goes, or when you leave or are removed.
 
 ### Removing records from a shared playlist
 

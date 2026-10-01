@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { fail, handleError, json } from "@/lib/api";
 import { callerId, rateLimit } from "@/lib/ratelimit";
-import { listMessages, postMessage } from "@/lib/repo";
+import { listMessages, markChatRead, postMessage } from "@/lib/repo";
 import { MAX_MESSAGE_CHARS, isMessageId, normaliseMessage } from "@/lib/chat";
 import { UUID } from "@/lib/validation";
 
@@ -29,6 +29,36 @@ const MAX_BODY_BYTES = 16 * 1024;
 const postSchema = z
   .object({ body: z.string().max(MAX_BODY_BYTES) })
   .strict();
+
+const readSchema = z.object({ readUpTo: z.string().refine(isMessageId) }).strict();
+
+/**
+ * PUT — { readUpTo } marks the chat read up to that message, so the unread
+ * badge clears on every device. Moves forward only; see repo.markChatRead.
+ */
+export async function PUT(request: NextRequest, { params }: Params) {
+  const auth = await requireUser(request, { mutating: true });
+  if ("response" in auth) return auth.response;
+
+  const limit = rateLimit(callerId(request, "playlist-chat-read-mark", auth.username), 60, 60_000);
+  if (!limit.ok) {
+    return fail("rate_limited", "Slow down a moment.", 429, { retryAfter: limit.resetSeconds });
+  }
+
+  const { id } = await params;
+  if (!UUID.safeParse(id).success) return fail("not_found", "No such playlist.", 404);
+
+  const parsed = readSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return fail("bad_request", "Expected { readUpTo }.", 400);
+
+  try {
+    const ok = await markChatRead(auth.userId, id, parsed.data.readUpTo);
+    if (!ok) return fail("not_found", "No such playlist.", 404);
+    return json({ ok: true });
+  } catch (error) {
+    return handleError("playlists/messages/read", error);
+  }
+}
 
 export async function GET(request: NextRequest, { params }: Params) {
   const auth = await requireUser(request);

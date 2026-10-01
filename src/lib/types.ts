@@ -282,6 +282,12 @@ export interface Playlist {
    * them — and not for your own.
    */
   lastMessageId: string | null;
+  /**
+   * Messages and notes from other people since you last read this playlist's
+   * chat — on any device; the read position is stored on the server. Capped
+   * at 99 (chat.UNREAD_CAP).
+   */
+  unread: number;
 }
 
 /** One message in a collaborative playlist's chat. */

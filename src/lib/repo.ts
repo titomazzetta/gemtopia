@@ -13,6 +13,7 @@ import {
   MAX_MESSAGES_KEPT,
   MAX_MESSAGES_PER_MINUTE,
   MESSAGE_PAGE,
+  UNREAD_CAP,
   activityNotes,
   diffRecords,
   type ActivityMeta,
@@ -381,6 +382,7 @@ interface PlaylistRow {
   owner: string;
   collaborators: string[] | null;
   last_message_id: string | null;
+  unread: number;
 }
 
 interface ItemRow {
@@ -424,7 +426,14 @@ const PLAYLIST_COLUMNS = `
     WHERE m.playlist_id = p.id) AS collaborators,
   (SELECT max(c.id)::text FROM playlist_messages c
     WHERE c.playlist_id = p.id
-      AND c.author_id IS DISTINCT FROM $1) AS last_message_id`;
+      AND c.author_id IS DISTINCT FROM $1) AS last_message_id,
+  (SELECT count(*)::int FROM (
+     SELECT 1 FROM playlist_messages c
+      WHERE c.playlist_id = p.id
+        AND c.author_id IS DISTINCT FROM $1
+        AND c.id > COALESCE((SELECT r.last_read_id FROM playlist_reads r
+                              WHERE r.playlist_id = p.id AND r.user_id = $1), 0)
+      LIMIT ${UNREAD_CAP}) u) AS unread`;
 
 function toEntry(i: ItemRow): PlaylistItemRow {
   return {
@@ -458,6 +467,7 @@ function toPlaylist(row: PlaylistRow, items: PlaylistItemRow[]): Playlist {
     joinLinkOn: row.join_link_on,
     version: row.version,
     lastMessageId: row.last_message_id,
+    unread: row.unread,
   };
 }
 
@@ -956,6 +966,10 @@ export async function removeCollaborator(
     );
     const gone = deleted.rows[0];
     if (!gone) return false;
+    await client.query(
+      `DELETE FROM playlist_reads WHERE playlist_id = $1 AND user_id = $2`,
+      [playlistId, gone.id],
+    );
     // Signed by the person who is gone, so it reads "komron left"; `removed`
     // says the owner did it.
     const removed = gone.id !== actorId;
@@ -1144,6 +1158,33 @@ async function hasCollaborators(client: Queryable, playlistId: string): Promise<
     [playlistId],
   );
   return rows.rows.length > 0;
+}
+
+/**
+ * Mark a playlist's chat read up to a message, for the person asking. Owner
+ * or collaborator (the access condition is in the INSERT … SELECT); moves
+ * forward only, and never past the newest message there is, whatever the
+ * client sends. Returns false — a 404 — for a playlist you can't see.
+ */
+export async function markChatRead(
+  userId: string,
+  playlistId: string,
+  upTo: string,
+): Promise<boolean> {
+  const row = await queryOne<{ last_read_id: string }>(
+    `INSERT INTO playlist_reads (playlist_id, user_id, last_read_id)
+     SELECT p.id, $2,
+            LEAST($3::bigint, COALESCE((SELECT max(m.id) FROM playlist_messages m
+                                         WHERE m.playlist_id = p.id), 0))
+       FROM playlists p
+      WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
+     ON CONFLICT (playlist_id, user_id) DO UPDATE
+        SET last_read_id = GREATEST(playlist_reads.last_read_id, EXCLUDED.last_read_id),
+            read_at = now()
+     RETURNING last_read_id::text`,
+    [playlistId, userId, upTo],
+  );
+  return row !== null;
 }
 
 /**

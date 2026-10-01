@@ -20,7 +20,15 @@ import {
   messageLength,
   normaliseMessage,
 } from "../src/lib/chat.ts";
-import { describeNote, groupRuns, hasUnread, mergeLatest, prependOlder } from "../src/client/chatView.ts";
+import {
+  describeNote,
+  groupRuns,
+  hasUnread,
+  mergeLatest,
+  prependOlder,
+  totalUnread,
+  unreadBadge,
+} from "../src/client/chatView.ts";
 
 let ran = 0;
 let failed = 0;
@@ -338,6 +346,14 @@ check("notes are their own runs, never folded into someone's messages", () => {
     T,
   );
   assert.deepEqual(runs.map((r) => r.note), [false, true, false]);
+});
+
+check("unread adds up across playlists, and badges stop at 99+", () => {
+  assert.equal(totalUnread([{ unread: 2 }, { unread: 0 }, { unread: 5 }, {}]), 7);
+  assert.equal(unreadBadge(0), "0");
+  assert.equal(unreadBadge(7), "7");
+  assert.equal(unreadBadge(99), "99+");
+  assert.equal(unreadBadge(250), "99+");
 });
 
 console.log(`\n${ran - failed}/${ran} chat tests passed.`);

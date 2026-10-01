@@ -39,6 +39,9 @@ export const MESSAGE_PAGE = 50;
  */
 export const MAX_MESSAGES_KEPT = 1000;
 
+/** Unread counts stop here; a badge says "99+" past it. */
+export const UNREAD_CAP = 99;
+
 /** Most messages one person can post in a minute, counted in the database. */
 export const MAX_MESSAGES_PER_MINUTE = 20;
 
