@@ -207,6 +207,8 @@ There's nothing to download or update: it is always the live version.
 | **Install it as an app** | Add to Home Screen on an iPhone, **Install** in Chrome or Edge, **Add to Dock** in Safari on a Mac. Full screen, its own icon, safe-area aware on iPhones. |
 | **Invite-only** | New accounts need a one-time code from an admin — an hour or a day, single use. Everyone already in keeps their access. |
 | **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, marked, instead of silently not existing — track by track where Discogs has a tracklist. On a first sync every record shows up within a minute as *loading* — tap one and it's fetched next. The header splits the count: what plays, what's record only, what Discogs has no audio for, what's still loading, and what hasn't finished syncing — the last of which is a button. |
+| **Shown how, not left to guess** | A four-card welcome on your first visit — what it is, how to hear it, how to build a set, digging and B2B — worded for the device you're on (drag on a desktop, + on a phone). After that, **?** (or the ? button, phones included) opens *How it works*: every feature in a few lines, the keyboard shortcuts, and the tour again. |
+| **Out of the way when it's routine** | The check for new records that runs on every visit is a thin line at the top, not a banner over a crate you can already use — and when it lands it says so: *3 new records in your collection*. The full banner, with an honest time estimate, is kept for a first sync or a big haul. Before anything plays, the player offers **Shuffle** and the playlists you used last instead of an empty box. On a laptop-sized window the crate drops the style, year and added columns so titles stay readable. |
 | **Playlist dissection** | What a playlist is made of, and what to dig for next, from Discogs' artist and label graph. |
 
 ### Keyboard
@@ -218,7 +220,7 @@ There's nothing to download or update: it is always the live version.
 | <kbd>J</kbd> <kbd>L</kbd> | Back / forward 10s | | <kbd>A</kbd> | Add to a playlist |
 | <kbd>S</kbd> | Shuffle what's on screen | | <kbd>B</kbd> | Back to shuffle, after exploring a record |
 | <kbd>R</kbd> | Repeat | | <kbd>/</kbd> | Search |
-| <kbd>?</kbd> | Every shortcut, on screen | | <kbd>Esc</kbd> | Close |
+| <kbd>?</kbd> | How it works, and every shortcut | | <kbd>Esc</kbd> | Close |
 
 ---
 

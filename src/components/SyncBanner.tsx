@@ -20,6 +20,13 @@ import type { SyncState } from "@/lib/types";
 const LONG_HAUL_SECONDS = 10;
 
 /**
+ * Up to this many new records, a sync is routine: a thin line at the top,
+ * and a "N new records" message when it lands. Past it (a first sync, a big
+ * haul from the shop) it gets the full banner.
+ */
+const QUIET_MAX = 25;
+
+/**
  * A record, turning.
  *
  * `animation-duration` is 1.8s, which is 33⅓ rpm slowed to something that
@@ -76,7 +83,19 @@ function formatEta(seconds: number): string {
   return `about ${hours} hours`;
 }
 
-export function SyncBanner({ sync }: { sync: SyncState }) {
+export function SyncBanner({
+  sync,
+  hasCrate = false,
+}: {
+  sync: SyncState;
+  /**
+   * The crate already has records in it. Then the check that runs on every
+   * load is routine — it gets a thin line, not a 70px banner over a crate
+   * you can already use. On a first sync there's nothing else to look at,
+   * so the banner explains what's happening.
+   */
+  hasCrate?: boolean;
+}) {
   const active =
     sync.status === "listing" ||
     sync.status === "detailing" ||
@@ -140,6 +159,44 @@ export function SyncBanner({ sync }: { sync: SyncState }) {
         className="shrink-0 border-b border-red-500/30 bg-red-500/10 px-4 py-2 text-xs text-red-300"
       >
         {sync.message ?? "Sync failed."}
+      </div>
+    );
+  }
+
+  const big =
+    !hasCrate ||
+    sync.status === "paused" ||
+    longHaulEta !== null ||
+    (sync.status === "detailing" && (sync.fresh ?? 0) > QUIET_MAX);
+
+  if (!big) {
+    // Progress through *this run's* new records, not the whole collection —
+    // 3 new records on a 1,500-record crate should fill the line, not 0.2%.
+    const fresh = sync.fresh ?? 0;
+    const runPercent =
+      sync.status === "detailing" && fresh > 0
+        ? Math.max(4, Math.min(100, Math.round(((sync.detailed - (sync.total - fresh)) / fresh) * 100)))
+        : null;
+    const label =
+      sync.status === "listing"
+        ? "Checking your collection for new records…"
+        : `Loading ${fresh.toLocaleString()} new record${fresh === 1 ? "" : "s"}…`;
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        title={label}
+        className="relative h-0.5 shrink-0 overflow-hidden bg-ink-850"
+      >
+        <span className="sr-only">{label}</span>
+        {runPercent === null ? (
+          <div className="absolute inset-y-0 left-0 w-1/3 bg-accent/50 motion-safe:animate-sync-sweep" />
+        ) : (
+          <div
+            className="h-full bg-accent/70 transition-[width] duration-500"
+            style={{ width: `${runPercent}%` }}
+          />
+        )}
       </div>
     );
   }
