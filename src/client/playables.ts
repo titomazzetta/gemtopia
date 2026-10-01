@@ -1,6 +1,7 @@
 "use client";
 
 import type { Playable, ReleaseDetail, ReleaseSummary, Track } from "@/lib/types";
+import { trackOnlyKey } from "@/lib/clipKey";
 import { parseBpmFromText } from "./tempo";
 
 /**
@@ -291,6 +292,54 @@ export function buildPlayables(
      * to the release at all. Calling that "Discogs has no audio" would be a
      * confident wrong answer about a record you can hear on Discogs right now.
      */
+    // Keys for every track on the tracklist, worked out once over the whole
+    // list, so a track's key is the same whether or not YouTube covers its
+    // neighbours.
+    const taken = new Set<string>();
+    const trackKeys = new Map<Track, string>(
+      release.tracks.map((track, i) => [track, trackOnlyKey(release.id, track.position, i, taken)]),
+    );
+    const addedAt = addedAtByRelease.get(release.id) ?? release.addedAt;
+
+    /*
+     * Tracks YouTube has no clip for, as rows of their own: "record only".
+     * Most of a vinyl collection is like this. They can go in a set, carry a
+     * BPM tapped while the record plays in the room, and show their side and
+     * length — so a set list can be written from the shelf. The player
+     * skips them; there is nothing to play.
+     */
+    const recordOnly = (tracks: readonly Track[]): Playable[] =>
+      tracks.map((track) => {
+        const key = trackKeys.get(track)!;
+        return {
+          key,
+          releaseId: release.id,
+          videoId: null,
+          title: track.title,
+          artist: track.artists.length > 0 ? track.artists.join(", ") : release.artist,
+          releaseTitle: release.title,
+          year: release.year,
+          genres: distinct(release.genres),
+          styles: distinct(release.styles),
+          labels: distinct(release.labels),
+          thumb: release.thumb,
+          country: release.country,
+          formats: release.formats,
+          duration: parseDuration(track.duration),
+          position: track.position || null,
+          bpm: bpmByClip.get(key) ?? parseBpmFromText(track.title) ?? releaseBpm,
+          matchKind: "track",
+          silence: "record-only",
+          addedAt,
+        };
+      });
+
+    // Detailed, no clips at all, but a tracklist: every track, record only.
+    if (release.videos.length === 0 && release.market !== null && release.tracks.length > 0) {
+      out.push(...recordOnly(release.tracks));
+      continue;
+    }
+
     if (release.videos.length === 0) {
       out.push({
         key: `${release.id}:silent`,
@@ -328,9 +377,12 @@ export function buildPlayables(
     }
 
     const groups = new Map<string, Candidate[]>();
+    /** Every track some clip on this release was matched to. */
+    const matched = new Set<Track>();
 
     for (const video of release.videos) {
       const match = matchTrack(video.title, release.artist, release.tracks);
+      if (match.track) matched.add(match.track);
       const trackSeconds = match.track ? parseDuration(match.track.duration) : null;
       const normTitle = normalize(video.title);
 
@@ -469,9 +521,47 @@ export function buildPlayables(
         addedAt: addedAtByRelease.get(release.id) ?? release.addedAt,
       });
     }
+
+    out.push(...recordOnly(missingTracks(release.tracks, matched, kept)));
   }
 
   return out;
+}
+
+/**
+ * The tracks on a partly-covered record that no clip plays.
+ *
+ * Careful in both directions, because the cost of each mistake differs. A
+ * missing track not listed hides music you own; a track listed as "record
+ * only" when a clip of it is right there is a duplicate row. So:
+ *
+ *   - A kept side-long or full-album rip covers the record: list nothing.
+ *   - A track matched by any clip (kept or folded away as a duplicate) is
+ *     covered.
+ *   - A clip that matched no title is very often a real track under another
+ *     name. If its runtime fits a missing track's printed length, treat that
+ *     track as covered by it. If at least as many such clips are left over as
+ *     tracks are missing, assume they are those tracks and list none.
+ */
+export function missingTracks(
+  tracks: readonly Track[],
+  matched: ReadonlySet<Track>,
+  kept: ReadonlyArray<{ video: { duration: number | null }; match: TrackMatch }>,
+): Track[] {
+  if (tracks.length === 0) return [];
+  if (kept.some((w) => w.match.longform)) return [];
+
+  let missing = tracks.filter((t) => !matched.has(t));
+  let unplaced = 0;
+  for (const clip of kept) {
+    if (clip.match.track !== null) continue;
+    const fit = missing.find((t) => durationFit(clip.video.duration, parseDuration(t.duration)) === 1);
+    if (fit) missing = missing.filter((t) => t !== fit);
+    else unplaced += 1;
+  }
+  // As many unrecognised clips as missing tracks, with nothing to tell them
+  // apart: assume the clips are those tracks, rather than list every one twice.
+  return unplaced >= missing.length ? [] : missing;
 }
 
 /* ------------------------------------------------------------------ */
@@ -590,18 +680,22 @@ export function countSilence(items: readonly Playable[]): {
   notLoaded: number;
   /** Still to be reached by the sync in progress — not a failure. */
   loading: number;
+  /** Tracks with no clip, listed from the tracklist: played from the record. */
+  recordOnly: number;
 } {
   let playable = 0;
   let noAudio = 0;
   let notLoaded = 0;
   let loading = 0;
+  let recordOnly = 0;
 
   for (const item of items) {
     if (item.silence === null) playable += 1;
     else if (item.silence === "no-audio") noAudio += 1;
     else if (item.silence === "loading") loading += 1;
+    else if (item.silence === "record-only") recordOnly += 1;
     else notLoaded += 1;
   }
 
-  return { playable, noAudio, notLoaded, loading };
+  return { playable, noAudio, notLoaded, loading, recordOnly };
 }

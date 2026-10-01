@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CLIP_KEY_PATTERN, isTrackOnlyKey } from "./clipKey";
 
 /**
  * Shared request schemas.
@@ -8,21 +9,31 @@ import { z } from "zod";
  * request, not a silently ignored one.
  */
 
-export const CLIP_KEY = z
-  .string()
-  .regex(/^\d{1,12}:[A-Za-z0-9_-]{11}$/, "malformed clip key");
+/** A clip (`123:<11-char YouTube id>`) or a record-only track (`123:t.B2`). See lib/clipKey.ts. */
+export const CLIP_KEY = z.string().regex(CLIP_KEY_PATTERN, "malformed clip key");
 
 export const playlistItemSchema = z
   .object({
     clipKey: CLIP_KEY,
     releaseId: z.number().int().positive().max(1e9),
-    videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/),
+    /** Null exactly when the entry is a record-only track. */
+    videoId: z.string().regex(/^[A-Za-z0-9_-]{11}$/).nullable(),
     title: z.string().max(400),
     artist: z.string().max(400),
     releaseTitle: z.string().max(400).default(""),
     year: z.number().int().min(1880).max(2200).nullable().default(null),
   })
-  .strict();
+  .strict()
+  // The key and the video must agree: a clip's key ends in its own video id,
+  // and a record-only track has no video at all. Otherwise an entry could be
+  // labelled one track and play another.
+  .refine(
+    (e) =>
+      e.videoId === null
+        ? isTrackOnlyKey(e.clipKey)
+        : !isTrackOnlyKey(e.clipKey) && e.clipKey.endsWith(`:${e.videoId}`),
+    { message: "clipKey and videoId disagree" },
+  );
 
 export const createPlaylistSchema = z
   .object({

@@ -128,6 +128,8 @@ import {
   describePartialAdoption,
 } from "@/client/adopt";
 import { DiscogsSearch } from "./DiscogsSearch";
+import { RecordOnlyCard } from "./RecordOnlyCard";
+import { isTrackOnlyKey } from "@/lib/clipKey";
 import type { SearchHit } from "@/lib/discogs";
 import { ChatIcon, Compass, ListIcon, Metronome, Refresh, Search, Shuffle, Users } from "./Icons";
 
@@ -138,17 +140,20 @@ type NewEntry = Omit<PlaylistItemRow, "position">;
 /**
  * A playable becomes a stored entry. Position comes from array order.
  *
- * Returns null for a record with no clip. The server would refuse it anyway —
- * `validation.ts` requires an eleven-character video id — but a 400 at the end
- * of a drag is a much worse way to learn that than the + button simply not
- * being offered on that row.
+ * A record-only track (a tracklist entry with no clip, key `123:t.B2`) goes
+ * in with no video — it's part of the set, the player skips it. Returns null
+ * for anything else without a clip: a whole record still loading, or one with
+ * no tracklist at all. The server would refuse those anyway — `validation.ts`
+ * requires the key and video to agree — but a 400 at the end of a drag is a
+ * much worse way to learn that than the + button simply not being offered.
  */
 function toEntry(item: Playable): NewEntry | null {
-  if (item.videoId === null) return null;
+  const recordOnly = item.silence === "record-only" && isTrackOnlyKey(item.key);
+  if (item.videoId === null && !recordOnly) return null;
   return {
     clipKey: item.key,
     releaseId: item.releaseId,
-    videoId: item.videoId,
+    videoId: recordOnly ? null : item.videoId,
     title: item.title.slice(0, 400),
     artist: item.artist.slice(0, 400),
     releaseTitle: item.releaseTitle.slice(0, 400),
@@ -226,6 +231,8 @@ export function CrateApp({
   /** The playlist whose collaborate panel is open. */
   const [collabFor, setCollabFor] = useState<string | null>(null);
   const [chatFor, setChatFor] = useState<string | null>(null);
+  /** A record-only track that was tapped: details and a tap pad. */
+  const [recordCard, setRecordCard] = useState<Playable | null>(null);
   // Bumped when the chat marks messages seen, so the unread dot re-reads.
   const [chatSeenTick, setChatSeenTick] = useState(0);
   /*
@@ -869,9 +876,9 @@ export function CrateApp({
         key: entry.clipKey,
         releaseId: entry.releaseId,
         videoId: entry.videoId,
-        // Never silent: the server refuses an entry without a valid video id,
-        // so anything that came back from it is playable by construction.
-        silence: null,
+        // The server stores a video exactly when the key is a clip's, so an
+        // entry without one is a record-only track and nothing else.
+        silence: entry.videoId === null ? "record-only" : null,
         // A playlist row that never synced on this device has no collection
         // date to report, and inventing one would put it at the top of a
         // recently-added sort it does not belong in.
@@ -887,9 +894,10 @@ export function CrateApp({
         country: null,
         formats: [],
         duration: null,
-        position: null,
+        // A record-only key carries its tracklist position: `123:t.B2`.
+        position: entry.videoId === null ? (entry.clipKey.split(":t.")[1] ?? null) : null,
         bpm: bpmByClip.get(entry.clipKey) ?? null,
-        matchKind: "release",
+        matchKind: entry.videoId === null ? "track" : "release",
       };
     });
   }, [activePlaylist, byKey, bpmByClip]);
@@ -1128,6 +1136,11 @@ export function CrateApp({
 
       const plan = queueFrom(items, index);
       const target = items[index];
+      if (target?.silence === "record-only") {
+        // Nothing to play: show where it is on the record, and a tap pad.
+        setRecordCard(target);
+        return false;
+      }
       if (target?.silence === "loading") {
         /*
          * Still in the sync queue. Tapping it is the clearest possible signal
@@ -1185,7 +1198,10 @@ export function CrateApp({
     waitingFor.current = null;
     const first = rows.find((p) => p.videoId !== null);
     if (!first) {
-      say(`Discogs has no audio for ${rows[0]?.title ?? "that record"}.`);
+      // No clips, but a tracklist: show its first track, record only.
+      const onRecord = rows.find((p) => p.silence === "record-only");
+      if (onRecord) setRecordCard(onRecord);
+      else say(`Discogs has no audio for ${rows[0]?.title ?? "that record"}.`);
       return;
     }
     const order = runningOrder(first, recordDetailById.get(releaseId) ?? null, allPlayables, null);
@@ -1311,8 +1327,8 @@ export function CrateApp({
 
   const createPlaylist = useCallback(
     async (name: string, seed?: Playable) => {
-      if (seed && seed.videoId === null) {
-        say(`${seed.title} has no clip to play, so it can't go in a playlist.`);
+      if (seed && toEntry(seed) === null) {
+        say(`${seed.title} hasn't loaded from Discogs yet, so it can't go in a playlist.`);
         return;
       }
       try {
@@ -1340,7 +1356,7 @@ export function CrateApp({
       }
       const entry = toEntry(item);
       if (entry === null) {
-        say(`${item.title} has no clip to play, so it can't go in a playlist.`);
+        say(`${item.title} hasn't loaded from Discogs yet, so it can't go in a playlist.`);
         return;
       }
       try {
@@ -2249,12 +2265,12 @@ export function CrateApp({
                 {!activePlaylist && (
                 <span className="shrink-0 font-mono text-[11px] text-neutral-600">
                   {silence.playable.toLocaleString()}
-                  {silence.noAudio + silence.notLoaded + silence.loading > 0 && (
+                  {silence.noAudio + silence.notLoaded + silence.loading + silence.recordOnly > 0 && (
                     <span
                       className="text-neutral-700"
-                      title={`${(silence.noAudio + silence.notLoaded + silence.loading).toLocaleString()} shown but not playable yet`}
+                      title={`${(silence.noAudio + silence.notLoaded + silence.loading + silence.recordOnly).toLocaleString()} shown without a clip — record only, or still loading`}
                     >
-                      +{(silence.noAudio + silence.notLoaded + silence.loading).toLocaleString()}
+                      +{(silence.noAudio + silence.notLoaded + silence.loading + silence.recordOnly).toLocaleString()}
                     </span>
                   )}
                 </span>
@@ -2398,6 +2414,12 @@ export function CrateApp({
             </h2>
             <span className="text-[11px] text-neutral-600">
               {silence.playable.toLocaleString()} clips
+              {silence.recordOnly > 0 && (
+                <span title="Tracks with no YouTube clip, listed from the Discogs tracklist — play them from the record">
+                  {" · "}
+                  {silence.recordOnly.toLocaleString()} record only
+                </span>
+              )}
               {silence.noAudio > 0 && (
                 <span title="Discogs holds no audio for these pressings">
                   {" · "}
@@ -2692,6 +2714,31 @@ export function CrateApp({
             setPlaylists((previous) => previous.filter((p) => p.id !== left));
             say("You left that playlist.");
           }}
+        />
+      )}
+
+      {recordCard && (
+        <RecordOnlyCard
+          key={recordCard.key}
+          item={recordCard}
+          bpm={bpmByClip.get(recordCard.key) ?? recordCard.bpm}
+          onSaveBpm={(bpm, confidence) =>
+            void saveMeta({
+              clipKey: recordCard.key,
+              bpm,
+              bpmSource: "tap",
+              bpmConfidence: confidence,
+              musicalKey: null,
+              rating: null,
+              cueNote: null,
+            })
+          }
+          onAdd={() => {
+            const item = recordCard;
+            setRecordCard(null);
+            queueForPlaylist(item);
+          }}
+          onClose={() => setRecordCard(null)}
         />
       )}
 

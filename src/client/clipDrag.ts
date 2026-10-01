@@ -13,12 +13,12 @@
 
 export const CLIP_MIME = "application/x-gemtopia-clip";
 
-/** `${releaseId}:${videoId}` — a Discogs id, then an 11-character YouTube id. */
-const CLIP_KEY = /^[1-9]\d{0,11}:[A-Za-z0-9_-]{11}$/;
-
-export function isClipKey(value: unknown): value is string {
-  return typeof value === "string" && CLIP_KEY.test(value);
-}
+/**
+ * A clip (`${releaseId}:${videoId}`) or a record-only track
+ * (`${releaseId}:t.B2`) — the two shapes in lib/clipKey.ts, and nothing else.
+ */
+export { isClipKey } from "@/lib/clipKey";
+import { isClipKey } from "@/lib/clipKey";
 
 /** Start a drag for this clip. Returns false (and sets nothing) for a non-clip key. */
 export function writeClipDrag(

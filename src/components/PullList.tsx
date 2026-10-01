@@ -439,6 +439,14 @@ export function PullList({
                           }`}
                         >
                           {playing && <Play className="mr-1 inline h-3 w-3" />}
+                          {row.recordOnly && (
+                            <span
+                              className="mr-1.5 inline-block -translate-y-px rounded border border-neutral-700 px-1 align-middle text-[9px] font-medium uppercase leading-[14px] tracking-wide text-neutral-400"
+                              title="No YouTube clip — play it from the record"
+                            >
+                              record only
+                            </span>
+                          )}
                           {row.title}
                         </span>
                         <span className="block truncate text-xs text-neutral-400">

@@ -27,6 +27,8 @@ export interface PullRow {
   bpm: number | null;
   /** The set number of an earlier track on the same record, if any. */
   sameRecordAs: number | null;
+  /** No clip: played from the record only. */
+  recordOnly: boolean;
 }
 
 export function pullRows(items: readonly Playable[]): PullRow[] {
@@ -45,6 +47,7 @@ export function pullRows(items: readonly Playable[]): PullRow[] {
       position: item.position?.trim() ? item.position.trim() : null,
       bpm: item.bpm,
       sameRecordAs: earlier,
+      recordOnly: item.silence === "record-only",
     };
   });
 }

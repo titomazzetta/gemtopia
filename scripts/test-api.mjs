@@ -1088,6 +1088,79 @@ await check("deleting needs CSRF", async () => {
   assert.equal(res.status, 403);
 });
 
+console.log("\nrecord-only tracks");
+
+{
+  const dj = actor(`dj_${randomBytes(4).toString("hex")}`);
+  await dj.call("/api/playlists");
+  const rec = (releaseId, pos, title) => ({
+    clipKey: `${releaseId}:t.${pos}`,
+    releaseId,
+    videoId: null,
+    title,
+    artist: "Test Artist",
+    releaseTitle: "Test EP",
+    year: 1996,
+  });
+  let setId = null;
+
+  await check("a record-only track goes in a playlist next to clips", async () => {
+    const res = await dj.call("/api/playlists", {
+      method: "POST",
+      body: { name: "From the shelf", entries: [clip(6001, "ggggggggggg"), rec(6002, "B2", "Home")] },
+    });
+    assert.equal(res.status, 201, res.raw);
+    setId = res.body.playlist.id;
+    const [a, b] = res.body.playlist.entries;
+    assert.equal(a.videoId, "ggggggggggg");
+    assert.equal(b.clipKey, "6002:t.B2");
+    assert.equal(b.videoId, null);
+  });
+
+  await check("the key and the video must agree, both ways", async () => {
+    const bad = [
+      { ...rec(6002, "B2", "Home"), videoId: "ggggggggggg" },
+      { ...clip(6001, "ggggggggggg"), videoId: null },
+      { ...clip(6001, "ggggggggggg"), videoId: "hhhhhhhhhhh" },
+      { ...rec(6002, "B2", "Home"), clipKey: "6002:t.B 2" },
+      { ...rec(6002, "B2", "Home"), clipKey: "6002:silent" },
+      { ...rec(6002, "B2", "Home"), clipKey: "6002:t.ABCDEFGHIJKLMNOPQ" },
+    ];
+    for (const entry of bad) {
+      const res = await dj.call(`/api/playlists/${setId}`, {
+        method: "PATCH",
+        body: { entries: [entry] },
+      });
+      assert.equal(res.status, 400, JSON.stringify(entry));
+    }
+    assert.equal((await dj.call(`/api/playlists/${setId}`)).body.playlist.entries.length, 2);
+  });
+
+  await check("a BPM can be logged for a record-only track", async () => {
+    const put = await dj.call("/api/track-meta", {
+      method: "PUT",
+      body: { entries: [{ clipKey: "6002:t.B2", bpm: 122.5, bpmSource: "tap" }] },
+    });
+    assert.equal(put.status, 200, put.raw);
+    const got = (await dj.call("/api/track-meta")).body.entries.find((e) => e.clipKey === "6002:t.B2");
+    assert.equal(Number(got.bpm), 122.5);
+  });
+
+  await check("a share link lists it, and its player only gets the clip", async () => {
+    const share = await dj.call(`/api/playlists/${setId}/share`, { method: "POST", body: { shared: true } });
+    assert.equal(share.status, 200);
+    const token = share.body.shareUrl.split("/s/").pop();
+    const api = await (await fetch(`${BASE}/api/shared/${token}`)).json();
+    assert.equal(api.playlist.items.length, 2);
+    assert.equal(api.playlist.items[1].videoId, null);
+    const page = await fetch(`${BASE}/s/${token}`);
+    assert.equal(page.status, 200);
+    const html = await page.text();
+    assert.ok(html.includes("record only"), "the record-only row is marked");
+    assert.ok(html.includes("Home"));
+  });
+}
+
 console.log("\ncollaborative playlists");
 
 {

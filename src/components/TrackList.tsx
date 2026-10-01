@@ -5,7 +5,7 @@ import type { Playable } from "@/lib/types";
 import { STRAIN_META, transitionWords, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { formatBpm } from "@/lib/mixing";
-import { NoPreview, Play, Plus, Trash } from "./Icons";
+import { Disc, NoPreview, Play, Plus, Trash } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import type { SortKey, SortState } from "@/client/sorting";
 import { writeClipDrag } from "@/client/clipDrag";
@@ -309,12 +309,21 @@ export function TrackList({
              * whether you are scanning, hovering, or using a screen reader.
              */
             const silent = item.silence !== null;
+            /*
+             * Record only: a real track off the tracklist with no clip. Most of
+             * a vinyl crate is like this, so it is not dimmed into the
+             * background like a failure — it's a track you play from the
+             * record. A disc on the artwork and a "record only" tag say so.
+             */
+            const recordOnly = item.silence === "record-only";
             const silentReason =
               item.silence === "loading"
                 ? "Still loading from Discogs — tap to fetch it next"
                 : item.silence === "not-loaded"
                   ? "Not synced yet — hit refresh to fetch this release"
-                  : "Discogs has no audio for this pressing";
+                  : recordOnly
+                    ? "No YouTube clip — tap for its side, length and a tap pad"
+                    : "Discogs has no audio for this pressing";
 
             return (
               <li
@@ -323,7 +332,10 @@ export function TrackList({
                 // Draggable for two reasons: reordering an open playlist, and
                 // dropping any playable row onto a playlist in the sidebar
                 // (desktop). A silent row has nothing to add, so it stays put.
-                draggable={reorderable || (finePointer && item.videoId !== null)}
+                draggable={
+                  reorderable ||
+                  (finePointer && (item.videoId !== null || item.silence === "record-only"))
+                }
                 onDragStart={(event) => {
                   if (reorderable) dragIndex.current = index;
                   writeClipDrag(event.dataTransfer, item.key);
@@ -338,7 +350,13 @@ export function TrackList({
                 className={`group border-b border-ink-850 ${
                   active ? "bg-accent/10" : "hover:bg-ink-850"
                 } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""} ${
-                  silent ? (item.silence === "loading" ? "opacity-60" : "opacity-45") : ""
+                  silent
+                    ? recordOnly
+                      ? ""
+                      : item.silence === "loading"
+                        ? "opacity-60"
+                        : "opacity-45"
+                    : ""
                 }`}
               >
                 {showTransitions &&
@@ -368,7 +386,14 @@ export function TrackList({
                         className="h-full w-full object-cover"
                       />
                     ) : null}
-                    {silent ? (
+                    {recordOnly ? (
+                      <span
+                        className="absolute inset-0 grid place-items-center bg-black/55"
+                        title={silentReason}
+                      >
+                        <Disc className="h-4 w-4 text-neutral-300" />
+                      </span>
+                    ) : silent ? (
                       <span
                         className="absolute inset-0 grid place-items-center bg-black/65"
                         title={silentReason}
@@ -397,6 +422,13 @@ export function TrackList({
                           {item.position}
                         </span>
                       ) : null}
+                      {recordOnly && (
+                        // On a phone the disc on the artwork says it; the
+                        // title needs the width more than the tag does.
+                        <span className="mr-1.5 hidden -translate-y-px rounded border border-neutral-700 px-1 align-middle text-[9px] font-medium uppercase leading-[14px] tracking-wide text-neutral-400 sm:inline-block">
+                          record only
+                        </span>
+                      )}
                       {item.title}
                     </span>
                     {phoneMeta && (
@@ -423,7 +455,7 @@ export function TrackList({
                     >
                       {item.artist}
                       <span className="text-neutral-700"> — {item.releaseTitle}</span>
-                      {silent && (
+                      {silent && !recordOnly && (
                         <span className="ml-1.5 text-neutral-600">
                           ·{" "}
                           {item.silence === "loading"
@@ -506,7 +538,7 @@ export function TrackList({
 
                 <ShareButton track={item} />
 
-                {onAdd && !silent && (
+                {onAdd && (!silent || item.silence === "record-only") && (
                   <button
                     type="button"
                     onClick={() => onAdd(item)}
