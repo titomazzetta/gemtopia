@@ -357,6 +357,7 @@ export function NowPlaying({
   onDig,
   detour,
   onBackToShuffle,
+  idle,
 }: {
   containerRef: RefObject<HTMLDivElement | null>;
   api: PlayerApi;
@@ -376,6 +377,18 @@ export function NowPlaying({
   /** Set while exploring a record away from the shuffle. */
   detour: { label: string } | null;
   onBackToShuffle: () => void;
+  /**
+   * What to offer before anything has played: shuffle what's on screen, or
+   * open one of the playlists you used last. The square the video will fill
+   * is the first thing you see on a desktop; it should be a way in, not a
+   * "nothing queued" placeholder.
+   */
+  idle?: {
+    shuffleLabel: string;
+    onShuffle: () => void;
+    recent: ReadonlyArray<{ id: string; name: string; tracks: number; shared: boolean }>;
+    onOpenPlaylist: (id: string) => void;
+  };
 }) {
   const progress = api.duration > 0 ? (api.currentTime / api.duration) * 100 : 0;
 
@@ -420,10 +433,47 @@ export function NowPlaying({
     >
       <div className="relative mx-auto aspect-square w-[min(52vw,200px)] bg-black lg:mx-0 lg:w-full">
         <div className="absolute inset-0" ref={containerRef} />
-        {!current && (
+        {!current && !idle && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 bg-ink-850 text-neutral-600">
             <Disc className="h-10 w-10" />
             <p className="text-xs">Nothing queued</p>
+          </div>
+        )}
+        {!current && idle && (
+          <div className="absolute inset-0 flex flex-col justify-center gap-4 bg-ink-850 px-6">
+            <button
+              type="button"
+              onClick={idle.onShuffle}
+              className="flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-semibold text-ink-950 hover:bg-accent-dim"
+            >
+              <Shuffle className="h-4 w-4" />
+              {idle.shuffleLabel}
+            </button>
+            {idle.recent.length > 0 && (
+              <div>
+                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
+                  Or pick up a set
+                </p>
+                <ul className="space-y-1">
+                  {idle.recent.map((playlist) => (
+                    <li key={playlist.id}>
+                      <button
+                        type="button"
+                        onClick={() => idle.onOpenPlaylist(playlist.id)}
+                        className={`flex w-full items-center gap-2 rounded-md border px-2.5 py-1.5 text-left hover:bg-ink-800 ${
+                          playlist.shared ? "border-accent-alt/40" : "border-ink-700"
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1 truncate text-xs text-neutral-200">{playlist.name}</span>
+                        <span className="shrink-0 font-mono text-[10px] tabular-nums text-neutral-500">
+                          {playlist.tracks}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -199,6 +199,16 @@ export function TrackList({
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(600);
+  /*
+   * The list's own width, not the window's. On a laptop-sized window the
+   * crate sits between the filter rail and the player, and at 800–1100px
+   * wide that left the title a few letters once the style, year and added
+   * columns had their room. Below this, those three step aside so the
+   * title and artist can be read; BPM and length stay.
+   */
+  const [width, setWidth] = useState(1000);
+  const tight = width < 720;
+  const hasItems = items.length > 0;
   const dragIndex = useRef<number | null>(null);
   const finePointer = useFinePointer();
 
@@ -206,11 +216,16 @@ export function TrackList({
     const element = viewportRef.current;
     if (!element) return;
     const observer = new ResizeObserver(([entry]) => {
-      if (entry) setHeight(entry.contentRect.height);
+      if (!entry) return;
+      setHeight(entry.contentRect.height);
+      setWidth(entry.contentRect.width);
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+    // Re-attached when the list goes from empty to not: the empty state has
+    // no viewport, so an observer set up while empty would watch nothing —
+    // and the width (and height) would stay at their defaults for good.
+  }, [hasItems]);
 
   const onScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     setScrollTop(event.currentTarget.scrollTop);
@@ -258,7 +273,7 @@ export function TrackList({
               sortKey="year"
               sort={sort}
               onSort={onSort}
-              className="hidden w-8 justify-end sm:flex"
+              className={`hidden w-8 justify-end ${tight ? "" : "sm:flex"}`}
             />
             {/*
               Date added. Hidden on a narrow phone along with Year, because
@@ -271,7 +286,7 @@ export function TrackList({
               sortKey="added"
               sort={sort}
               onSort={onSort}
-              className="hidden w-12 justify-end md:flex"
+              className={`hidden w-12 justify-end ${tight ? "" : "md:flex"}`}
             />
             <SortHeader
               label="BPM"
@@ -434,7 +449,11 @@ export function TrackList({
                     {phoneMeta && (
                       // The numbers a DJ reads first, held at the right so a
                       // long artist name truncates instead of pushing them off.
-                      <span className="flex min-w-0 items-baseline gap-1.5 text-[11px] text-neutral-500 sm:hidden">
+                      <span
+                        className={`flex min-w-0 items-baseline gap-1.5 text-[11px] text-neutral-500 ${
+                          tight ? "" : "sm:hidden"
+                        }`}
+                      >
                         <span className="min-w-0 truncate">{item.artist}</span>
                         <span className="shrink-0 font-mono text-[10px] tabular-nums text-neutral-600">
                           {[
@@ -449,7 +468,7 @@ export function TrackList({
                     )}
                     <span
                       className={`truncate text-[11px] text-neutral-500 ${
-                        phoneMeta ? "hidden sm:block" : "block"
+                        phoneMeta ? (tight ? "hidden" : "hidden sm:block") : "block"
                       }`}
                     >
                       {item.artist}
@@ -467,17 +486,20 @@ export function TrackList({
                     </span>
                   </span>
 
-                  <span className="hidden shrink-0 items-center gap-2 sm:flex">
-                    {item.styles[0] && (
+                  {/* In a tight list the numbers move into the second line (above). */}
+                  <span className={`hidden shrink-0 items-center gap-2 ${tight && phoneMeta ? "" : "sm:flex"}`}>
+                    {item.styles[0] && !tight && (
                       <span className="rounded bg-ink-800 px-1.5 py-0.5 text-[10px] text-neutral-500">
                         {item.styles[0]}
                       </span>
                     )}
-                    <span className="hidden w-8 text-right font-mono text-[10px] text-neutral-600 sm:inline">
+                    <span
+                      className={`hidden w-8 text-right font-mono text-[10px] text-neutral-600 ${tight ? "" : "sm:inline"}`}
+                    >
                       {item.year ?? ""}
                     </span>
                     <span
-                      className="hidden w-12 text-right font-mono text-[10px] text-neutral-600 md:inline"
+                      className={`hidden w-12 text-right font-mono text-[10px] text-neutral-600 ${tight ? "" : "md:inline"}`}
                       title={
                         item.addedAt
                           ? `Added ${new Date(item.addedAt).toLocaleDateString()}`

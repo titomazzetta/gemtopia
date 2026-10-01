@@ -8,6 +8,7 @@ import type {
   PlaylistItemRow,
   ReleaseDetail,
   Source,
+  SyncState,
   TrackMeta,
 } from "@/lib/types";
 import {
@@ -75,7 +76,8 @@ import {
 } from "@/client/bpmSweep";
 import { useTempoDetector } from "@/client/useTempoDetector";
 import { beginDetour, detourEnds, resumePoint, type Detour } from "@/client/detour";
-import { Shortcuts } from "./Shortcuts";
+import { HelpPanel } from "./HelpPanel";
+import { WelcomeTour, welcomeSeen } from "./WelcomeTour";
 import {
   DEFAULT_RANGE,
   RANGE_CEILING,
@@ -340,6 +342,18 @@ export function CrateApp({
    */
   const [detour, setDetour] = useState<Detour<Playable> | null>(null);
   const [showKeys, setShowKeys] = useState(false);
+  /*
+   * The welcome tour, once per browser. Opened from an effect rather than
+   * the initial state: the server renders this component too, and has no
+   * idea what this browser has seen, so deciding during render would make
+   * the first client render disagree with the server's.
+   */
+  const [tourOpen, setTourOpen] = useState(false);
+  useEffect(() => {
+    if (welcomeSeen()) return;
+    const timer = window.setTimeout(() => setTourOpen(true), 400);
+    return () => window.clearTimeout(timer);
+  }, []);
   const [shuffleOn, setShuffleOn] = useState(true);
   const [repeatOn, setRepeatOn] = useState(true);
 
@@ -1210,6 +1224,26 @@ export function CrateApp({
   }, [allPlayables, recordDetailById, playFrom, say]);
 
   /*
+   * The sync is quiet when it's routine (a thin line, see SyncBanner), so
+   * the one thing worth saying out loud is said when it lands: how many new
+   * records came in. Said once per run, and only for a run that fetched any.
+   */
+  const lastSyncStatus = useRef<SyncState["status"] | null>(null);
+  useEffect(() => {
+    const previous = lastSyncStatus.current;
+    lastSyncStatus.current = sync?.status ?? null;
+    if (!sync || sync.status !== "done" || previous === "done" || previous === null) return;
+    const fresh = sync.fresh ?? 0;
+    if (fresh === 0) return;
+    const where = sync.source === "wantlist" ? "wantlist" : "collection";
+    say(
+      fresh === sync.total
+        ? `Your ${where} is ready — ${fresh.toLocaleString()} records.`
+        : `${fresh.toLocaleString()} new record${fresh === 1 ? "" : "s"} in your ${where}.`,
+    );
+  }, [sync, say]);
+
+  /*
    * Searching or filtering during a first sync: whatever matches and is still
    * loading jumps the queue, so the records you are looking for are the next
    * ones to become playable. A hint only — it never starts a sync.
@@ -1970,7 +2004,16 @@ export function CrateApp({
     sync?.status === "paused";
   return (
     <div className="flex h-full flex-col">
-      {showKeys && <Shortcuts onClose={() => setShowKeys(false)} />}
+      {showKeys && (
+        <HelpPanel
+          onClose={() => setShowKeys(false)}
+          onReplayTour={() => {
+            setShowKeys(false);
+            setTourOpen(true);
+          }}
+        />
+      )}
+      {tourOpen && <WelcomeTour username={username} onClose={() => setTourOpen(false)} />}
       <header className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900 px-4 pb-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
         {/*
           20px lands in the text cut, which is the drawing meant for this size.
@@ -1981,13 +2024,13 @@ export function CrateApp({
         <span className="hidden text-sm font-semibold tracking-tight text-neutral-100 sm:block">
           Gemtopia
         </span>
-        {/* Keyboard users find "?"; everyone else needs something to click. */}
+        {/* "How it works": `?` on a keyboard, this button everywhere else — phones too. */}
         <button
           type="button"
           onClick={() => setShowKeys(true)}
-          title="Keyboard shortcuts (?)"
-          aria-label="Keyboard shortcuts"
-          className="hidden h-6 w-6 shrink-0 items-center justify-center rounded border border-ink-700 font-mono text-[11px] text-neutral-500 hover:text-neutral-200 lg:flex"
+          title="How it works (?)"
+          aria-label="How it works"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-ink-700 font-mono text-[11px] text-neutral-500 hover:text-neutral-200"
         >
           ?
         </button>
@@ -2139,7 +2182,9 @@ export function CrateApp({
         </details>
       </header>
 
-      {sync && sync.status !== "done" && <SyncBanner sync={sync} />}
+      {sync && sync.status !== "done" && (
+        <SyncBanner sync={sync} hasCrate={details.length > 0} />
+      )}
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         {/*
@@ -2405,14 +2450,16 @@ export function CrateApp({
           )}
 
           <div
-            className={`hidden shrink-0 items-center gap-2 border-b border-ink-800 px-4 py-2 lg:flex ${
+            className={`hidden shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-ink-800 px-4 py-2 lg:flex ${
               digTarget ? "lg:hidden" : ""
             }`}
           >
-            <h2 className="text-xs font-medium text-neutral-300">
+            {/* On a narrow window the buttons wrap to a second line rather than
+                squeezing the playlist's name to nothing. */}
+            <h2 className="min-w-0 max-w-full truncate text-xs font-medium text-neutral-300">
               {activePlaylist ? activePlaylist.name : `Your ${source}`}
             </h2>
-            <span className="text-[11px] text-neutral-600">
+            <span className="min-w-0 shrink truncate text-[11px] text-neutral-600">
               {silence.playable.toLocaleString()} clips
               {silence.recordOnly > 0 && (
                 <span title="Tracks with no YouTube clip, listed from the Discogs tracklist — play them from the record">
@@ -2447,7 +2494,7 @@ export function CrateApp({
               )}
             </span>
             {activePlaylist && isCollabPlaylist(activePlaylist) && (
-              <span className="truncate text-[11px] text-accent-alt/90">
+              <span className="min-w-0 truncate text-[11px] text-accent-alt/90">
                 {collabLine(activePlaylist, username)}
               </span>
             )}
@@ -2460,7 +2507,7 @@ export function CrateApp({
                     ? "People on this playlist, and the join link"
                     : "Build this set with other people"
                 }
-                className={`ml-auto flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px] font-medium ${
+                className={`ml-auto flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1.5 text-[11px] font-medium ${
                   isCollabPlaylist(activePlaylist)
                     ? "border-accent-alt/60 text-accent-alt"
                     : "border-ink-700 text-neutral-200 hover:border-accent-alt/50 hover:text-accent-alt"
@@ -2478,7 +2525,7 @@ export function CrateApp({
                 type="button"
                 onClick={() => setChatFor(activePlaylist.id)}
                 title="Talk through the set with everyone on it"
-                className="relative flex items-center gap-1.5 whitespace-nowrap rounded-full border border-accent-alt/60 px-3 py-1.5 text-[11px] font-medium text-accent-alt hover:bg-accent-alt/10"
+                className="relative flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-accent-alt/60 px-3 py-1.5 text-[11px] font-medium text-accent-alt hover:bg-accent-alt/10"
               >
                 <ChatIcon className="h-3 w-3" />
                 Chat
@@ -2492,7 +2539,7 @@ export function CrateApp({
                 type="button"
                 onClick={() => setPullListFor(activePlaylist.id)}
                 title="The whole running order at once — BPMs and every transition — and a way to tick records off as you pull them"
-                className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-ink-700 px-3 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
+                className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-ink-700 px-3 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
               >
                 <ListIcon className="h-3 w-3" />
                 Whole list
@@ -2502,7 +2549,7 @@ export function CrateApp({
               <button
                 type="button"
                 onClick={() => setActivePlaylistId(null)}
-                className="whitespace-nowrap text-[11px] text-neutral-500 hover:text-neutral-200"
+                className="shrink-0 whitespace-nowrap text-[11px] text-neutral-500 hover:text-neutral-200"
               >
                 Back to crate
               </button>
@@ -2703,6 +2750,24 @@ export function CrateApp({
           detour={detour ? { label: detour.label } : null}
           onBackToShuffle={endDetour}
           digging={Boolean(digTarget)}
+          idle={{
+            shuffleLabel: activePlaylist
+              ? "Shuffle this playlist"
+              : activeFilterCount > 0 || filters.query.trim()
+                ? `Shuffle these ${visible.length.toLocaleString()}`
+                : `Shuffle your ${source}`,
+            onShuffle: shuffleNow,
+            recent: orderByRecent(playlists, recentPlaylists)
+              .filter((p) => p.id !== activePlaylistId)
+              .slice(0, 4)
+              .map((p) => ({
+                id: p.id,
+                name: p.name,
+                tracks: p.items.length,
+                shared: isCollabPlaylist(p),
+              })),
+            onOpenPlaylist: (id) => setActivePlaylistId(id),
+          }}
         />
       </div>
 

@@ -140,9 +140,11 @@ export function startSync(options: {
           total: summaries.length,
           status: "done",
           message: "Up to date.",
+          fresh: 0,
         });
         return;
       }
+      const fresh = missing.length;
 
       let done = alreadyDone;
       let pending = missing;
@@ -203,6 +205,7 @@ export function startSync(options: {
             total: summaries.length,
             status: "detailing",
             message: `Loading tracks — ${done} of ${summaries.length}`,
+            fresh,
           });
         } catch (error) {
           const err = error as { code?: string; retryAfter?: number };
@@ -214,6 +217,7 @@ export function startSync(options: {
               total: summaries.length,
               status: "paused",
               message: `Discogs rate limit — resuming in ${wait}s`,
+              fresh,
             });
             await sleep(wait * 1_000);
             pending = [...batch, ...pending]; // retry this batch first
@@ -249,6 +253,7 @@ export function startSync(options: {
           total: summaries.length,
           status: "done",
           message: "Crate ready.",
+          fresh,
         });
       }
     } catch (error) {

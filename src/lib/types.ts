@@ -389,4 +389,11 @@ export interface SyncState {
   status: "idle" | "listing" | "detailing" | "done" | "error" | "paused";
   message?: string;
   updatedAt: number;
+  /**
+   * Releases this run is fetching that weren't cached before — new since the
+   * last sync, or everything on a first one. Set once the listing is read.
+   * Decides between a thin progress line and the full banner, and what the
+   * "N new records" message says when the run is done.
+   */
+  fresh?: number;
 }

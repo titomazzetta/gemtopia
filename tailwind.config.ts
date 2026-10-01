@@ -39,12 +39,18 @@ export default {
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
       keyframes: {
+        // The thin sync line's "working on it" sweep (SyncBanner).
+        "sync-sweep": {
+          from: { transform: "translateX(-100%)" },
+          to: { transform: "translateX(300%)" },
+        },
         "spin-record": {
           from: { transform: "rotate(0deg)" },
           to: { transform: "rotate(360deg)" },
         },
       },
       animation: {
+        "sync-sweep": "sync-sweep 1.4s ease-in-out infinite",
         // Slower than a real 33rpm platter. At true speed the label fleck
         // strobes against a 60Hz refresh and reads as juddering rather than
         // turning, which looks broken — the opposite of the point.
