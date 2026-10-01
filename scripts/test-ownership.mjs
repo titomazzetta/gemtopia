@@ -15,6 +15,7 @@ import {
   alreadyCollected,
   badgeFor,
   confirmAddMessage,
+  wantlistHeart,
 } from "../src/client/ownership.ts";
 
 let ran = 0;
@@ -207,5 +208,39 @@ check("every outcome is phrased as a question", () => {
     );
   }
 });
+
+/* ---- wantlistHeart: the heart on the player ---- */
+
+check("a record you own gets no heart", () => {
+  assert.equal(wantlistHeart({ inCollection: true, onWantlist: false }), null);
+  // Owning beats wanting: Discogs never removes the want when you buy it.
+  assert.equal(wantlistHeart({ inCollection: true, onWantlist: true }), null);
+});
+
+check("a record you don't own gets an empty heart", () => {
+  assert.deepEqual(wantlistHeart({ inCollection: false, onWantlist: false }), { wanted: false });
+});
+
+check("a record already on the wantlist gets a filled heart, so the same tap takes it off", () => {
+  assert.deepEqual(wantlistHeart({ inCollection: false, onWantlist: true }), { wanted: true });
+});
+
+check("an unsynced collection still offers the heart rather than hiding it", () => {
+  assert.deepEqual(wantlistHeart({ inCollection: null, onWantlist: null }), { wanted: false });
+  const sets = { collection: new Set(), wantlist: new Set([7]) };
+  assert.deepEqual(wantlistHeart(ownershipFrom(sets, 7)), { wanted: true });
+});
+
+check("a dig preview from a synced crate is offered", () => {
+  const sets = { collection: new Set([1, 2, 3]), wantlist: new Set() };
+  assert.deepEqual(wantlistHeart(ownershipFrom(sets, 99)), { wanted: false });
+  assert.equal(wantlistHeart(ownershipFrom(sets, 2)), null);
+});
+
+// The early exit above only covers the checks before it.
+if (failed > 0) {
+  console.error(`\n${failed} of ${ran} ownership tests failed.`);
+  process.exit(1);
+}
 
 console.log(`All ${ran} ownership tests passed.`);

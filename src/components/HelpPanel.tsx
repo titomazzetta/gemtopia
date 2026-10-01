@@ -87,7 +87,8 @@ export const HELP: ReadonlyArray<Section> = [
       <>
         {fine ? <>{k("D")} or </> : null}<b>Dig from this</b> on what&apos;s playing: what else you own
         that connects to it, then beyond your crate — other versions, the remixer, the label, the era.
-        Heart a record to put it on your Discogs wantlist.
+        Heart a record to put it on your Discogs wantlist — on its card, or on the player while
+        it&apos;s playing{fine ? <> ({k("W")})</> : null}, for anything you don&apos;t own.
       </>
     ),
   },
