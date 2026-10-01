@@ -657,6 +657,11 @@ playlists too.
   leave a small note in the chat — "komron added *Shiva* — Kerri Chandler ·
   1998 · 124 BPM · 6:12" — and tapping the record's name plays it. A big
   import is one line, not a flood; reorders say nothing.
+- **One BPM per record, for everyone on the set.** A tempo anyone on the
+  playlist logs becomes the set's BPM — so your partner sees your readings for
+  records they don't own, and set prep agrees on both screens. The latest
+  reading wins, but an auto-detect never replaces somebody's tap. It stays with
+  the playlist even if the person who logged it leaves.
 - **Who added what, on every row.** On a shared playlist each record carries a
   small amber tag with who put it in ("you" for yours), and on a phone the row
   shows the year, BPM and length that don't fit as columns.
@@ -849,7 +854,7 @@ push, no force-push, nothing merges red.
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
 `npm audit --audit-level=high`, 665 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 145 API tests against a running server. CodeQL
+reached the client bundle, then 153 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -1069,7 +1074,7 @@ npm run test:manifest   # 8
 npm run test:collab     # 20
 npm run test:collab-view # 7
 npm run test:chat       # 38 — 665 offline in all
-npm run test:api        # 145 checks, needs a running server + Postgres
+npm run test:api        # 153 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci

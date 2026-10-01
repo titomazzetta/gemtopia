@@ -104,7 +104,7 @@ Server logs record error context only, never tokens.
 | Referrer leakage | `Referrer-Policy: no-referrer`; artwork `<img>` also sets `referrerpolicy="no-referrer"`. |
 | Cross-origin reads of API responses | `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store` on every `/api/*` response. |
 | Secrets in the client bundle | No variable is prefixed `NEXT_PUBLIC_`. CI greps `.next/static` for the build-time secret and fails if it appears. |
-| Listening habits leaking between users | The BPM catalogue is keyed `(user_id, clip_key)`. Covered by "another user's catalogue is separate". |
+| Listening habits leaking between users | The BPM catalogue is keyed `(user_id, clip_key)`. Covered by "another user's catalogue is separate". The one deliberate exception: a reading for a record on a playlist you share is copied to that set, for its members only (§5). |
 
 ### Denial of service
 
@@ -212,8 +212,17 @@ one playlist*, never what anyone can read about anyone else.
   limited per user.
 - **What it does not do.** Anyone holding a live link who has an account can
   join — that is what a link is. The owner sees who joined, can remove them,
-  and can kill the link. Collaborators' BPM catalogues stay their own, so a
-  record measured by one person shows no BPM to another until they measure it.
+  and can kill the link.
+- **The set's BPM is shared; the catalogue isn't.** Each person's BPM
+  catalogue stays theirs. What is shared is one reading per record *on a
+  playlist you are on*: when you log a BPM, it is copied onto the matching
+  rows of the playlists you can edit (`repo.shareBpmWithSets`, `CAN_EDIT` in
+  the statement), so everyone on that set sees the same number whether or not
+  they own the record. Nothing about records outside the set, and nothing to
+  anyone outside it. Between people the latest reading wins, except an
+  auto-detect never replaces someone's tap or typed value; taking your reading
+  back takes it off the sets, not anyone else's. It stays with the playlist if
+  you leave — it's part of the set you built together.
 
 ### Chat on collaborative playlists
 
@@ -272,9 +281,9 @@ to other users, so it is treated as the most hostile input in the app.
   text message and a bounded object (≤ 2 KB) on a note. Titles and artists in
   notes come from people's earlier edits, so they go through the same
   normalisation as messages (`chat.cleanLabel`) and are drawn as text. A note
-  shares exactly one thing a collaborator would not otherwise see: the BPM the
-  person adding the record had measured — deliberately, since they are adding
-  it to a shared set. Notes do not count towards the posting limit.
+  carries the BPM the person adding the record had measured — the same
+  reading the set itself now shares (above). Notes do not count towards the
+  posting limit.
 - **Unread state stays in the browser.** The last-seen id is kept in
   `localStorage`, only to draw a dot; it is never sent or trusted.
 

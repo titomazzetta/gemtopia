@@ -394,6 +394,8 @@ interface ItemRow {
   release_title: string;
   year: number | null;
   added_by?: string | null;
+  bpm?: number | null;
+  bpm_by?: string | null;
 }
 
 /*
@@ -435,6 +437,8 @@ function toEntry(i: ItemRow): PlaylistItemRow {
     year: i.year,
     position: i.position,
     addedBy: i.added_by ?? null,
+    bpm: i.bpm ?? null,
+    bpmBy: i.bpm_by ?? null,
   };
 }
 
@@ -474,10 +478,12 @@ export async function listPlaylists(userId: string): Promise<Playlist[]> {
   const items = await query<ItemRow>(
     `SELECT i.playlist_id, i.position, i.clip_key, i.release_id, i.video_id,
             i.title, i.artist, i.release_title, i.year,
-            a.username_display AS added_by
+            a.username_display AS added_by,
+            i.bpm::float8 AS bpm, b.username_display AS bpm_by
        FROM playlist_items i
        JOIN playlists p ON p.id = i.playlist_id
        LEFT JOIN users a ON a.id = i.added_by
+       LEFT JOIN users b ON b.id = i.bpm_by
       WHERE ${CAN_EDIT("p", "$1")}
       ORDER BY i.playlist_id, i.position`,
     [userId],
@@ -509,9 +515,11 @@ export async function getPlaylist(
   const items = await query<ItemRow>(
     `SELECT i.playlist_id, i.position, i.clip_key, i.release_id, i.video_id,
             i.title, i.artist, i.release_title, i.year,
-            a.username_display AS added_by
+            a.username_display AS added_by,
+            i.bpm::float8 AS bpm, b.username_display AS bpm_by
        FROM playlist_items i
        LEFT JOIN users a ON a.id = i.added_by
+       LEFT JOIN users b ON b.id = i.bpm_by
       WHERE i.playlist_id = $1
       ORDER BY i.position`,
     [playlistId],
@@ -562,26 +570,38 @@ interface Queryable {
  * Bulk insert via `unnest`, so a 400-track playlist is one statement rather
  * than 400 round trips. Still fully parameterised.
  */
+interface SetBpm {
+  bpm: string | null;
+  source: string | null;
+  by: string | null;
+}
+
 async function insertItems(
   client: Queryable,
   playlistId: string,
   entries: PlaylistItemRow[],
   addedBy: Array<string | null>,
+  /** The set's BPM for each entry, carried across a rewrite; null for new. */
+  setBpm: Array<SetBpm | null> = entries.map(() => null),
 ): Promise<void> {
   if (entries.length === 0) return;
 
   await client.query(
     `INSERT INTO playlist_items
         (playlist_id, position, clip_key, release_id, video_id,
-         title, artist, release_title, year, added_by)
+         title, artist, release_title, year, added_by,
+         bpm, bpm_source, bpm_by)
      SELECT $1,
             t.position, t.clip_key, t.release_id, t.video_id,
-            t.title, t.artist, t.release_title, t.year, t.added_by
+            t.title, t.artist, t.release_title, t.year, t.added_by,
+            t.bpm, t.bpm_source, t.bpm_by
        FROM unnest(
               $2::int[], $3::text[], $4::bigint[], $5::text[],
-              $6::text[], $7::text[], $8::text[], $9::int[], $10::uuid[]
+              $6::text[], $7::text[], $8::text[], $9::int[], $10::uuid[],
+              $11::numeric[], $12::text[], $13::uuid[]
             ) AS t(position, clip_key, release_id, video_id,
-                   title, artist, release_title, year, added_by)`,
+                   title, artist, release_title, year, added_by,
+                   bpm, bpm_source, bpm_by)`,
     [
       playlistId,
       entries.map((_, i) => i),
@@ -593,7 +613,25 @@ async function insertItems(
       entries.map((e) => (e.releaseTitle ?? "").slice(0, 400)),
       entries.map((e) => e.year),
       addedBy,
+      setBpm.map((b) => b?.bpm ?? null),
+      setBpm.map((b) => b?.source ?? null),
+      setBpm.map((b) => b?.by ?? null),
     ],
+  );
+
+  // New records bring the BPM the person who added them has logged, so the
+  // set knows the tempo the moment it's in — for everyone on it.
+  await client.query(
+    `UPDATE playlist_items i
+        SET bpm = tm.bpm, bpm_source = tm.bpm_source, bpm_by = tm.user_id
+       FROM track_meta tm
+      WHERE i.playlist_id = $1
+        AND i.bpm IS NULL
+        AND i.added_by IS NOT NULL
+        AND tm.user_id = i.added_by
+        AND tm.clip_key = i.clip_key
+        AND tm.bpm IS NOT NULL`,
+    [playlistId],
   );
 }
 
@@ -660,9 +698,13 @@ export async function replaceItems(
       title: string;
       artist: string;
       year: number | null;
+      bpm: string | null;
+      bpm_source: string | null;
+      bpm_by: string | null;
     }>(
       `SELECT i.clip_key, i.added_by, u.username_display AS added_by_name,
-              i.title, i.artist, i.year
+              i.title, i.artist, i.year,
+              i.bpm::text AS bpm, i.bpm_source, i.bpm_by
          FROM playlist_items i
          LEFT JOIN users u ON u.id = i.added_by
         WHERE i.playlist_id = $1 ORDER BY i.position`,
@@ -681,7 +723,20 @@ export async function replaceItems(
     await client.query(`DELETE FROM playlist_items WHERE playlist_id = $1`, [
       playlistId,
     ]);
-    await insertItems(client, playlistId, entries, addedBy);
+    // The set's BPMs survive the rewrite, matched by record.
+    const setBpmByKey = new Map<string, SetBpm>();
+    for (const r of previous.rows) {
+      if (r.bpm !== null && !setBpmByKey.has(r.clip_key)) {
+        setBpmByKey.set(r.clip_key, { bpm: r.bpm, source: r.bpm_source, by: r.bpm_by });
+      }
+    }
+    await insertItems(
+      client,
+      playlistId,
+      entries,
+      addedBy,
+      entries.map((e) => setBpmByKey.get(e.clipKey) ?? null),
+    );
     await client.query(
       `UPDATE playlists SET updated_at = now(), version = version + 1 WHERE id = $1`,
       [playlistId],
@@ -1265,6 +1320,14 @@ export async function deleteTrackMeta(
       RETURNING clip_key`,
     [userId, clipKey],
   );
+  // A reading you take back comes off the sets you gave it to. Someone
+  // else's reading of the same record stays where it is.
+  await query(
+    `UPDATE playlist_items
+        SET bpm = NULL, bpm_source = NULL, bpm_by = NULL
+      WHERE clip_key = $2 AND bpm_by = $1`,
+    [userId, clipKey],
+  );
   return rows.length > 0;
 }
 
@@ -1345,7 +1408,40 @@ export async function upsertTrackMeta(
     ],
   );
 
+  await shareBpmWithSets(userId, entries.filter((e) => e.bpm !== null).map((e) => e.clipKey));
   return rows.length;
+}
+
+/**
+ * Copy what you just logged onto every playlist you're on that holds those
+ * records, as that set's BPM — so a back-to-back partner sees it, and keeps
+ * seeing it whether or not they own the record or you later leave.
+ *
+ * Reads the catalogue row as it stands after the upsert (which has already
+ * applied tap-beats-auto for you), then the same rule between people: the
+ * latest reading wins, except that an auto-detected one never replaces
+ * someone's tap or typed value. Your own earlier reading is always yours to
+ * replace. Only playlists you can edit (CAN_EDIT); nobody else's.
+ */
+async function shareBpmWithSets(userId: string, clipKeys: string[]): Promise<void> {
+  if (clipKeys.length === 0) return;
+  await query(
+    `UPDATE playlist_items i
+        SET bpm = tm.bpm, bpm_source = tm.bpm_source, bpm_by = $1
+       FROM track_meta tm, playlists p
+      WHERE tm.user_id = $1
+        AND tm.clip_key = ANY($2::text[])
+        AND tm.bpm IS NOT NULL
+        AND i.clip_key = tm.clip_key
+        AND p.id = i.playlist_id
+        AND ${CAN_EDIT("p", "$1")}
+        AND (i.bpm IS NULL
+             OR i.bpm_by IS NOT DISTINCT FROM $1
+             OR i.bpm_source NOT IN ('tap', 'manual')
+             OR tm.bpm_source IN ('tap', 'manual'))
+        AND (i.bpm IS DISTINCT FROM tm.bpm OR i.bpm_by IS DISTINCT FROM $1)`,
+    [userId, clipKeys],
+  );
 }
 
 /* ------------------------------------------------------------------ */
