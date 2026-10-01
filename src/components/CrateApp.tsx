@@ -1893,6 +1893,30 @@ export function CrateApp({
    * busy" and send an add and then a remove.
    */
   const finePointer = useFinePointer();
+
+  /*
+   * The account menu is a <details>, which on its own only closes when its
+   * summary is pressed again — a tap anywhere else, or Esc, left it hanging
+   * open over the header. Close it the way every other menu closes.
+   */
+  const accountMenuRef = useRef<HTMLDetailsElement | null>(null);
+  useEffect(() => {
+    const close = (event: PointerEvent | KeyboardEvent) => {
+      const menu = accountMenuRef.current;
+      if (!menu?.open) return;
+      const outside =
+        event instanceof KeyboardEvent
+          ? event.key === "Escape"
+          : !menu.contains(event.target as Node);
+      if (outside) menu.open = false;
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, []);
   const [wantBusy, setWantBusy] = useState(false);
   const wantBusyRef = useRef(false);
   const toggleWant = useCallback(
@@ -2059,6 +2083,9 @@ export function CrateApp({
         case "Escape":
           setPicker(null);
           setShowKeys(false);
+          // Esc also steps out of Dig — but only when nothing is open on top
+          // of it, so closing the chat or a sheet doesn't close Dig as well.
+          if (!document.querySelector('[aria-modal="true"]')) setDigTarget(null);
           break;
         default:
           break;
@@ -2296,7 +2323,7 @@ export function CrateApp({
           <Refresh className={`h-3.5 w-3.5 ${syncing ? "animate-spin" : ""}`} />
         </button>
 
-        <details className="relative">
+        <details ref={accountMenuRef} className="relative">
           <summary className="cursor-pointer list-none rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-400 hover:text-neutral-100">
             {username}
           </summary>
@@ -3340,6 +3367,15 @@ export function CrateApp({
           role="dialog"
           aria-modal="true"
           aria-label="Add to playlist"
+          /*
+            Esc closes it even from inside the name field. The window-level
+            shortcut handler ignores keys typed into inputs (it only blurs),
+            and on a desktop that field has focus as soon as this opens, so
+            Esc used to take two presses.
+          */
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setPicker(null);
+          }}
           onClick={(e) => e.target === e.currentTarget && setPicker(null)}
         >
           <div className="w-full rounded-t-2xl border-t border-ink-700 bg-ink-900 p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:max-w-sm sm:rounded-lg sm:border sm:pb-4">
