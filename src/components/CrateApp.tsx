@@ -115,9 +115,9 @@ import { PlaylistViewBar } from "./PlaylistViewBar";
 import { PullList } from "./PullList";
 import { InvitePanel } from "./InvitePanel";
 import { CollabPanel } from "./CollabPanel";
-import { ChatPanel, readSeen } from "./ChatPanel";
+import { ChatPanel } from "./ChatPanel";
 import { isCollabPlaylist, collabLine, canRemoveEntry } from "@/client/collabView";
-import { hasUnread } from "@/client/chatView";
+import { totalUnread, unreadBadge } from "@/client/chatView";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
 import { PlaylistPanel } from "./PlaylistPanel";
@@ -133,7 +133,17 @@ import { DiscogsSearch } from "./DiscogsSearch";
 import { RecordOnlyCard } from "./RecordOnlyCard";
 import { isTrackOnlyKey } from "@/lib/clipKey";
 import type { SearchHit } from "@/lib/discogs";
-import { ChatIcon, Compass, ListIcon, Metronome, Refresh, Search, Shuffle, Users } from "./Icons";
+import {
+  ChatIcon,
+  Compass,
+  ListIcon,
+  Metronome,
+  Refresh,
+  Search,
+  Shuffle,
+  UnreadBadge,
+  Users,
+} from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights" | "search";
 
@@ -235,8 +245,6 @@ export function CrateApp({
   const [chatFor, setChatFor] = useState<string | null>(null);
   /** A record-only track that was tapped: details and a tap pad. */
   const [recordCard, setRecordCard] = useState<Playable | null>(null);
-  // Bumped when the chat marks messages seen, so the unread dot re-reads.
-  const [chatSeenTick, setChatSeenTick] = useState(0);
   /*
    * How the open playlist is being *looked at* — never how it is stored.
    * Remembered against the playlist it was chosen for, so opening any other
@@ -1355,19 +1363,53 @@ export function CrateApp({
   const collabOpen = Boolean(activePlaylist && isCollabPlaylist(activePlaylist));
 
   /*
-   * A dot on the chat button when someone has said something since you last
-   * looked. The newest id comes with the playlist (refreshed every 20s above);
-   * what you've seen is kept in this browser. chatSeenTick re-reads it after
-   * the chat marks messages seen.
+   * Unread chat, from anyone else, counted by the server against how far you
+   * have read on any device (repo.markChatRead), and refreshed with the
+   * playlists — every 20s with a shared one open, every minute otherwise.
+   * Shown as a count on the chat button, on each playlist in the list, and
+   * by the logo, so a message lands somewhere you'll see it even when that
+   * playlist isn't open.
    */
-  const chatUnread = useMemo(
-    () =>
-      chatSeenTick >= 0 &&
-      Boolean(activePlaylist) &&
-      collabOpen &&
-      hasUnread(activePlaylist?.lastMessageId ?? null, readSeen(activePlaylist?.id ?? "")),
-    [activePlaylist, collabOpen, chatSeenTick],
+  const unreadChatIds = useMemo(
+    () => new Set(playlists.filter((p) => p.unread > 0).map((p) => p.id)),
+    [playlists],
   );
+  const unreadTotal = useMemo(() => totalUnread(playlists), [playlists]);
+
+  // The tab title carries the count too: "(3) Gemtopia".
+  useEffect(() => {
+    document.title = unreadTotal > 0 ? `(${unreadBadge(unreadTotal)}) Gemtopia` : "Gemtopia";
+  }, [unreadTotal]);
+
+  /** Open the shared playlist with unread messages, and its chat. */
+  const openUnreadChat = useCallback(() => {
+    const id = playlists.find((p) => unreadChatIds.has(p.id))?.id;
+    if (!id) return;
+    setActivePlaylistId(id);
+    setChatFor(id);
+  }, [playlists, unreadChatIds]);
+
+  const chatUnread = activePlaylist && collabOpen ? activePlaylist.unread : 0;
+  /*
+   * With a shared playlist open, every 20 seconds (above). With shared
+   * playlists but none open, every minute — enough to light the chat dot by
+   * the logo without the cost of watching closely.
+   */
+  const watchCollab = useMemo(() => playlists.some(isCollabPlaylist), [playlists]);
+  useEffect(() => {
+    if (collabOpen || !watchCollab) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        playlistsApi.list().then(setPlaylists).catch(() => {});
+      }
+    };
+    const timer = window.setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [collabOpen, watchCollab]);
   useEffect(() => {
     if (!collabOpen) return;
     const refresh = () => {
@@ -2050,6 +2092,30 @@ export function CrateApp({
         <span className="hidden text-sm font-semibold tracking-tight text-neutral-100 sm:block">
           Gemtopia
         </span>
+        {/*
+          Something new in a shared playlist's chat, from someone else. One tap
+          opens that playlist and its chat. Only there when there's news.
+        */}
+        {unreadChatIds.size > 0 && (
+          <button
+            type="button"
+            onClick={openUnreadChat}
+            title={
+              unreadChatIds.size === 1
+                ? `${unreadBadge(unreadTotal)} new in a shared playlist's chat`
+                : `${unreadBadge(unreadTotal)} new across ${unreadChatIds.size} shared playlists`
+            }
+            aria-label={
+              unreadChatIds.size === 1
+                ? `${unreadBadge(unreadTotal)} unread in a shared playlist's chat — open it`
+                : `${unreadBadge(unreadTotal)} unread across ${unreadChatIds.size} shared playlists — open the first`
+            }
+            className="flex shrink-0 items-center gap-1 rounded-full border border-accent-alt/50 bg-accent-alt/10 py-0.5 pl-2 pr-0.5 text-accent-alt"
+          >
+            <ChatIcon className="h-3.5 w-3.5" />
+            <UnreadBadge count={unreadTotal} />
+          </button>
+        )}
         {/* "How it works": `?` on a keyboard, this button everywhere else — phones too. */}
         <button
           type="button"
@@ -2241,6 +2307,12 @@ export function CrateApp({
                 {value === "playlists" && playlists.length > 0 && (
                   <span className="ml-1 text-neutral-600">{playlists.length}</span>
                 )}
+                {value === "playlists" && unreadChatIds.size > 0 && (
+                  <span
+                    className="ml-1 inline-block h-1.5 w-1.5 -translate-y-0.5 rounded-full bg-accent"
+                    aria-label="new messages"
+                  />
+                )}
               </button>
             ))}
           </div>
@@ -2323,7 +2395,7 @@ export function CrateApp({
                 <button
                   type="button"
                   onClick={() => setSheet("source")}
-                  className="flex min-w-0 items-center gap-1 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-200"
+                  className="relative flex min-w-0 items-center gap-1 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-neutral-200"
                 >
                   <span className="truncate">
                     {activePlaylist ? activePlaylist.name : `Your ${source}`}
@@ -2331,6 +2403,13 @@ export function CrateApp({
                   <span aria-hidden="true" className="text-[9px] text-neutral-500">
                     ▼
                   </span>
+                  {/* Another shared playlist has news; the sheet shows which. */}
+                  {[...unreadChatIds].some((id) => id !== activePlaylist?.id) && (
+                    <span
+                      className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-accent ring-2 ring-ink-950"
+                      aria-label="new messages in another playlist"
+                    />
+                  )}
                 </button>
 
                 {!activePlaylist && (
@@ -2401,13 +2480,14 @@ export function CrateApp({
                       <button
                         type="button"
                         onClick={() => setChatFor(activePlaylist.id)}
-                        aria-label={chatUnread ? "Chat — new messages" : "Chat"}
+                        aria-label={chatUnread > 0 ? `Chat — ${unreadBadge(chatUnread)} unread` : "Chat"}
                         className="relative flex shrink-0 items-center rounded-md border border-accent-alt/60 bg-accent-alt/10 px-2 py-1.5 text-xs text-accent-alt"
                       >
                         <ChatIcon className="h-3.5 w-3.5" />
-                        {chatUnread && (
-                          <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-accent ring-2 ring-ink-950" aria-hidden="true" />
-                        )}
+                        <UnreadBadge
+                          count={chatUnread}
+                          className="absolute -right-2 -top-2 ring-2 ring-ink-950"
+                        />
                       </button>
                     )}
                   </>
@@ -2555,9 +2635,7 @@ export function CrateApp({
               >
                 <ChatIcon className="h-3 w-3" />
                 Chat
-                {chatUnread && (
-                  <span className="h-2 w-2 rounded-full bg-accent" aria-label="new messages" />
-                )}
+                <UnreadBadge count={chatUnread} />
               </button>
             )}
             {activePlaylist && (
@@ -2848,7 +2926,12 @@ export function CrateApp({
             setChatFor(null);
             setCollabFor(id);
           }}
-          onSeen={() => setChatSeenTick((n) => n + 1)}
+          onSeen={() => {
+            const seen = chatFor;
+            setPlaylists((previous) =>
+              previous.map((p) => (p.id === seen && p.unread > 0 ? { ...p, unread: 0 } : p)),
+            );
+          }}
           lookup={(clipKey) => {
             if (activePlaylist?.id !== chatFor) return null;
             const item = playlistItems.find((p) => p.key === clipKey);

@@ -197,3 +197,17 @@ export const SendIcon = ({ className = base }: Props) => (
     <path d="M22 2 11 13" />
   </svg>
 );
+
+/**
+ * A messenger-style unread count: a small green pill with the number.
+ * Renders nothing at zero.
+ */
+export const UnreadBadge = ({ count, className = "" }: { count: number; className?: string }) =>
+  count > 0 ? (
+    <span
+      className={`inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[10px] font-bold leading-none tabular-nums text-ink-950 ${className}`}
+      aria-label={`${count >= 99 ? "99+" : count} unread`}
+    >
+      {count >= 99 ? "99+" : count}
+    </span>
+  ) : null;

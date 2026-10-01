@@ -178,6 +178,13 @@ export const chatApi = {
       `/api/playlists/${playlistId}/messages/${encodeURIComponent(messageId)}`,
       { method: "DELETE" },
     ),
+
+  /** Read up to this message — clears the unread badge on every device. */
+  markRead: (playlistId: string, readUpTo: string) =>
+    request<{ ok: true }>(`/api/playlists/${playlistId}/messages`, {
+      method: "PUT",
+      body: JSON.stringify({ readUpTo }),
+    }),
 };
 
 export const trackMetaApi = {

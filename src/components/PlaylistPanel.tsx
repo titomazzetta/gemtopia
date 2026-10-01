@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import type { Playlist } from "@/lib/types";
 import { isClipDrag, readClipDrag } from "@/client/clipDrag";
 import { isCollabPlaylist, collabLine } from "@/client/collabView";
-import { Link, Lock, Play, Plus, Shuffle, Trash, Users } from "./Icons";
+import { Link, Lock, Play, Plus, Shuffle, Trash, UnreadBadge, Users } from "./Icons";
 
 export function PlaylistPanel({
   playlists,
@@ -155,12 +155,16 @@ export function PlaylistPanel({
                         }}
                         className="min-w-0 flex-1 text-left"
                       >
-                        <span
-                          className={`block truncate text-xs ${
-                            active ? "font-semibold text-accent" : "text-neutral-200"
-                          }`}
-                        >
-                          {playlist.name}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span
+                            className={`min-w-0 truncate text-xs ${
+                              active ? "font-semibold text-accent" : "text-neutral-200"
+                            }`}
+                          >
+                            {playlist.name}
+                          </span>
+                          {/* New in its chat from someone else, like a messenger tile. */}
+                          <UnreadBadge count={playlist.unread} className="shrink-0" />
                         </span>
                         <span className="flex items-center gap-1 text-[10px] text-neutral-600">
                           {collab ? (

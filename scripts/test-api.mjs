@@ -1535,6 +1535,38 @@ console.log("\ncollaborative playlists");
     assert.equal(res.status, 200);
   });
 
+  await check("unread counts other people's messages since you last read, on any device", async () => {
+    const latest = (await owner.call(chat)).body.messages[0].id;
+    const mark = await owner.call(chat, { method: "PUT", body: { readUpTo: latest } });
+    assert.equal(mark.status, 200);
+    assert.equal((await find(owner)).unread, 0);
+    await friend.call(chat, { method: "POST", body: { body: "New one for you" } });
+    assert.equal((await find(owner)).unread, 1);
+    await owner.call(chat, { method: "POST", body: { body: "My own doesn't count" } });
+    assert.equal((await find(owner)).unread, 1);
+    assert.equal((await find(friend)).unread > 0, true, "the owner's reply is unread for the friend");
+  });
+
+  await check("reading can't be pushed past the newest message", async () => {
+    await owner.call(chat, { method: "PUT", body: { readUpTo: "999999999999" } });
+    assert.equal((await find(owner)).unread, 0);
+    // `third`, not `friend`: friend has used up the chat's posting allowance
+    // for this half-minute in the checks above.
+    assert.equal((await third.call(chat, { method: "POST", body: { body: "Still counts" } })).status, 201);
+    assert.equal((await find(owner)).unread, 1, "a far-future mark didn't swallow the next message");
+  });
+
+  await check("marking read is yours, on playlists you're on, and well-formed", async () => {
+    const latest = (await owner.call(chat)).body.messages[0].id;
+    assert.equal((await stranger.call(chat, { method: "PUT", body: { readUpTo: latest } })).status, 404);
+    assert.equal((await owner.call(chat, { method: "PUT", body: { readUpTo: "abc" } })).status, 400);
+    assert.equal((await owner.call(chat, { method: "PUT", body: { readUpTo: latest, user: "x" } })).status, 400);
+    assert.equal(
+      (await owner.call(chat, { method: "PUT", body: { readUpTo: latest }, csrfToken: "wrong" })).status,
+      403,
+    );
+  });
+
   await check("strangers still cannot see it at all", async () => {
     assert.equal((await stranger.call(`/api/playlists/${playlistId}`)).status, 404);
     assert.equal(await find(stranger), null);

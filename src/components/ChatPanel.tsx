@@ -20,29 +20,6 @@ const POLL_MS = 4_000;
 /** The counter appears once this few characters are left. */
 const COUNTER_FROM = 100;
 
-const SEEN_KEY = (playlistId: string) => `gt_chat_seen:${playlistId}`;
-
-/**
- * The last message id this browser has shown for a playlist's chat. Kept in
- * this browser only, for the unread dot; never trusted for anything else.
- */
-export function readSeen(playlistId: string): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(SEEN_KEY(playlistId));
-  } catch {
-    return null;
-  }
-}
-
-function writeSeen(playlistId: string, id: string): void {
-  try {
-    window.localStorage.setItem(SEEN_KEY(playlistId), id);
-  } catch {
-    /* private mode, storage off: the dot just stays */
-  }
-}
-
 function time(at: number): string {
   return new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
@@ -74,7 +51,7 @@ export function ChatPanel({
   onClose: () => void;
   /** Open the people on this playlist (join link, who's in, leave). */
   onPeople: () => void;
-  /** The newest message has been seen; the unread dot can go. */
+  /** The newest message has been seen; the unread badge can go. */
   onSeen: () => void;
   /** This person no longer has the playlist (removed, or it was deleted). */
   onGone: () => void;
@@ -156,12 +133,15 @@ export function ChatPanel({
     };
   }, [refresh]);
 
-  // The newest message on screen has been seen.
+  // The newest message on screen has been seen: say so to the server, so the
+  // unread badge clears on every device, not just this one.
   const newest = messages[messages.length - 1]?.id ?? null;
   useEffect(() => {
     if (!newest) return;
-    writeSeen(playlist.id, newest);
     callbacks.current.onSeen();
+    chatApi.markRead(playlist.id, newest).catch(() => {
+      /* the next open marks it again */
+    });
   }, [newest, playlist.id]);
 
   // Stay pinned to the bottom as messages arrive, unless you've scrolled up

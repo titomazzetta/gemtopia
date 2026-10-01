@@ -505,6 +505,19 @@ UPDATE playlist_items i
    AND tm.bpm IS NOT NULL
    AND tm.user_id = COALESCE(i.added_by, p.user_id);
 
+-- How far each person has read each shared playlist's chat, so the unread
+-- count is the same on their phone and their laptop. One row per person per
+-- playlist, moved forward only (GREATEST), never past the newest message.
+-- Goes with the playlist; a collaborator's row goes when they leave or are
+-- removed (repo.removeCollaborator).
+CREATE TABLE IF NOT EXISTS playlist_reads (
+  playlist_id   UUID NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  last_read_id  BIGINT NOT NULL DEFAULT 0 CHECK (last_read_id >= 0),
+  read_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (playlist_id, user_id)
+);
+
 -- ---------------------------------------------------------------------------
 -- Record-only tracks
 --
