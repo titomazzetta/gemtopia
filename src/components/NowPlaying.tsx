@@ -24,6 +24,8 @@ import {
 } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import { WantButton, type WantHeart } from "./WantButton";
+import { writeClipDrag } from "@/client/clipDrag";
+import { useFinePointer } from "@/client/useFinePointer";
 
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -395,6 +397,10 @@ export function NowPlaying({
   };
 }) {
   const progress = api.duration > 0 ? (api.currentTime / api.duration) * 100 : 0;
+  // The track that's playing can be picked up and dropped on a playlist, the
+  // same as any row in the crate. Desktop only, like every other drag here.
+  const finePointer = useFinePointer();
+  const canDrag = finePointer && current !== null;
 
   const onScrub = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -482,8 +488,22 @@ export function NowPlaying({
         )}
       </div>
 
-      <div className="hidden flex-1 flex-col gap-3 p-4 lg:flex">
-        <div className="min-h-[52px]">
+      {/*
+        The controls scroll inside the column; the video above them doesn't
+        move. Without min-h-0 + overflow the column's 940px of content pushed
+        the whole page taller than a laptop screen (1027px at 1280x800 and
+        1440x900), so reaching "Add to playlist" scrolled everything, header
+        included, and left a blank band under the crate.
+      */}
+      <div className="hidden min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4 lg:flex">
+        <div
+          className={`min-h-[52px] ${canDrag ? "cursor-grab active:cursor-grabbing" : ""}`}
+          draggable={canDrag}
+          onDragStart={(event) => {
+            if (!current || !writeClipDrag(event.dataTransfer, current.key)) event.preventDefault();
+          }}
+          title={canDrag ? "Drag onto a playlist to add it" : undefined}
+        >
           {current ? (
             <>
               <div className="flex items-start gap-2">
