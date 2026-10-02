@@ -56,8 +56,8 @@ export const HELP: ReadonlyArray<Section> = [
       <>
         {fine ? (
           <>
-            <b>Drag</b> any row onto a playlist in the sidebar, or press {k("A")} / the <b>+</b> to pick
-            one.
+            <b>Drag</b> any row, or the title of what&apos;s playing, onto a playlist in the sidebar, or
+            press {k("A")} / the <b>+</b> to pick one.
           </>
         ) : (
           <>
