@@ -148,7 +148,11 @@ export function PlaylistPanel({
                     ) : (
                       <button
                         type="button"
-                        onClick={() => onSelect(active ? null : playlist.id)}
+                        // Always opens it, even when it's already the active
+                        // one: you may be looking at Dig on top of it, and
+                        // pressing the set should bring it back, not close
+                        // it. "Back to crate" is the way out.
+                        onClick={() => onSelect(playlist.id)}
                         onDoubleClick={() => {
                           // Only the owner names the set.
                           if (owner) setEditingId(playlist.id);

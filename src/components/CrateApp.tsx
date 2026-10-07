@@ -1386,12 +1386,23 @@ export function CrateApp({
   }, [unreadTotal]);
 
   /** Open the shared playlist with unread messages, and its chat. */
+  /**
+   * Show a playlist — from anywhere. Picking one is a request to look at it,
+   * so whatever is covering the main column (Dig, an EP you were exploring)
+   * steps aside. Playback is left alone: a record you were previewing keeps
+   * playing, and Back to shuffle still knows where you were.
+   */
+  const openPlaylist = useCallback((id: string) => {
+    setActivePlaylistId(id);
+    setDigTarget(null);
+  }, []);
+
   const openUnreadChat = useCallback(() => {
     const id = playlists.find((p) => unreadChatIds.has(p.id))?.id;
     if (!id) return;
-    setActivePlaylistId(id);
+    openPlaylist(id);
     setChatFor(id);
-  }, [playlists, unreadChatIds]);
+  }, [playlists, unreadChatIds, openPlaylist]);
 
   const chatUnread = activePlaylist && collabOpen ? activePlaylist.unread : 0;
   /*
@@ -2428,7 +2439,7 @@ export function CrateApp({
               <PlaylistPanel
                 playlists={playlists}
                 activeId={activePlaylistId}
-                onSelect={setActivePlaylistId}
+                onSelect={(id) => (id === null ? setActivePlaylistId(null) : openPlaylist(id))}
                 onCreate={(name) => void createPlaylist(name)}
                 onDelete={(id) => void deletePlaylist(id)}
                 onRename={(id, name) => void renamePlaylist(id, name)}
@@ -2442,7 +2453,9 @@ export function CrateApp({
                 onDropClip={(playlistId, key) => {
                   // The key only ever looks up a record already on this
                   // device; an unknown one is ignored, never sent anywhere.
-                  const item = byKey.get(key);
+                  // What's playing can come from outside the crate (a friend's
+                  // record on a shared set), so the queue is checked too.
+                  const item = byKey.get(key) ?? queue.find((p) => p.key === key);
                   if (item) void addToPlaylist(playlistId, item);
                 }}
               />
@@ -2964,7 +2977,7 @@ export function CrateApp({
                 tracks: p.items.length,
                 shared: isCollabPlaylist(p),
               })),
-            onOpenPlaylist: (id) => setActivePlaylistId(id),
+            onOpenPlaylist: openPlaylist,
           }}
         />
       </div>
@@ -3154,7 +3167,8 @@ export function CrateApp({
             playlists={playlists}
             activeId={activePlaylistId}
             onSelect={(id) => {
-              setActivePlaylistId(id);
+              if (id === null) setActivePlaylistId(null);
+              else openPlaylist(id);
               setSheet("none");
             }}
             onCreate={(name) => void createPlaylist(name)}
