@@ -13,11 +13,11 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "keygen": "node -e \"console.log('SESSION_SECRET=' + require('crypto').randomBytes(32).toString('base64url'))\"",
-    "audit:ci": "npm audit --audit-level=high",
+    "audit:ci": "node scripts/audit-gate.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "verify:discogs": "node scripts/verify-discogs.mjs",
     "verify:db": "node scripts/verify-db.mjs",
-    "test": "npm run test:env && npm run test:headers && npm run test:playables && npm run test:sorting && npm run test:share && npm run test:scrub && npm run test:ownership && npm run test:recent && npm run test:adopt && npm run test:search && npm run test:writes && npm run test:playback && npm run test:watchdog && npm run test:freshness && npm run test:tempo && npm run test:mixing && npm run test:bpm-range && npm run test:beat-meter && npm run test:record && npm run test:mark && npm run test:api && npm run test:bpm-scale && npm run test:order && npm run test:views && npm run test:dig-feed && npm run test:dig-links && npm run test:sync-queue && npm run test:clip-drag && npm run test:pull-list && npm run test:search-play && npm run test:invites && npm run test:manifest && npm run test:collab && npm run test:collab-view && npm run test:chat",
+    "test": "npm run test:env && npm run test:headers && npm run test:playables && npm run test:sorting && npm run test:share && npm run test:scrub && npm run test:ownership && npm run test:recent && npm run test:adopt && npm run test:search && npm run test:writes && npm run test:playback && npm run test:watchdog && npm run test:freshness && npm run test:tempo && npm run test:mixing && npm run test:bpm-range && npm run test:beat-meter && npm run test:record && npm run test:mark && npm run test:api && npm run test:bpm-scale && npm run test:order && npm run test:views && npm run test:dig-feed && npm run test:dig-links && npm run test:sync-queue && npm run test:clip-drag && npm run test:pull-list && npm run test:search-play && npm run test:invites && npm run test:manifest && npm run test:collab && npm run test:collab-view && npm run test:chat && npm run test:audit-gate",
     "test:env": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-env.mjs",
     "test:headers": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-headers.mjs",
     "test:playables": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playables.mjs",
@@ -52,10 +52,11 @@
     "test:manifest": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-manifest.mjs",
     "test:collab": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-collab.mjs",
     "test:collab-view": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-collab-view.mjs",
-    "test:chat": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-chat.mjs"
+    "test:chat": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-chat.mjs",
+    "test:audit-gate": "node scripts/test-audit-gate.mjs"
   },
   "dependencies": {
-    "next": "16.3.6",
+    "next": "16.3.8",
     "pg": "8.23.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
@@ -69,7 +70,7 @@
     "@types/react-dom": "19.3.0",
     "autoprefixer": "10.6.1",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.3.6",
+    "eslint-config-next": "16.3.8",
     "postcss": "8.5.28",
     "tailwindcss": "3.4.19",
     "typescript": "^5.9.3"

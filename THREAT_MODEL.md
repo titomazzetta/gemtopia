@@ -532,7 +532,7 @@ only possible because the test holds the key. Without it, no session can be
 manufactured. That is the sealing guarantee demonstrated rather than asserted.
 
 CI (`.github/workflows/ci.yml`) runs typecheck, lint, the tempo suite, a
-Postgres-backed API suite, build, and `npm audit --audit-level=high` on every
+Postgres-backed API suite, build, and the dependency audit gate on every
 push, and fails on any of them.
 
 ---
@@ -590,9 +590,24 @@ client bundle for the placeholder secret and failing if it appears.
 
 **Scanning runs on a schedule, not just on push.** CodeQL
 (`security-and-quality`) runs on every pull request to `main` and again weekly;
-`npm audit --audit-level=high` runs in CI and again weekly, so an advisory
-disclosed against an already-pinned dependency surfaces even during a quiet
-month. Dependabot opens grouped patch/minor PRs weekly and separate PRs for
+the dependency audit runs in CI and again weekly, so an advisory disclosed
+against an already-pinned dependency surfaces even during a quiet month.
+
+**The audit gate fails closed, with one narrow, written exception.**
+`scripts/audit-gate.mjs` runs `npm audit` twice: on the whole tree and on
+production dependencies only (`--omit=dev`). Any high or critical advisory in
+the production tree fails the build, full stop. One that lives only in build
+tooling (the CSS build, the linter) may pass, but only with an entry in
+`.github/audit-allowlist.json` that names the GHSA id, gives the reason it
+can't reach users, and expires within 180 days; an expired or undated entry
+fails the build, so every exception gets reviewed again rather than becoming
+permanent. If `npm audit` can't produce a report (the registry is down), the
+gate fails rather than reading silence as clean. Without this, an advisory
+with no upstream fix (October 2026: `braces`, reached only through Tailwind 3
+and the Next ESLint config) keeps CI red until everyone stops reading CI. The
+same run that introduced the gate found a real production advisory — an SSRF
+in Next.js image optimisation — and that one was fixed by upgrading, because
+the gate allows nothing else. Dependabot opens grouped patch/minor PRs weekly and separate PRs for
 majors, plus monthly bumps of the pinned action SHAs — pinning is only safe if
 something keeps moving the pins. Secret scanning and push protection are on:
 a credential committed by mistake is rejected at push time rather than found

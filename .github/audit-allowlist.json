@@ -1,0 +1,9 @@
+[
+  {
+    "advisory": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "scope": "dev",
+    "reason": "Stack-exhaustion DoS on deeply nested glob patterns. No fixed braces release exists (3.0.3 is the latest and is affected). It is reached only through dev tooling (tailwindcss 3 via chokidar/micromatch, and eslint-config-next via fast-glob), which expands patterns written in this repo, never user input, and is not in the production bundle. npm's only offered fix is tailwindcss 4, a breaking migration deferred in dependabot.yml.",
+    "expires": "2027-01-05"
+  }
+]
