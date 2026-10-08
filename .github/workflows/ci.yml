@@ -64,6 +64,10 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # The gate's own rules first, so a broken gate can't pass a bad audit.
+      - name: Audit gate tests
+        run: npm run test:audit-gate
+
       - name: Audit dependencies
         run: npm run audit:ci
 
