@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type RefObject } from "react";
+import { useCallback, useState, type KeyboardEvent, type RefObject } from "react";
 import type { ScaleFactor } from "@/client/bpmScaling";
 import type { BpmSource, Playable } from "@/lib/types";
 import type { PlayerApi } from "@/client/useYouTubePlayer";
@@ -358,6 +358,7 @@ export function NowPlaying({
   onNext,
   onAddToPlaylist,
   onDig,
+  onTrackDragStart,
   want,
   detour,
   onBackToShuffle,
@@ -378,6 +379,8 @@ export function NowPlaying({
   onNext: () => void;
   onAddToPlaylist: () => void;
   onDig: () => void;
+  /** The playing track was picked up: show the playlists to drop it on. */
+  onTrackDragStart?: () => void;
   /** The wantlist heart, when what's playing isn't in your collection. */
   want: WantHeart | null;
   /** Set while exploring a record away from the shuffle. */
@@ -401,6 +404,30 @@ export function NowPlaying({
   // same as any row in the crate. Desktop only, like every other drag here.
   const finePointer = useFinePointer();
   const canDrag = finePointer && current !== null;
+
+  /*
+   * Press on the title, the artist or the record and pull: the track comes
+   * with you, and the Playlists tab opens so there is somewhere to drop it.
+   * A plain click still does what it always did. The drag image is the
+   * browser's own snapshot of these three lines — a custom image drawn from
+   * an off-screen element comes out blank in some Safari versions, and this
+   * is exactly what you're carrying anyway.
+   */
+  const onDragStart = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!current || !writeClipDrag(event.dataTransfer, current.key)) {
+      event.preventDefault();
+      return;
+    }
+    onTrackDragStart?.();
+  };
+
+  /** Keyboard parity for the artist and record lines, which are not <button>s. */
+  const activateOnKey = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onDig();
+    }
+  };
 
   const onScrub = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -496,12 +523,18 @@ export function NowPlaying({
         included, and left a blank band under the crate.
       */}
       <div className="hidden min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4 lg:flex">
+        {/*
+          The drag source is this whole block, and nothing inside it is a
+          <button>: Safari and Firefox won't start a drag that begins on a
+          button, so the artist and record lines are role="button" spans
+          (focusable, Enter/Space work) — pressing and pulling on any of the
+          three lines picks the track up in every browser. -webkit-user-drag
+          makes Safari drag the element rather than a text selection.
+        */}
         <div
-          className={`min-h-[52px] ${canDrag ? "cursor-grab active:cursor-grabbing" : ""}`}
+          className={`min-h-[52px] ${canDrag ? "cursor-grab select-none active:cursor-grabbing [-webkit-user-drag:element]" : ""}`}
           draggable={canDrag}
-          onDragStart={(event) => {
-            if (!current || !writeClipDrag(event.dataTransfer, current.key)) event.preventDefault();
-          }}
+          onDragStart={onDragStart}
           title={canDrag ? "Drag onto a playlist to add it" : undefined}
         >
           {current ? (
@@ -533,24 +566,28 @@ export function NowPlaying({
                 the same — three ways in, because nobody should have to learn
                 which one is right.
               */}
-              <button
-                type="button"
+              <span
+                role="button"
+                tabIndex={0}
                 onClick={onDig}
-                title="Open the whole record (D)"
-                className="block max-w-full truncate text-left text-xs text-neutral-400 underline-offset-2 hover:text-neutral-100 hover:underline"
+                onKeyDown={activateOnKey}
+                title={canDrag ? "Open the whole record (D) — or drag onto a playlist" : "Open the whole record (D)"}
+                className="block max-w-full cursor-pointer truncate text-left text-xs text-neutral-400 underline-offset-2 hover:text-neutral-100 hover:underline"
               >
                 {current.artist}
-              </button>
-              <button
-                type="button"
+              </span>
+              <span
+                role="button"
+                tabIndex={0}
                 onClick={onDig}
-                title="Open the whole record (D)"
-                className="block max-w-full truncate text-left text-[11px] text-neutral-600 underline-offset-2 hover:text-neutral-300 hover:underline"
+                onKeyDown={activateOnKey}
+                title={canDrag ? "Open the whole record (D) — or drag onto a playlist" : "Open the whole record (D)"}
+                className="block max-w-full cursor-pointer truncate text-left text-[11px] text-neutral-600 underline-offset-2 hover:text-neutral-300 hover:underline"
               >
                 {current.releaseTitle}
                 {current.year ? ` · ${current.year}` : ""}
                 {current.labels[0] ? ` · ${current.labels[0]}` : ""}
-              </button>
+              </span>
               {detour && (
                 <div className="mt-1.5 flex items-center gap-2 rounded border border-accent/30 bg-accent/5 px-2 py-1 text-[10px]">
                   <span className="min-w-0 flex-1 truncate text-neutral-400">

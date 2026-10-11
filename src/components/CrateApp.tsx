@@ -1016,7 +1016,7 @@ export function CrateApp({
   );
 
   /*
-   * Split so the header can say what "1,500 clips" now means, given that
+   * Split so the header can say what "1,500 tracks" now means, given that
    * unplayable records are among them. The two silent kinds are counted
    * separately because they lead somewhere different: no-audio is permanent
    * and there is nothing to do about it, whereas not-loaded is one refresh
@@ -2672,7 +2672,9 @@ export function CrateApp({
               {activePlaylist ? activePlaylist.name : `Your ${source}`}
             </h2>
             <span className="min-w-0 shrink truncate text-[11px] text-neutral-600">
-              {silence.playable.toLocaleString()} clips
+              {/* "tracks", like the playlist list and set prep: record-only
+                  tracks are tracks too, they just play from the vinyl. */}
+              {(silence.playable + silence.recordOnly).toLocaleString()} tracks
               {silence.recordOnly > 0 && (
                 <span title="Tracks with no YouTube clip, listed from the Discogs tracklist — play them from the record">
                   {" · "}
@@ -2682,7 +2684,10 @@ export function CrateApp({
               {silence.noAudio > 0 && (
                 <span title="Discogs holds no audio for these pressings">
                   {" · "}
-                  {silence.noAudio.toLocaleString()} without a preview
+                  {/* Records, not tracks: each of these is a whole release
+                      with no clip and no tracklist, so it isn't one of the
+                      tracks counted above. */}
+                  {silence.noAudio.toLocaleString()} {silence.noAudio === 1 ? "record" : "records"} without a preview
                 </span>
               )}
               {silence.loading > 0 && (
@@ -2957,6 +2962,9 @@ export function CrateApp({
           onNext={() => advance(1)}
           onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
           onDig={() => setDigTarget(current)}
+          // Picked up from the player: open the playlists so there's
+          // somewhere to drop it, wherever the left rail was.
+          onTrackDragStart={() => setRail("playlists")}
           want={currentWant}
           detour={detour ? { label: detour.label } : null}
           onBackToShuffle={endDetour}
