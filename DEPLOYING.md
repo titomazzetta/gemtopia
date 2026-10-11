@@ -27,15 +27,19 @@ Hit **Connect** on the project dashboard and make sure **Connection pooling** is
 toggled on — the hostname you copy must contain `-pooler`. Serverless functions
 open and drop connections constantly and will exhaust a direct endpoint.
 
-### 2. A session signing key
+### 2. Two keys: sessions and chat
 
 ```bash
 npm install
 npm run keygen
 ```
 
-Copy the 43-character value. This encrypts your session cookie; changing it later
-signs everyone out, which is the intended panic button.
+It prints two different 43-character values. `SESSION_SECRET` encrypts your
+session cookie; changing it later signs everyone out, which is the intended
+panic button. `CHAT_MASTER_KEY` locks every shared playlist's chat key — see
+[Chat encryption](#chat-encryption-turning-it-on-and-rotating-the-key). The app
+refuses to start if they're the same key. Keep a copy of `CHAT_MASTER_KEY` in
+your password manager: lose it and existing chats can't be read by anyone.
 
 ### 3. A Discogs application
 
@@ -111,6 +115,7 @@ DISCOGS_CONSUMER_KEY=your-key
 DISCOGS_CONSUMER_SECRET=your-secret
 DISCOGS_CONTACT=+https://github.com/titomazzetta/gemtopia
 SESSION_SECRET=the-keygen-output
+CHAT_MASTER_KEY=the-other-keygen-output
 APP_ORIGIN=http://localhost:3000
 DATABASE_URL=postgresql://...-pooler...neon.tech/gemtopia?sslmode=require
 ```
@@ -243,6 +248,7 @@ again — don't reuse your local one), and your **production** Neon string.
 | `DISCOGS_CONSUMER_KEY` | yes | From the production Discogs app |
 | `DISCOGS_CONSUMER_SECRET` | yes | From the production Discogs app |
 | `SESSION_SECRET` | yes | A fresh `npm run keygen` output |
+| `CHAT_MASTER_KEY` | for chat | The other `npm run keygen` output. Without it chat refuses new messages (never stores them unencrypted). Mark it **Sensitive** |
 | `APP_ORIGIN` | yes | Your URL, **no trailing slash** |
 | `DATABASE_URL` | yes | The Neon `-pooler` string |
 | `DISCOGS_CONTACT` | advised | A URL or email — Discogs requires a contact in the User-Agent |
@@ -370,6 +376,8 @@ the earlier ones produce.
 | Sync stalls and resumes | Discogs rate limit | Working as designed. It backs off and continues; the progress bar shows where it's up to. |
 | Auto BPM finds no audio | Tab audio wasn't shared | Re-run it and tick *Share tab audio* in the picker. Chromium browsers only. |
 | Everything 401s suddenly | Session revoked, or `SESSION_SECRET` changed | Sign in again. Changing that variable invalidates every session by design. |
+| Chat says "unavailable" when you send | `CHAT_MASTER_KEY` isn't set on this deployment | Add it (Production, and Preview if you test chat there) and redeploy. Nothing was stored in the meantime. |
+| A chat line reads "couldn't be verified" | That message failed its integrity check: edited in the database, or its key was wrapped by a master key you've since removed | Admin panel → Chat encryption shows any keys on an unconfigured master key. Put the old key back in `CHAT_MASTER_KEY_PREVIOUS`, redeploy, **Re-wrap keys**. |
 | `npm test` fails on an unknown flag | Node older than 22.6 | The pure-logic suites use Node's built-in type stripping. `nvm use` picks up `.nvmrc`. |
 
 ---
@@ -457,3 +465,60 @@ Order matters: the new code expects the new columns.
 To open sign-up again, set `INVITE_ONLY=false` and redeploy. Codes and removals
 stay in the database; a removed member stays removed either way.
 
+
+---
+
+## Chat encryption: turning it on, and rotating the key
+
+Chat messages and activity notes are sealed (AES-256-GCM) before they reach the
+database, under a key per shared playlist that is itself locked by
+`CHAT_MASTER_KEY`. The master key lives only in Vercel. Details and the threat
+model: [THREAT_MODEL.md §5](./THREAT_MODEL.md#chat-encryption-at-rest).
+
+### Turning it on (an existing deployment with chats)
+
+Order matters, as with every schema change:
+
+1. **Add the key.** `npm run keygen`, take the `CHAT_MASTER_KEY` line, and add
+   it in Vercel → Settings → Environment Variables for **Production** (and
+   **Preview** if you test chat there), marked **Sensitive**. Save a copy in
+   your password manager.
+2. **Migrate production first** — the "Chat encryption at rest" block at the
+   end of `db/schema.sql`, in Neon's SQL Editor on the production database.
+   It's additive and safe with the old code still live: the old code keeps
+   writing the old plaintext form, which the new check still accepts.
+3. **Merge.** New messages and notes are sealed from the first one.
+4. **Seal the older ones.** Account menu → Invite someone → **Chat encryption**
+   → **Seal older messages**. It converts them in place, in batches, and shows
+   "none in plaintext" when it's done.
+5. **Lock it.** Run the same SQL block once more. With no plaintext left, it
+   adds the constraint that makes the database itself refuse any message
+   without ciphertext; the panel then says "refuses any message without
+   ciphertext".
+
+### Rotating the master key
+
+Do it if the key may have been exposed, or on a schedule (yearly is plenty).
+
+1. `npm run keygen` for a new `CHAT_MASTER_KEY`.
+2. In Vercel: move the current value into `CHAT_MASTER_KEY_PREVIOUS`, put the
+   new one in `CHAT_MASTER_KEY`, redeploy. Everything keeps working — old
+   playlist keys unwrap with the previous key, new ones use the new key.
+3. Admin panel → Chat encryption → **Re-wrap keys**, until it shows nothing on
+   a retired key. Only one 61-byte row per playlist is rewritten; no message
+   is touched.
+4. Delete `CHAT_MASTER_KEY_PREVIOUS` and redeploy. From now on, backups taken
+   before the rotation can't be decrypted by anyone either.
+
+Never delete the old key before step 3 reports zero: playlist keys still
+wrapped by it would become unopenable, and their chats with them.
+
+### Checking the database connection is encrypted
+
+```bash
+npm run verify:db
+```
+
+Connects exactly the way the app does and prints the TLS version and cipher,
+the certificate's subject and issuer, whether the chain and hostname verified,
+and whether the login used SCRAM channel binding.

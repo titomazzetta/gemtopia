@@ -19,8 +19,25 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import readline from "node:readline";
 import pg from "pg";
+import { pgConnectionOptions } from "../src/lib/dbTls.ts";
+
+/*
+ * Record which SCRAM mechanism the handshake used, so the report can say
+ * whether channel binding (SCRAM-SHA-256-PLUS) actually happened. pg picks
+ * the mechanism in crypto/sasl.startSession; wrapping it here, in a
+ * diagnostic script only, observes the choice without changing it.
+ */
+const sasl = createRequire(import.meta.url)("pg/lib/crypto/sasl");
+let scramMechanism = null;
+const startSession = sasl.startSession;
+sasl.startSession = (...args) => {
+  const session = startSession(...args);
+  scramMechanism = session.mechanism;
+  return session;
+};
 
 // Tolerate a trailing slash — shells tab-complete one onto flags often
 // enough that a silent "did nothing" is a worse outcome than being lenient.
@@ -104,9 +121,32 @@ if (connectionString !== raw) {
 }
 
 console.log("\nConnecting…");
-const client = new pg.Client({ connectionString });
+// The app's own TLS policy (src/lib/dbTls.ts), so this proves what the app
+// will actually do — not what the string asks for.
+const options = pgConnectionOptions(connectionString);
+const client = new pg.Client(options);
 try {
   await client.connect();
+
+  const stream = client.connection?.stream;
+  if (options.ssl && stream && typeof stream.getProtocol === "function") {
+    const cert = stream.getPeerCertificate();
+    console.log(`tls       : ${stream.getProtocol()} · ${stream.getCipher()?.name ?? "?"}`);
+    console.log(`cert      : ${cert?.subject?.CN ?? "?"} (issued by ${cert?.issuer?.O ?? cert?.issuer?.CN ?? "?"}, valid to ${cert?.valid_to ?? "?"})`);
+    console.log(`verified  : ${stream.authorized ? "yes — chain and hostname checked" : `NO (${stream.authorizationError})`}`);
+  } else {
+    console.log("tls       : off (loopback database — the connection never leaves this machine)");
+  }
+  console.log(
+    `auth      : ${
+      scramMechanism === "SCRAM-SHA-256-PLUS"
+        ? "SCRAM-SHA-256-PLUS — channel binding on"
+        : scramMechanism
+          ? `${scramMechanism} — the server did not offer channel binding`
+          : "no SCRAM exchange (trust or password auth)"
+    }`,
+  );
+
   const { rows: [info] } = await client.query("select version(), current_database() as db");
   const { rows: tables } = await client.query(
     "select tablename from pg_tables where schemaname = 'public' order by tablename",

@@ -465,8 +465,12 @@ BEGIN
       ADD CONSTRAINT playlist_messages_kind_check
       CHECK (kind IN ('text', 'added', 'removed', 'joined', 'left'));
   END IF;
+  -- Superseded by playlist_messages_shape_check (chat encryption, below),
+  -- which covers sealed rows too; never re-added once that exists.
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_meta_check'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_shape_check'
   ) THEN
     ALTER TABLE playlist_messages
       ADD CONSTRAINT playlist_messages_meta_check
@@ -562,5 +566,81 @@ BEGIN
   ) THEN
     ALTER TABLE playlist_items ADD CONSTRAINT playlist_items_video_matches_key
       CHECK ((video_id IS NULL) = (clip_key ~ ':t\.'));
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Chat encryption at rest (lib/envelope.ts)
+--
+-- Every shared playlist gets its own random 256-bit key. It is stored only
+-- wrapped (AES-256-GCM) by the master key, CHAT_MASTER_KEY, which lives in
+-- the host's secret store and never in this database — so nothing in a dump
+-- or a backup of it decrypts anything. kek_id is the public fingerprint of
+-- the master key that wrapped the row (an HMAC, not key material), which is
+-- what lets the master key rotate: re-wrap the keys, then retire the old one.
+--
+-- Messages and activity notes are then stored as one sealed blob: version,
+-- nonce, ciphertext and tag, bound by AAD to their playlist, their id and
+-- their kind. body and meta stay only for rows written before this, until the
+-- admin panel's "Seal older messages" converts them in place.
+--
+-- Expand first (this block, safe to run while the old code is live: it still
+-- writes plaintext rows the shape check accepts), then deploy, then seal the
+-- older rows. Every statement is a no-op on a second run.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS playlist_chat_keys (
+  playlist_id   UUID PRIMARY KEY REFERENCES playlists(id) ON DELETE CASCADE,
+  kek_id        TEXT NOT NULL CHECK (kek_id ~ '^[A-Za-z0-9_-]{16}$'),
+  wrapped_key   BYTEA NOT NULL CHECK (octet_length(wrapped_key) = 61),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  rewrapped_at  TIMESTAMPTZ
+);
+
+-- "How many keys are still on the old master key?" during a rotation.
+CREATE INDEX IF NOT EXISTS playlist_chat_keys_kek_idx ON playlist_chat_keys (kek_id);
+
+ALTER TABLE playlist_messages ADD COLUMN IF NOT EXISTS sealed BYTEA;
+ALTER TABLE playlist_messages ALTER COLUMN body DROP NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_sealed_size_check'
+  ) THEN
+    -- 29 bytes is an empty payload (version + nonce + tag); 8 KB is far more
+    -- than 500 characters and a 2 KB note can ever need.
+    ALTER TABLE playlist_messages ADD CONSTRAINT playlist_messages_sealed_size_check
+      CHECK (sealed IS NULL OR octet_length(sealed) BETWEEN 29 AND 8192);
+  END IF;
+
+  -- A row is either sealed (and holds no plaintext at all), or one of the
+  -- two plaintext shapes written before encryption.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_shape_check'
+  ) THEN
+    ALTER TABLE playlist_messages DROP CONSTRAINT IF EXISTS playlist_messages_meta_check;
+    ALTER TABLE playlist_messages ADD CONSTRAINT playlist_messages_shape_check
+      CHECK (
+        (sealed IS NOT NULL AND body IS NULL AND meta IS NULL)
+        OR (sealed IS NULL AND body IS NOT NULL AND (
+              (kind = 'text' AND meta IS NULL)
+              OR (kind <> 'text' AND jsonb_typeof(meta) = 'object'
+                  AND octet_length(meta::text) <= 2000)))
+      );
+  END IF;
+
+  -- The last step, and the one that makes plaintext impossible rather than
+  -- merely unused: once no plaintext row is left, the database refuses any
+  -- row without ciphertext — whatever a future bug in the app tries to write.
+  -- On a database with older rows this waits; run the block again after
+  -- "Seal older messages" reports none left.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_sealed_required'
+  ) AND NOT EXISTS (
+    SELECT 1 FROM playlist_messages WHERE sealed IS NULL
+  ) THEN
+    ALTER TABLE playlist_messages ADD CONSTRAINT playlist_messages_sealed_required
+      CHECK (sealed IS NOT NULL);
   END IF;
 END $$;

@@ -263,8 +263,28 @@ export interface AdminOverview {
   members: MemberView[];
 }
 
+/** Counts and public key ids only — never key material or message content. */
+export interface EncryptionStatus {
+  configured: boolean;
+  currentKeyId: string | null;
+  retiredKeyIds: string[];
+  messages: { sealed: number; plaintext: number };
+  playlistKeys: { total: number; current: number; retired: number; missing: number };
+  plaintextRefused: boolean;
+}
+
+export type EncryptionAction = "seal-older" | "rewrap";
+
 export const adminApi = {
   overview: () => request<AdminOverview>("/api/admin/invites"),
+
+  encryption: () => request<EncryptionStatus>("/api/admin/encryption"),
+
+  encryptionAction: (action: EncryptionAction) =>
+    request<{ result: Record<string, number>; status: EncryptionStatus }>("/api/admin/encryption", {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    }),
 
   /** The only response that ever carries a code in plain text. */
   create: (hours: 1 | 24) =>

@@ -65,6 +65,33 @@ export const envSchema = z.object({
     ),
 
   /**
+   * Master key for chat encryption at rest (lib/envelope.ts): 32 bytes,
+   * base64url. It wraps each shared playlist's own key, and it lives only
+   * here — never in the database or its backups — so a copy of the database
+   * holds nothing that decrypts. Generate with `npm run keygen`.
+   *
+   * Optional so a deployment without it still serves everything else; chat
+   * refuses to post (and shows sealed messages as unreadable) until it is
+   * set, rather than falling back to storing plaintext.
+   */
+  CHAT_MASTER_KEY: z
+    .string()
+    .refine(isKey32, { message: "CHAT_MASTER_KEY must be 32 bytes, base64url encoded (43 characters)" })
+    .optional(),
+
+  /**
+   * Retired master keys, comma separated, kept only until every playlist key
+   * they wrapped has been re-wrapped under the current one (admin panel →
+   * Encryption → Re-wrap). Then remove them.
+   */
+  CHAT_MASTER_KEY_PREVIOUS: z
+    .string()
+    .refine((v) => v.split(",").map((k) => k.trim()).filter(Boolean).every(isKey32), {
+      message: "CHAT_MASTER_KEY_PREVIOUS must be 32-byte base64url keys separated by commas",
+    })
+    .optional(),
+
+  /**
    * Canonical public origin, e.g. https://gemtopia.vercel.app
    * Used to build the OAuth callback URL and to reject host-header spoofing.
    */
@@ -171,7 +198,33 @@ export const envSchema = z.object({
   // existing members get in, and nobody new ever can.
   message: "INVITE_ONLY is on but ADMIN_USERNAMES is empty, so nobody could make an invite code",
   path: ["ADMIN_USERNAMES"],
-});
+}).refine((env) => !env.CHAT_MASTER_KEY || !sameKey(env.CHAT_MASTER_KEY, env.SESSION_SECRET), {
+  // One key, one job. Reusing the session key would mean rotating sessions
+  // (the "log everyone out" lever) also locks every chat, and a leak of one
+  // would be a leak of both.
+  message: "CHAT_MASTER_KEY must be a different key from SESSION_SECRET",
+  path: ["CHAT_MASTER_KEY"],
+}).refine(
+  (env) =>
+    !env.CHAT_MASTER_KEY_PREVIOUS ||
+    env.CHAT_MASTER_KEY_PREVIOUS.split(",").every(
+      (k) => !k.trim() || (!sameKey(k, env.SESSION_SECRET) && (!env.CHAT_MASTER_KEY || !sameKey(k, env.CHAT_MASTER_KEY))),
+    ),
+  {
+    message: "CHAT_MASTER_KEY_PREVIOUS must not repeat the current key or SESSION_SECRET",
+    path: ["CHAT_MASTER_KEY_PREVIOUS"],
+  },
+);
+
+/** 32 bytes of base64url, the shape of every symmetric key here. */
+function isKey32(value: string): boolean {
+  const v = value.trim();
+  return /^[A-Za-z0-9_-]{43}$/.test(v) && Buffer.from(v, "base64url").length === 32;
+}
+
+function sameKey(a: string, b: string): boolean {
+  return Buffer.from(a.trim(), "base64url").equals(Buffer.from(b.trim(), "base64url"));
+}
 
 export type Env = z.infer<typeof envSchema>;
 
@@ -189,7 +242,7 @@ export function parseEnv(raw: RawEnv): Readonly<Env> {
     throw new Error(
       `Invalid environment configuration:\n${issues}\n\n` +
         `Copy .env.example to .env.local and fill it in. ` +
-        `Run \`npm run keygen\` for SESSION_SECRET.\n` +
+        `Run \`npm run keygen\` for SESSION_SECRET and CHAT_MASTER_KEY.\n` +
         `A blank line like \`ANTHROPIC_API_KEY=\` counts as absent, not invalid.`,
     );
   }

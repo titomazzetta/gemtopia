@@ -50,6 +50,8 @@ secret, or the Anthropic key exists in client JavaScript.
 |---|---|---|
 | Discogs consumer secret | **Critical** — compromises every user | Vercel env var, server memory only |
 | `SESSION_SECRET` (AES key) | **Critical** — forges arbitrary sessions | Vercel env var, server memory only |
+| `CHAT_MASTER_KEY` (AES key) | **High** — with a copy of the database, reads every chat | Vercel env var, server memory only; never in Postgres or its backups |
+| Chat messages and activity notes | Moderate — private conversation about a set | Postgres, **AES-256-GCM sealed** per playlist (§5) |
 | `ANTHROPIC_API_KEY` | **High** — billable | Vercel env var, server memory only |
 | `DATABASE_URL` | **High** — all stored user data | Vercel env var, server memory only |
 | User's Discogs access token | **Critical** — unscoped read *and write* on their account (see §12.1) | AES-256-GCM sealed cookie, browser only |
@@ -144,6 +146,12 @@ Server logs record error context only, never tokens.
 | `timingSafeEqual` for tokens | CSRF and OAuth tokens compared in constant time. |
 | SHA-256 content hash for the analysis cache | Not a security control — a cache key. Stated here so it is not mistaken for one. |
 | Rotating `SESSION_SECRET` | Invalidates every session immediately. The intended emergency "log everyone out" lever. |
+| Envelope encryption for chat | A random 256-bit key per shared playlist, stored only wrapped (AES-256-GCM) by `CHAT_MASTER_KEY`. Rotating the master key re-wraps one 61-byte row per playlist; no message is rewritten. See §5. |
+| AAD on every sealed blob | Binds a ciphertext to its playlist, its row id and its kind (and a wrapped key to its playlist and master-key id), so a blob moved, copied or relabelled in the database fails authentication instead of being shown somewhere else. |
+| Per-playlist keys rather than one key | Random-nonce GCM is safe to about 2^32 encryptions per key; a playlist keeps at most 1,000 messages, so every key stays orders of magnitude inside that bound regardless of how big the app gets. |
+| HMAC fingerprint as a key id | `HMAC-SHA256(key, "gemtopia/key-id/v1")`, truncated to 96 bits, names which master key wrapped a row. A PRF output: identifies the key, reveals nothing usable about it. |
+| A different key for each job | `CHAT_MASTER_KEY` must differ from `SESSION_SECRET` — the app refuses to boot otherwise — so logging everyone out never locks the chats, and a leak of one is not a leak of the other. |
+| TLS policy for Postgres in code | Verified certificate, TLS 1.2+, SCRAM channel binding, for anything not on loopback — and the connection string can no longer override it (§9). |
 
 ---
 
@@ -291,6 +299,77 @@ to other users, so it is treated as the most hostile input in the app.
   client can't mark the future read and swallow messages yet to come. The
   count is capped at 99 and covers other people's messages and notes only.
   It goes when the playlist goes, or when you leave or are removed.
+
+### Chat encryption at rest
+
+Messages and activity notes are encrypted before they reach Postgres, with
+keys the database never sees. The code is `lib/envelope.ts` (pure functions,
+unit-tested directly) and its callers in `lib/repo.ts`.
+
+**The key hierarchy.**
+
+```
+CHAT_MASTER_KEY (KEK)    32 bytes, in Vercel's secret store — not in Postgres,
+   │                     not in any backup of it, not in the client bundle
+   │ wraps (AES-256-GCM, AAD = playlist id + master-key id)
+   ▼
+playlist key (DEK)       32 random bytes per shared playlist, stored only
+   │                     wrapped: playlist_chat_keys.wrapped_key (61 bytes)
+   │ seals (AES-256-GCM, AAD = playlist id + message id + kind)
+   ▼
+message / note           version ‖ 96-bit nonce ‖ ciphertext ‖ tag
+                         in playlist_messages.sealed
+```
+
+What is sealed is the whole payload — the text, a note's metadata (record
+title, artist, BPM), and the author id. What stays in the clear is only what
+the database needs to do its job: ids, playlist, author (for the "who" and
+the posting limit), kind and timestamp.
+
+**What it protects against.**
+
+| Threat | Outcome |
+|---|---|
+| A database dump, a leaked backup, a Neon point-in-time copy | Wrapped keys and ciphertext only. Nothing decrypts without the master key, which isn't there. |
+| SQL injection that can read tables (none is known; every query is parameterised) | Same: ciphertext. |
+| Someone with database access, or logs of it (provider support, a misconfigured log drain, a query-history pane) | Same. Query logs carry ciphertext, never message text. |
+| Tampering in the database — edit bytes, copy a message into another row or playlist, relabel a message as a note | GCM authentication fails, and the reader sees one fixed "couldn't be verified" line in its place — never the altered text. The page still loads. |
+| Re-attributing a message to someone else (`UPDATE … SET author_id`) | Detected: the sealed payload carries the author, and a row that names a different one is refused. (Not in the AAD, because deleting an account sets `author_id` to NULL; those messages still read, as from a former member.) |
+| A deployment without the key | Chat refuses to post (503). It never falls back to storing plaintext, and notes are skipped rather than written in the clear. |
+
+**What it doesn't protect against — said plainly.** This is encryption at
+rest, not end-to-end encryption. The server decrypts messages to show them to
+the people on the playlist, so anyone who controls the running server (or the
+Vercel account holding `CHAT_MASTER_KEY`) can read them. Transport is HTTPS
+(§9), so nobody in between can. The next step is written up in
+[docs/E2EE-DESIGN.md](./docs/E2EE-DESIGN.md): what end-to-end would take in a
+browser app, what it would cost, and why it isn't the first thing built.
+
+**The rules the database enforces itself.** `playlist_messages_shape_check`:
+a row is either sealed with no plaintext at all, or one of the two plaintext
+shapes from before encryption. After the older rows are sealed,
+`playlist_messages_sealed_required` makes the database refuse any row without
+ciphertext — so a future bug in the app can't quietly start storing plaintext
+again. The migration is expand → deploy → seal the older rows (admin panel)
+→ lock, and each step is safe with the previous code still running.
+
+**Rotating the master key.** Put the new key in `CHAT_MASTER_KEY` and the old
+one in `CHAT_MASTER_KEY_PREVIOUS`, redeploy, press **Re-wrap keys** in the
+admin panel until it reports none left, then delete the old key. Nothing but
+61-byte key rows is rewritten. Once the old key is deleted, old backups are
+unreadable too — that is the point at which a leaked historical backup stops
+mattering.
+
+**Proved, not asserted.** `test-envelope` (21 checks): tampering anywhere in
+the blob, the wrong key, a blob moved to another playlist or row or relabelled
+as another kind, re-attribution, rotation and re-wrapping, malformed keys.
+`test-api` against a real Postgres: every row of a chat is ciphertext with no
+plaintext column filled; flipping one byte in a stored message, copying one
+into another row, or changing its author all show the "couldn't be verified"
+line; older plaintext rows read as before and are then sealed in place with
+the same text; once locked, a plaintext `INSERT` is rejected by the database
+itself; a key wrapped by an unknown master key is reported, never replaced;
+and deleting a playlist deletes its key.
 
 ### Removing records from a shared playlist
 
@@ -503,6 +582,35 @@ Two deliberate compromises, stated rather than hidden:
 Note `microphone=()` is **not** in `Permissions-Policy`: mic capture is the
 documented fallback for browsers without tab audio capture.
 
+### Encryption in transit, on every hop
+
+| Hop | Protection |
+|---|---|
+| Browser ↔ Gemtopia | HTTPS only. HSTS for two years with `includeSubDomains; preload`, so after one visit the browser refuses plain HTTP to the domain outright; `upgrade-insecure-requests` in the CSP. Session and CSRF cookies are `Secure`, `HttpOnly` (the session) and `SameSite`. |
+| Gemtopia ↔ Postgres (Neon) | TLS 1.2 or newer, the server certificate verified against the system CAs with its hostname checked, and SCRAM-SHA-256-PLUS channel binding, which ties the password exchange to that TLS session — a man-in-the-middle with a mis-issued certificate still couldn't relay the login. Decided in `lib/dbTls.ts`, for every non-loopback host, with no switch to turn it off. |
+| Gemtopia ↔ Discogs, YouTube, Anthropic | HTTPS to fixed origins written in the code. The browser never talks to Discogs at all (`connect-src 'self'`). |
+
+The database hop had two latent weaknesses, both found by reading the code
+rather than by an incident, and both fixed with tests (`test-db-tls`):
+
+- **A substring test on the URL.** TLS was skipped when `DATABASE_URL`
+  *contained* `localhost` or `127.0.0.1` — so a host like
+  `localhost.example.com`, or a password that happened to contain
+  `127.0.0.1`, would have turned it off for a remote database. The host is
+  now parsed and compared exactly.
+- **The connection string could overrule the code.** node-postgres merges the
+  SSL settings it parses from the URL *over* the ones passed in code, so a
+  pasted `?sslmode=disable` or `sslmode=no-verify` silently beat
+  `rejectUnauthorized: true` — and pg v9 is documented to weaken plain
+  `sslmode=require` to "encrypt but don't check the certificate". The SSL
+  parameters are now stripped from the string before pg sees it; the test
+  shows the old behaviour (the string wins) next to the new one (the policy
+  wins). A dependency upgrade can no longer quietly downgrade this.
+
+`npm run verify:db` connects exactly the way the app does and prints what
+happened: TLS version and cipher, the certificate's subject and issuer, whether
+the chain and hostname verified, and whether the login used channel binding.
+
 ---
 
 ## 10. Verifying the claims
@@ -686,11 +794,21 @@ Honest list of what is *not* solved.
    There is no push channel; a tab sitting idle stays rendered until it next
    calls the API. In practice that is seconds, but it is not zero.
 
-5. **Database encryption is Neon's, not ours.** Playlists and BPM readings are
-   encrypted at rest by the provider but not application-level encrypted. A
-   provider-side compromise exposes them. Given the sensitivity (a DJ's track
-   list), that was judged acceptable; the Discogs token, which is not
-   acceptable to lose, deliberately never goes near the database.
+5. **Chat is encrypted by the app; playlists and BPMs are encrypted by Neon.**
+   Chat messages and notes are sealed with keys the database never holds
+   (§5). Playlists and BPM readings are encrypted at rest by the provider but
+   not by the app, so a provider-side compromise exposes them. Given the
+   sensitivity (a DJ's track list), that was judged acceptable; the Discogs
+   token, which is not acceptable to lose, deliberately never goes near the
+   database.
+
+   The chat master key lives in Vercel's environment. Whoever controls that
+   account (or the running server) can read the chat — that is what "not
+   end-to-end" means. The upgrade path short of end-to-end is a KMS (AWS KMS,
+   GCP KMS) holding the master key so the server can ask for unwraps but never
+   holds the key itself, with every unwrap audit-logged; `kek_id` is already
+   the hook for that. The full end-to-end design is in
+   [docs/E2EE-DESIGN.md](./docs/E2EE-DESIGN.md).
 
 6. **`style-src 'unsafe-inline'`** — see §9.
 

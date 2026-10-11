@@ -1,6 +1,7 @@
 import "server-only";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import { env } from "./env";
+import { pgConnectionOptions } from "./dbTls";
 
 /**
  * Postgres access.
@@ -23,16 +24,13 @@ declare global {
 
 function makePool(): Pool {
   const pool = new Pool({
-    connectionString: env.DATABASE_URL,
+    // TLS policy (verified certificate, TLS 1.2+, SCRAM channel binding for
+    // anything not on this machine) is decided in dbTls.ts, and the
+    // connection string's own sslmode can no longer override it.
+    ...pgConnectionOptions(env.DATABASE_URL),
     max: 3,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 8_000,
-    // Neon and every other managed provider require TLS. Local development
-    // against a plain Postgres on localhost is the only exception.
-    ssl: env.DATABASE_URL.includes("localhost") ||
-      env.DATABASE_URL.includes("127.0.0.1")
-      ? false
-      : { rejectUnauthorized: true },
   });
 
   // A pool that emits an unhandled 'error' event will crash the process.

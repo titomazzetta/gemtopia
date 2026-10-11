@@ -134,13 +134,19 @@ const nextConfig: NextConfig = {
   //  and CI runs it alongside `typecheck` — see .github/workflows/ci.yml.)
   typescript: { ignoreBuildErrors: false },
 
+  /*
+   * The image optimizer, closed. Nothing in the app uses next/image —
+   * artwork is a plain <img> from the Discogs CDN, allowed by the CSP — so
+   * /_next/image has no reason to fetch anything. It used to allow
+   * **.discogs.com, which gave it an outbound fetcher to aim (Next 16.3.6
+   * shipped an SSRF in exactly this endpoint, and allowed hosts' redirects
+   * are followed without re-checking). Now it allows no host at all, so the
+   * next advisory against it has nothing here to reach.
+   */
   images: {
-    // Discogs artwork CDNs only.
-    remotePatterns: [
-      { protocol: "https", hostname: "i.discogs.com" },
-      { protocol: "https", hostname: "img.discogs.com" },
-      { protocol: "https", hostname: "**.discogs.com" },
-    ],
+    unoptimized: true,
+    remotePatterns: [],
+    localPatterns: [],
   },
 
   async headers() {

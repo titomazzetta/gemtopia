@@ -309,6 +309,12 @@ export interface ChatMessage {
   at: number;
   /** Written by whoever is asking. */
   mine: boolean;
+  /**
+   * The stored ciphertext failed its integrity check (tampered with, moved
+   * from another row, or its key is gone). `body` is then a fixed notice,
+   * never anything recovered from the row.
+   */
+  unreadable?: true;
 }
 
 export type BpmSource = "tap" | "auto" | "discogs" | "manual";

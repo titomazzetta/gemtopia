@@ -6,6 +6,7 @@ import { callerId, rateLimit } from "@/lib/ratelimit";
 import { listMessages, markChatRead, postMessage } from "@/lib/repo";
 import { MAX_MESSAGE_CHARS, isMessageId, normaliseMessage } from "@/lib/chat";
 import { UUID } from "@/lib/validation";
+import { ChatKeyMissingError } from "@/lib/chatKeys";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,8 @@ type Params = { params: Promise<{ id: string }> };
  * POST — { body } posts a message.
  *
  * Who may: the owner and collaborators, decided in the SQL (repo.ts), never
- * here. Anyone else — a stranger, someone removed a second ago, a malformed
+ * here. Bodies are sealed (AES-256-GCM, lib/envelope.ts) in repo.ts before
+ * they reach the database and opened there after the access check. Anyone else — a stranger, someone removed a second ago, a malformed
  * id — gets one indistinguishable 404, the same as for the playlist itself.
  */
 
@@ -129,6 +131,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
     return json({ message: result.message }, { status: 201 });
   } catch (error) {
+    // No master key on this deployment: refuse, rather than store plaintext.
+    if (error instanceof ChatKeyMissingError) {
+      return fail("unavailable", "Chat is unavailable right now.", 503);
+    }
     return handleError("playlists/messages/post", error);
   }
 }
