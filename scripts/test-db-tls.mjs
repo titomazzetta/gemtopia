@@ -2,8 +2,9 @@
  * Database TLS policy tests.   npm run test:db-tls
  *
  * src/lib/dbTls.ts decides how the app connects to Postgres. These pin the
- * two bugs it replaced — a substring test on the URL, and a connection
- * string's sslmode quietly overriding the code — and the policy itself.
+ * three bugs it replaced — a substring test on the URL, a connection
+ * string's sslmode quietly overriding the code, and a channel_binding=require
+ * the driver never read — and the policy itself.
  */
 import assert from "node:assert/strict";
 import pg from "pg";
@@ -80,6 +81,15 @@ check("what pg actually ends up with: our policy, not the string's", () => {
   // And the bug being fixed: without the policy, the string wins.
   const naive = new pg.Client({ connectionString: `${NEON}?sslmode=disable`, ssl: { rejectUnauthorized: true } });
   assert.equal(naive.ssl, false);
+});
+
+check("channel_binding=require in the URL does nothing in pg; the policy is what turns binding on", () => {
+  // Neon's console strings end in sslmode=require&channel_binding=require.
+  // node-postgres doesn't read channel_binding at all — it binds only when
+  // enableChannelBinding is set in code — so the URL alone never bound.
+  const url = `${NEON}?sslmode=require&channel_binding=require`;
+  assert.equal(new pg.Client({ connectionString: url }).enableChannelBinding, false);
+  assert.equal(new pg.Client(pgConnectionOptions(url)).enableChannelBinding, true);
 });
 
 check("other parameters survive byte for byte (no + for %20 re-encoding)", () => {

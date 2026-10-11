@@ -596,8 +596,8 @@ documented fallback for browsers without tab audio capture.
 | Gemtopia ↔ Postgres (Neon) | TLS 1.2 or newer, the server certificate verified against the system CAs with its hostname checked, and SCRAM-SHA-256-PLUS channel binding, which ties the password exchange to that TLS session — a man-in-the-middle with a mis-issued certificate still couldn't relay the login. Decided in `lib/dbTls.ts`, for every non-loopback host, with no switch to turn it off. |
 | Gemtopia ↔ Discogs, YouTube, Anthropic | HTTPS to fixed origins written in the code. The browser never talks to Discogs at all (`connect-src 'self'`). |
 
-The database hop had two latent weaknesses, both found by reading the code
-rather than by an incident, and both fixed with tests (`test-db-tls`):
+The database hop had three latent weaknesses, all found by reading the code
+rather than by an incident, and all fixed with tests (`test-db-tls`):
 
 - **A substring test on the URL.** TLS was skipped when `DATABASE_URL`
   *contained* `localhost` or `127.0.0.1` — so a host like
@@ -612,6 +612,12 @@ rather than by an incident, and both fixed with tests (`test-db-tls`):
   parameters are now stripped from the string before pg sees it; the test
   shows the old behaviour (the string wins) next to the new one (the policy
   wins). A dependency upgrade can no longer quietly downgrade this.
+- **The connection string asked for channel binding the driver never did.**
+  Neon's connection strings end in `channel_binding=require`, but
+  node-postgres doesn't read that parameter: it uses SCRAM-SHA-256-PLUS only
+  when `enableChannelBinding` is set in code. So the URL promised binding and
+  every login used plain SCRAM. It's set in `lib/dbTls.ts` now, and
+  `verify:db` shows which mechanism the login actually used.
 
 `npm run verify:db` connects exactly the way the app does and prints what
 happened: TLS version and cipher, the certificate's subject and issuer, whether

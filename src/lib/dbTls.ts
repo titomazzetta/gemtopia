@@ -2,7 +2,7 @@
  * How the app connects to Postgres: TLS policy decided here, in code, not by
  * whatever a connection string happens to say.
  *
- * Two things this fixes, both found by reading rather than by an incident:
+ * Three things this fixes, all found by reading rather than by an incident:
  *
  *  1. The old check was `DATABASE_URL.includes("localhost")`. A substring
  *     test on a URL: a host like `localhost.example.com`, or a password that
@@ -16,6 +16,11 @@
  *     documented to weaken plain `sslmode=require` to "encrypt but don't
  *     check the certificate". The SSL parameters are now stripped from the
  *     string, and the policy below is the only one that applies.
+ *
+ *  3. Neon's connection strings end in `channel_binding=require`, and
+ *     node-postgres ignores that parameter: it binds only when
+ *     `enableChannelBinding` is set in code. So the URL asked for channel
+ *     binding and the login never used it. It's set here now.
  *
  * The policy: any database that isn't on this machine gets TLS 1.2 or newer
  * with the server certificate verified against the system's trusted CAs and
