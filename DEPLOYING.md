@@ -486,15 +486,27 @@ Order matters, as with every schema change:
 2. **Migrate production first** — the "Chat encryption at rest" block at the
    end of `db/schema.sql`, in Neon's SQL Editor on the production database.
    It's additive and safe with the old code still live: the old code keeps
-   writing the old plaintext form, which the new check still accepts.
+   writing the old plaintext form, which the new check still accepts. The
+   lock at the end of the block can't take yet — it waits until a sealed
+   message exists — even if the chat table is empty.
 3. **Merge.** New messages and notes are sealed from the first one.
 4. **Seal the older ones.** Account menu → Invite someone → **Chat encryption**
    → **Seal older messages**. It converts them in place, in batches, and shows
    "none in plaintext" when it's done.
-5. **Lock it.** Run the same SQL block once more. With no plaintext left, it
+5. **Lock it.** Run the same SQL block once more. With no plaintext left and
+   at least one sealed message in (proof the new code is the one running), it
    adds the constraint that makes the database itself refuse any message
    without ciphertext; the panel then says "refuses any message without
-   ciphertext".
+   ciphertext". If nobody has chatted since the deploy, the panel says it
+   can't lock yet — run the block again after the first message.
+
+Once it's locked, don't use Vercel's instant rollback to a deployment from
+before encryption: that code writes plaintext, which the database now
+refuses — and it writes activity notes inside track saves, joins and leaves
+on shared playlists, so those would fail too, not just chat. If you ever must,
+drop the lock first (`ALTER TABLE playlist_messages DROP CONSTRAINT
+playlist_messages_sealed_required;`) and re-run the block after rolling
+forward.
 
 ### Rotating the master key
 

@@ -351,7 +351,13 @@ shapes from before encryption. After the older rows are sealed,
 `playlist_messages_sealed_required` makes the database refuse any row without
 ciphertext — so a future bug in the app can't quietly start storing plaintext
 again. The migration is expand → deploy → seal the older rows (admin panel)
-→ lock, and each step is safe with the previous code still running.
+→ lock, and each step is safe with the previous code still running. The lock
+only takes once nothing is plaintext *and* at least one sealed row exists —
+proof that the encrypting code is live. Without the second condition, running
+the block ahead of the deploy on a database with no chat yet would have locked
+out the running code, whose track saves, joins and leaves write plaintext
+notes in the same transaction. Once locked, rolling back to a pre-encryption
+build needs the lock dropped first (DEPLOYING.md says how).
 
 **Rotating the master key.** Put the new key in `CHAT_MASTER_KEY` and the old
 one in `CHAT_MASTER_KEY_PREVIOUS`, redeploy, press **Re-wrap keys** in the
