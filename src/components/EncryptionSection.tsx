@@ -108,9 +108,15 @@ export function EncryptionSection() {
 
           <dt className="text-neutral-500">Database</dt>
           <dd className={status.plaintextRefused ? "text-accent" : "text-neutral-400"}>
+            {/* The lock is the schema block's last step (db/schema.sql); it
+                only takes once nothing is plaintext and something is sealed. */}
             {status.plaintextRefused
               ? "refuses any message without ciphertext"
-              : "accepts the older plaintext form until it's sealed and locked"}
+              : status.messages.plaintext > 0
+                ? "accepts the older plaintext form until it's sealed and locked"
+                : status.messages.sealed === 0
+                  ? "not locked yet: it can lock once the first sealed message is in"
+                  : "ready to lock: run the “Chat encryption at rest” SQL block again"}
           </dd>
         </dl>
       )}

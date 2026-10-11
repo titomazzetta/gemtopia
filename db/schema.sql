@@ -586,7 +586,8 @@ END $$;
 --
 -- Expand first (this block, safe to run while the old code is live: it still
 -- writes plaintext rows the shape check accepts), then deploy, then seal the
--- older rows. Every statement is a no-op on a second run.
+-- older rows, then run this block once more to lock. Every statement is a
+-- no-op on a second run.
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS playlist_chat_keys (
@@ -631,14 +632,22 @@ BEGIN
   END IF;
 
   -- The last step, and the one that makes plaintext impossible rather than
-  -- merely unused: once no plaintext row is left, the database refuses any
-  -- row without ciphertext — whatever a future bug in the app tries to write.
-  -- On a database with older rows this waits; run the block again after
-  -- "Seal older messages" reports none left.
+  -- merely unused: the database refuses any row without ciphertext —
+  -- whatever a future bug in the app tries to write.
+  --
+  -- It waits for two things. No plaintext row may be left (run the block
+  -- again after "Seal older messages" reports none). And at least one sealed
+  -- row must exist: proof that the encrypting code is the code that's live.
+  -- Without that second test, running this block ahead of the deploy on a
+  -- database with no chat yet would lock out the code still running — which
+  -- writes plaintext notes inside track saves, joins and leaves, so those
+  -- would fail too, not only chat.
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_sealed_required'
   ) AND NOT EXISTS (
     SELECT 1 FROM playlist_messages WHERE sealed IS NULL
+  ) AND EXISTS (
+    SELECT 1 FROM playlist_messages WHERE sealed IS NOT NULL
   ) THEN
     ALTER TABLE playlist_messages ADD CONSTRAINT playlist_messages_sealed_required
       CHECK (sealed IS NOT NULL);

@@ -2119,6 +2119,49 @@ if (admin) {
       }
     });
 
+    await check("the lock waits for a sealed row: running the block before a deploy can't lock out the code still live", async () => {
+      // The block exactly as an operator pastes it into the SQL editor.
+      const schema = readFileSync(join(here, "..", "db", "schema.sql"), "utf8");
+      const start = schema.indexOf("-- Chat encryption at rest");
+      assert.ok(start > 0, "the block is in db/schema.sql");
+      const block = schema.slice(start);
+      const locked = async () =>
+        (await sql.query(`SELECT 1 FROM pg_constraint WHERE conname = 'playlist_messages_sealed_required'`)).rows.length > 0;
+
+      const created = await admin.call("/api/playlists", { method: "POST", body: { name: "Rollout", entries: [] } });
+      const id = created.body.playlist.id;
+      // One transaction, rolled back: the chat table is emptied and the lock
+      // dropped only inside it. No API calls in here — the ALTERs hold the
+      // table until the rollback.
+      await sql.query("BEGIN");
+      try {
+        await sql.query(`ALTER TABLE playlist_messages DROP CONSTRAINT IF EXISTS playlist_messages_sealed_required`);
+        await sql.query(`DELETE FROM playlist_messages`);
+
+        await sql.query(block);
+        assert.equal(await locked(), false, "no chat yet: the old code may be the one running");
+
+        await sql.query(`INSERT INTO playlist_messages (playlist_id, kind, body) VALUES ($1, 'text', 'from the old code')`, [id]);
+        await sql.query(block);
+        assert.equal(await locked(), false, "plaintext left: not yet");
+
+        await sql.query(`INSERT INTO playlist_messages (playlist_id, kind, sealed) VALUES ($1, 'text', $2)`, [id, randomBytes(64)]);
+        await sql.query(block);
+        assert.equal(await locked(), false, "sealed rows, but plaintext still left: not yet");
+
+        await sql.query(`DELETE FROM playlist_messages WHERE sealed IS NULL`);
+        await sql.query(block);
+        assert.equal(await locked(), true, "all sealed, and the new code is live: locked");
+
+        await sql.query(block);
+        assert.equal(await locked(), true, "and a re-run changes nothing");
+      } finally {
+        await sql.query("ROLLBACK");
+        await admin.call(`/api/playlists/${id}`, { method: "DELETE" });
+      }
+      assert.equal(await locked(), true, "the real table is untouched");
+    });
+
     await check("a key wrapped by a master key that's no longer configured is reported, not guessed at", async () => {
       const created = await admin.call("/api/playlists", { method: "POST", body: { name: "Orphan key", entries: [] } });
       const id = created.body.playlist.id;

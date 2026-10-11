@@ -872,7 +872,7 @@ push, no force-push, nothing merges red.
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
 the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 722 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 169 API tests against a running server. CodeQL
+reached the client bundle, then 170 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -1100,7 +1100,7 @@ npm run test:chat       # 39
 npm run test:audit-gate # 15
 npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
 npm run test:db-tls     # 10 — 722 offline in all
-npm run test:api        # 169 checks, needs a running server + Postgres
+npm run test:api        # 170 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci
