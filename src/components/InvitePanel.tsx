@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { adminApi, ApiError, type AdminOverview, type InviteStatus } from "@/client/api";
+import { EncryptionSection } from "./EncryptionSection";
 
 /**
  * Invites, for admins. Opened from the account menu; full screen on a phone,
@@ -324,6 +325,8 @@ export function InvitePanel({
           {!data && !error && (
             <p className="p-8 text-center text-sm text-neutral-600">Loading…</p>
           )}
+
+          <EncryptionSection />
         </div>
       </div>
     </div>

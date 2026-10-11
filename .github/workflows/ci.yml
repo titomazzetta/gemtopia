@@ -19,6 +19,8 @@ env:
   DISCOGS_CONSUMER_KEY: ci-placeholder-key
   DISCOGS_CONSUMER_SECRET: ci-placeholder-secret
   SESSION_SECRET: Y2ktb25seS1wbGFjZWhvbGRlci1rZXktMzJieXRlcy0
+  # A different placeholder: the app refuses a chat key equal to the session key.
+  CHAT_MASTER_KEY: Y2ktb25seS1jaGF0LW1hc3Rlci1rZXktMzItYnl0ZXM
   APP_ORIGIN: http://localhost:3000
   DISCOGS_CONTACT: +https://example.invalid
   DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/gemtopia_ci
@@ -29,7 +31,9 @@ env:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # Pinned, not ubuntu-latest: that label moves to Ubuntu 26 from 19 Oct
+    # 2026, and a runner change should be a reviewed diff, not a surprise.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     services:
@@ -125,6 +129,12 @@ jobs:
       - name: Mixability tests
         run: npm run test:mixing
 
+      - name: Envelope encryption tests
+        run: npm run test:envelope
+
+      - name: Database TLS policy tests
+        run: npm run test:db-tls
+
       - name: Client and feature unit tests
         # These suites existed but CI never ran them. One step, fail on the
         # first broken suite.
@@ -142,11 +152,11 @@ jobs:
 
       - name: Assert no secret reached the client bundle
         run: |
-          # Both server-only secrets, not just the Discogs one. SESSION_SECRET
+          # Every server-only secret, not just the Discogs one. SESSION_SECRET
           # is the key that seals every session cookie; leaking it into the
-          # bundle would let anyone forge a login, which is worse than leaking
-          # the consumer secret, and it was the one this step did not check.
-          for secret in "ci-placeholder-secret" "$SESSION_SECRET"; do
+          # bundle would let anyone forge a login. CHAT_MASTER_KEY unwraps
+          # every playlist's chat key; leaking it would undo encryption at rest.
+          for secret in "ci-placeholder-secret" "$SESSION_SECRET" "$CHAT_MASTER_KEY"; do
             if grep -rlF -- "$secret" .next/static/ 2>/dev/null; then
               echo "::error::A server-only secret was inlined into the client bundle"
               exit 1

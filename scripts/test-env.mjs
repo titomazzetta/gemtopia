@@ -268,6 +268,37 @@ check("withoutBlanks keeps a value that is only meaningful as a string", () => {
   assert.equal(out.FLAG, "false");
 });
 
+/* -- chat encryption master key ------------------------------------------ */
+
+const KEY = () => randomBytes(32).toString("base64url");
+
+check("CHAT_MASTER_KEY is optional (chat refuses to post without it)", () => {
+  assert.equal(parseEnv(base()).CHAT_MASTER_KEY, undefined);
+});
+
+check("a 32-byte CHAT_MASTER_KEY is accepted", () => {
+  const key = KEY();
+  assert.equal(parseEnv({ ...base(), CHAT_MASTER_KEY: key }).CHAT_MASTER_KEY, key);
+});
+
+check("a short or malformed CHAT_MASTER_KEY is refused", () => {
+  throws({ ...base(), CHAT_MASTER_KEY: "too-short" }, /CHAT_MASTER_KEY must be 32 bytes/);
+  throws({ ...base(), CHAT_MASTER_KEY: `${KEY()}xyz` }, /CHAT_MASTER_KEY must be 32 bytes/);
+});
+
+check("CHAT_MASTER_KEY can't be the session key (one key, one job)", () => {
+  throws({ ...base(), CHAT_MASTER_KEY: SECRET }, /different key from SESSION_SECRET/);
+});
+
+check("retired keys are checked too, and can't repeat the current or session key", () => {
+  const current = KEY();
+  const env = parseEnv({ ...base(), CHAT_MASTER_KEY: current, CHAT_MASTER_KEY_PREVIOUS: `${KEY()}, ${KEY()}` });
+  assert.ok(env.CHAT_MASTER_KEY_PREVIOUS);
+  throws({ ...base(), CHAT_MASTER_KEY: current, CHAT_MASTER_KEY_PREVIOUS: "nope" }, /32-byte base64url keys/);
+  throws({ ...base(), CHAT_MASTER_KEY: current, CHAT_MASTER_KEY_PREVIOUS: current }, /must not repeat/);
+  throws({ ...base(), CHAT_MASTER_KEY: current, CHAT_MASTER_KEY_PREVIOUS: SECRET }, /must not repeat/);
+});
+
 /* ------------------------------------------------------------------------ */
 
 if (failed > 0) {

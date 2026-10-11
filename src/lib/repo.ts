@@ -3,6 +3,15 @@ import { randomBytes } from "node:crypto";
 import { query, queryOne, tx } from "./db";
 import { seal, unseal } from "./crypto";
 import {
+  EnvelopeError,
+  newDataKey,
+  openMessage,
+  sealMessage,
+  unwrapDataKey,
+  wrapDataKey,
+} from "./envelope";
+import { chatKeyRing, requireChatKeyRing } from "./chatKeys";
+import {
   MAX_COLLABORATORS,
   carryAddedBy,
   hashJoinToken,
@@ -576,6 +585,13 @@ interface Queryable {
   ): Promise<{ rows: T[] }>;
 }
 
+/** The pool, shaped like a transaction client, for helpers that take either. */
+const POOL: Queryable = {
+  async query<T extends import("pg").QueryResultRow>(text: string, params?: unknown[]) {
+    return { rows: await query<T>(text, params ?? []) };
+  },
+};
+
 /**
  * Bulk insert via `unnest`, so a 400-track playlist is one statement rather
  * than 400 round trips. Still fully parameterised.
@@ -1009,23 +1025,120 @@ export interface SharedPlaylist {
 interface MessageRow {
   id: string;
   kind: MessageKind;
+  /** Legacy plaintext columns: only rows written before encryption have them. */
   meta: ActivityMeta | null;
-  body: string;
+  body: string | null;
+  /** version ‖ iv ‖ ciphertext ‖ tag; see lib/envelope.ts. */
+  sealed: Buffer | null;
+  author_id: string | null;
   created_at: Date;
   author: string | null;
   mine: boolean;
 }
 
-function toMessage(row: MessageRow): ChatMessage {
-  return {
+/** What a reader sees in place of a message that fails its integrity check. */
+export const UNREADABLE_MESSAGE = "This message can't be shown: it failed its integrity check.";
+
+/* ---- chat keys (envelope encryption, lib/envelope.ts) --------------- */
+
+interface ChatKeyRow {
+  kek_id: string;
+  wrapped_key: Buffer;
+}
+
+async function readChatKeyRow(client: Queryable, playlistId: string): Promise<ChatKeyRow | null> {
+  const { rows } = await client.query<ChatKeyRow>(
+    `SELECT kek_id, wrapped_key FROM playlist_chat_keys WHERE playlist_id = $1`,
+    [playlistId],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * The playlist's chat key if it has one, for reading. Never creates one. Null
+ * when there is no key yet, no master key configured, or the stored key won't
+ * unwrap — the caller shows sealed messages as unreadable either way.
+ */
+async function existingChatKey(client: Queryable, playlistId: string): Promise<Buffer | null> {
+  const ring = chatKeyRing();
+  if (!ring) return null;
+  const row = await readChatKeyRow(client, playlistId);
+  if (!row) return null;
+  try {
+    return unwrapDataKey(ring, row.kek_id, playlistId, row.wrapped_key);
+  } catch (error) {
+    console.error(`[chat] key for playlist ${playlistId} does not unwrap (${(error as Error).message})`);
+    return null;
+  }
+}
+
+/**
+ * The playlist's chat key, made on first use. Callers have already checked
+ * the person may write here. Two first posts racing is fine: ON CONFLICT
+ * keeps one key, and the loser reads the winner's.
+ *
+ * A stored key that won't unwrap throws rather than being replaced, because
+ * a new key would silently orphan every message the old one sealed.
+ */
+async function chatKey(client: Queryable, playlistId: string): Promise<Buffer> {
+  const ring = requireChatKeyRing();
+  const row = await readChatKeyRow(client, playlistId);
+  if (row) return unwrapDataKey(ring, row.kek_id, playlistId, row.wrapped_key);
+
+  const dataKey = newDataKey();
+  const inserted = await client.query<{ playlist_id: string }>(
+    `INSERT INTO playlist_chat_keys (playlist_id, kek_id, wrapped_key)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (playlist_id) DO NOTHING
+     RETURNING playlist_id`,
+    [playlistId, ring.current.id, wrapDataKey(ring.current, playlistId, dataKey)],
+  );
+  if (inserted.rows.length === 1) return dataKey;
+
+  dataKey.fill(0);
+  const winner = await readChatKeyRow(client, playlistId);
+  if (!winner) throw new Error("chat key disappeared while being created");
+  return unwrapDataKey(ring, winner.kek_id, playlistId, winner.wrapped_key);
+}
+
+/** Ids for rows about to be inserted, so each can be sealed to its own id. */
+async function nextMessageIds(client: Queryable, count: number): Promise<string[]> {
+  const { rows } = await client.query<{ id: string }>(
+    `SELECT nextval(pg_get_serial_sequence('playlist_messages', 'id'))::text AS id
+       FROM generate_series(1, $1::int)`,
+    [count],
+  );
+  return rows.map((r) => r.id);
+}
+
+function toMessage(row: MessageRow, playlistId: string, dataKey: Buffer | null): ChatMessage {
+  const base = {
     id: row.id,
-    kind: row.kind,
-    meta: row.meta,
     author: row.author,
-    body: row.body,
     at: row.created_at.getTime(),
     mine: row.mine,
   };
+
+  // Written before encryption, and not yet re-sealed by the admin backfill.
+  if (!row.sealed) {
+    return { ...base, kind: row.kind, meta: row.meta, body: row.body ?? "" };
+  }
+
+  try {
+    if (!dataKey) throw new EnvelopeError("no key");
+    const payload = openMessage(
+      dataKey,
+      { playlistId, messageId: row.id, kind: row.kind },
+      row.author_id,
+      row.sealed,
+    );
+    return { ...base, kind: row.kind, meta: payload.m as ActivityMeta | null, body: payload.b };
+  } catch (error) {
+    // Logged without content — there is none to log — and shown as one
+    // unreadable line rather than failing the whole page.
+    console.error(`[chat] message ${row.id} in ${playlistId} did not verify (${(error as Error).message})`);
+    return { ...base, kind: "text", meta: null, body: UNREADABLE_MESSAGE, unreadable: true };
+  }
 }
 
 /**
@@ -1036,6 +1149,9 @@ function toMessage(row: MessageRow): ChatMessage {
  * Polling reads the latest page again rather than "everything after id N":
  * it picks up deletions for free, and it cannot miss a message that
  * committed out of id order.
+ *
+ * Messages are decrypted here, server-side, after the access check — the
+ * database only ever returns ciphertext for them.
  */
 export async function listMessages(
   userId: string,
@@ -1049,7 +1165,8 @@ export async function listMessages(
   if (!access) return null;
 
   const rows = await query<MessageRow>(
-    `SELECT m.id::text AS id, m.kind, m.meta, m.body, m.created_at,
+    `SELECT m.id::text AS id, m.kind, m.meta, m.body, m.sealed,
+            m.author_id::text AS author_id, m.created_at,
             u.username_display AS author,
             (m.author_id IS NOT DISTINCT FROM $2::uuid) AS mine
        FROM playlist_messages m
@@ -1060,10 +1177,19 @@ export async function listMessages(
       LIMIT $4`,
     [playlistId, userId, before, MESSAGE_PAGE + 1],
   );
-  return {
-    messages: rows.slice(0, MESSAGE_PAGE).map(toMessage),
-    hasMore: rows.length > MESSAGE_PAGE,
-  };
+
+  const page = rows.slice(0, MESSAGE_PAGE);
+  const dataKey = page.some((r) => r.sealed)
+    ? await existingChatKey(POOL, playlistId)
+    : null;
+  try {
+    return {
+      messages: page.map((row) => toMessage(row, playlistId, dataKey)),
+      hasMore: rows.length > MESSAGE_PAGE,
+    };
+  } finally {
+    dataKey?.fill(0);
+  }
 }
 
 export type PostResult =
@@ -1072,18 +1198,31 @@ export type PostResult =
   | { status: "too_fast" };
 
 /**
- * Post a message. `body` must already be normalised (chat.normaliseMessage);
- * the CHECK constraint refuses anything empty or over 500 characters anyway.
+ * Post a message. `body` must already be normalised (chat.normaliseMessage).
  *
- * The access condition is inside the INSERT itself, so there is no window
- * between "may they?" and "they did". The per-person limit is counted in the
- * database, so it holds however many serverless instances are running.
+ * The text is sealed before it reaches the database: AES-256-GCM under the
+ * playlist's own key, bound to this playlist, this message id and its kind.
+ * The id is taken from the sequence first so it can be part of that binding.
+ *
+ * The access condition is still inside the INSERT itself, so there is no
+ * window between "may they?" and "they did". The per-person limit is counted
+ * in the database, so it holds however many serverless instances are running.
  */
 export async function postMessage(
   userId: string,
   playlistId: string,
   body: string,
 ): Promise<PostResult> {
+  // Refuse before touching anything if this deployment can't encrypt:
+  // never fall back to storing the message in plaintext.
+  requireChatKeyRing();
+
+  const access = await queryOne<{ id: string }>(
+    `SELECT p.id FROM playlists p WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}`,
+    [playlistId, userId],
+  );
+  if (!access) return { status: "not_found" };
+
   const recent = await queryOne<{ n: number }>(
     `SELECT count(*)::int AS n FROM playlist_messages
       WHERE author_id = $1 AND kind = 'text'
@@ -1092,24 +1231,50 @@ export async function postMessage(
   );
   if ((recent?.n ?? 0) >= MAX_MESSAGES_PER_MINUTE) return { status: "too_fast" };
 
-  const row = await queryOne<MessageRow>(
-    `WITH inserted AS (
-       INSERT INTO playlist_messages (playlist_id, author_id, body)
-       SELECT p.id, $2, $3
-         FROM playlists p
-        WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
-       RETURNING id, kind, meta, body, created_at
-     )
-     SELECT i.id::text AS id, i.kind, i.meta, i.body, i.created_at,
-            u.username_display AS author, true AS mine
-       FROM inserted i
-       JOIN users u ON u.id = $2`,
-    [playlistId, userId, body],
-  );
+  const dataKey = await chatKey(POOL, playlistId);
+  let row: MessageRow | null;
+  try {
+    const [id] = await nextMessageIds(POOL, 1);
+    const sealed = sealMessage(
+      dataKey,
+      { playlistId, messageId: id!, kind: "text" },
+      { a: userId, b: body, m: null },
+    );
+    row = await queryOne<MessageRow>(
+      `WITH inserted AS (
+         INSERT INTO playlist_messages (id, playlist_id, author_id, sealed)
+         OVERRIDING SYSTEM VALUE
+         SELECT $4::bigint, p.id, $2, $3
+           FROM playlists p
+          WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
+         RETURNING id, kind, created_at
+       )
+       SELECT i.id::text AS id, i.kind, NULL::jsonb AS meta, NULL::text AS body,
+              NULL::bytea AS sealed, $2::text AS author_id, i.created_at,
+              u.username_display AS author, true AS mine
+         FROM inserted i
+         JOIN users u ON u.id = $2`,
+      [playlistId, userId, sealed, id],
+    );
+  } finally {
+    dataKey.fill(0);
+  }
   if (!row) return { status: "not_found" };
 
   await query(PRUNE_MESSAGES, [playlistId, MAX_MESSAGES_KEPT]);
-  return { status: "ok", message: toMessage(row) };
+  // We hold the plaintext already; nothing to decrypt.
+  return {
+    status: "ok",
+    message: {
+      id: row.id,
+      kind: "text",
+      meta: null,
+      author: row.author,
+      body,
+      at: row.created_at.getTime(),
+      mine: true,
+    },
+  };
 }
 
 /**
@@ -1127,7 +1292,11 @@ const PRUNE_MESSAGES = `
 /**
  * Leave activity notes in a playlist's chat, inside the caller's transaction.
  * `kind` and `meta` are only ever written here, from what the server holds —
- * there is no path from a request body to either.
+ * there is no path from a request body to either. Sealed exactly like
+ * messages: the record titles in a note are as private as the chat.
+ *
+ * Without a master key the notes are skipped (and logged), not written in
+ * plaintext — and the edit they describe still goes through.
  */
 async function writeNotes(
   client: Queryable,
@@ -1136,18 +1305,31 @@ async function writeNotes(
   notes: readonly ActivityNote[],
 ): Promise<void> {
   if (notes.length === 0) return;
-  await client.query(
-    `INSERT INTO playlist_messages (playlist_id, author_id, kind, body, meta)
-     SELECT $1, $2, n.kind, n.body, n.meta
-       FROM unnest($3::text[], $4::text[], $5::jsonb[]) AS n(kind, body, meta)`,
-    [
-      playlistId,
-      authorId,
-      notes.map((n) => n.kind),
-      notes.map((n) => n.body),
-      notes.map((n) => JSON.stringify(n.meta)),
-    ],
-  );
+  if (!chatKeyRing()) {
+    console.error(`[chat] ${notes.length} note(s) for ${playlistId} skipped: no CHAT_MASTER_KEY`);
+    return;
+  }
+
+  const dataKey = await chatKey(client, playlistId);
+  try {
+    const ids = await nextMessageIds(client, notes.length);
+    const sealed = notes.map((note, i) =>
+      sealMessage(
+        dataKey,
+        { playlistId, messageId: ids[i]!, kind: note.kind },
+        { a: authorId, b: note.body, m: note.meta as unknown as Record<string, unknown> },
+      ),
+    );
+    await client.query(
+      `INSERT INTO playlist_messages (id, playlist_id, author_id, kind, sealed)
+       OVERRIDING SYSTEM VALUE
+       SELECT n.id, $1, $2, n.kind, n.sealed
+         FROM unnest($3::bigint[], $4::text[], $5::bytea[]) AS n(id, kind, sealed)`,
+      [playlistId, authorId, ids, notes.map((n) => n.kind), sealed],
+    );
+  } finally {
+    dataKey.fill(0);
+  }
   await client.query(PRUNE_MESSAGES, [playlistId, MAX_MESSAGES_KEPT]);
 }
 
@@ -1210,6 +1392,184 @@ export async function deleteMessage(
     [playlistId, userId, messageId],
   );
   return rows.length > 0;
+}
+
+/* ---- encryption administration (admin panel → Encryption) ---------- */
+
+export interface EncryptionStatus {
+  /** CHAT_MASTER_KEY is set on this deployment. */
+  configured: boolean;
+  /** Public id of the current master key (an HMAC fingerprint, not the key). */
+  currentKeyId: string | null;
+  /** Retired master keys still configured for unwrapping. */
+  retiredKeyIds: string[];
+  messages: { sealed: number; plaintext: number };
+  playlistKeys: { total: number; current: number; retired: number; missing: number };
+  /** The database itself refuses a message without ciphertext. */
+  plaintextRefused: boolean;
+}
+
+export async function encryptionStatus(): Promise<EncryptionStatus> {
+  const ring = chatKeyRing();
+  const counts = await queryOne<{ sealed: number; plaintext: number }>(
+    `SELECT count(*) FILTER (WHERE sealed IS NOT NULL)::int AS sealed,
+            count(*) FILTER (WHERE sealed IS NULL)::int AS plaintext
+       FROM playlist_messages`,
+  );
+  const keys = await query<{ kek_id: string; n: number }>(
+    `SELECT kek_id, count(*)::int AS n FROM playlist_chat_keys GROUP BY kek_id`,
+  );
+  const locked = await queryOne<{ on: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM pg_constraint
+                     WHERE conname = 'playlist_messages_sealed_required') AS on`,
+  );
+
+  const playlistKeys = { total: 0, current: 0, retired: 0, missing: 0 };
+  for (const { kek_id, n } of keys) {
+    playlistKeys.total += n;
+    if (ring && kek_id === ring.current.id) playlistKeys.current += n;
+    else if (ring?.byId.has(kek_id)) playlistKeys.retired += n;
+    else playlistKeys.missing += n;
+  }
+
+  return {
+    configured: Boolean(ring),
+    currentKeyId: ring?.current.id ?? null,
+    retiredKeyIds: ring ? [...ring.byId.keys()].filter((id) => id !== ring.current.id) : [],
+    messages: { sealed: counts?.sealed ?? 0, plaintext: counts?.plaintext ?? 0 },
+    playlistKeys,
+    plaintextRefused: locked?.on ?? false,
+  };
+}
+
+/**
+ * Seal messages written before encryption existed, in place, in batches.
+ * Each batch is one transaction that locks its rows (SKIP LOCKED, so two
+ * admins clicking at once share the work rather than colliding), seals each
+ * row to its own id, and clears the plaintext columns in the same UPDATE —
+ * there is no moment where a row has neither or both.
+ *
+ * Stops after `budgetMs` so one request stays well inside a serverless time
+ * limit; the panel calls again until nothing is left.
+ */
+export async function sealOlderMessages(budgetMs = 4_000): Promise<{ sealed: number; remaining: number }> {
+  requireChatKeyRing();
+  const started = Date.now();
+  let sealedCount = 0;
+
+  while (Date.now() - started < budgetMs) {
+    const done = await tx(async (client) => {
+      const { rows } = await client.query<{
+        id: string;
+        playlist_id: string;
+        author_id: string | null;
+        kind: MessageKind;
+        body: string | null;
+        meta: ActivityMeta | null;
+      }>(
+        `SELECT id::text AS id, playlist_id, author_id::text AS author_id, kind, body, meta
+           FROM playlist_messages
+          WHERE sealed IS NULL
+          ORDER BY id
+          LIMIT 200
+          FOR UPDATE SKIP LOCKED`,
+      );
+      if (rows.length === 0) return 0;
+
+      const keys = new Map<string, Buffer>();
+      try {
+        const ids: string[] = [];
+        const blobs: Buffer[] = [];
+        for (const row of rows) {
+          let dataKey = keys.get(row.playlist_id);
+          if (!dataKey) {
+            dataKey = await chatKey(client, row.playlist_id);
+            keys.set(row.playlist_id, dataKey);
+          }
+          ids.push(row.id);
+          blobs.push(
+            sealMessage(
+              dataKey,
+              { playlistId: row.playlist_id, messageId: row.id, kind: row.kind },
+              {
+                a: row.author_id,
+                b: row.body ?? "",
+                m: (row.meta as unknown as Record<string, unknown> | null) ?? null,
+              },
+            ),
+          );
+        }
+        await client.query(
+          `UPDATE playlist_messages m
+              SET sealed = u.sealed, body = NULL, meta = NULL
+             FROM unnest($1::bigint[], $2::bytea[]) AS u(id, sealed)
+            WHERE m.id = u.id AND m.sealed IS NULL`,
+          [ids, blobs],
+        );
+      } finally {
+        for (const key of keys.values()) key.fill(0);
+      }
+      return rows.length;
+    });
+    if (done === 0) break;
+    sealedCount += done;
+  }
+
+  const left = await queryOne<{ n: number }>(
+    `SELECT count(*)::int AS n FROM playlist_messages WHERE sealed IS NULL`,
+  );
+  return { sealed: sealedCount, remaining: left?.n ?? 0 };
+}
+
+/**
+ * Re-wrap every playlist key under the current master key. Run after
+ * rotating CHAT_MASTER_KEY (the old one moved to CHAT_MASTER_KEY_PREVIOUS).
+ * Touches one small row per playlist; no message is decrypted or rewritten.
+ * When it reports nothing remaining, the old key can be deleted from the
+ * host — and from then on, old backups are unreadable too.
+ */
+export async function rewrapChatKeys(): Promise<{ rewrapped: number; remaining: number; missing: number }> {
+  const ring = requireChatKeyRing();
+  const rewrapped = await tx(async (client) => {
+    const { rows } = await client.query<{ playlist_id: string; kek_id: string; wrapped_key: Buffer }>(
+      `SELECT playlist_id, kek_id, wrapped_key
+         FROM playlist_chat_keys
+        WHERE kek_id <> $1
+        ORDER BY playlist_id
+        LIMIT 1000
+        FOR UPDATE SKIP LOCKED`,
+      [ring.current.id],
+    );
+    let count = 0;
+    for (const row of rows) {
+      if (!ring.byId.has(row.kek_id)) continue; // reported as missing below
+      const dataKey = unwrapDataKey(ring, row.kek_id, row.playlist_id, row.wrapped_key);
+      try {
+        await client.query(
+          `UPDATE playlist_chat_keys
+              SET kek_id = $3, wrapped_key = $4, rewrapped_at = now()
+            WHERE playlist_id = $1 AND kek_id = $2`,
+          [row.playlist_id, row.kek_id, ring.current.id, wrapDataKey(ring.current, row.playlist_id, dataKey)],
+        );
+        count += 1;
+      } finally {
+        dataKey.fill(0);
+      }
+    }
+    return count;
+  });
+
+  const left = await query<{ kek_id: string; n: number }>(
+    `SELECT kek_id, count(*)::int AS n FROM playlist_chat_keys WHERE kek_id <> $1 GROUP BY kek_id`,
+    [ring.current.id],
+  );
+  let remaining = 0;
+  let missing = 0;
+  for (const { kek_id, n } of left) {
+    if (ring.byId.has(kek_id)) remaining += n;
+    else missing += n;
+  }
+  return { rewrapped, remaining, missing };
 }
 
 /**

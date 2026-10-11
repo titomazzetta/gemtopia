@@ -654,7 +654,9 @@ playlists too.
   on the playlist in your list, and by the logo — that matches on every device
   you're signed in on. Up to 500 characters a message; delete your own, and the
   owner can delete any. Plain text only: nothing typed is ever turned into
-  HTML or a link.
+  HTML or a link. **Encrypted in transit and at rest**: each shared playlist's
+  chat has its own AES-256 key, locked by a master key that never touches the
+  database, so a copy of the database reads as noise.
 - **The chat keeps score.** Adding or taking out a record, joining and leaving
   leave a small note in the chat — "komron added *Shiva* — Kerri Chandler ·
   1998 · 124 BPM · 6:12" — and tapping the record's name plays it. A big
@@ -718,6 +720,20 @@ playlist to anyone but its owner.**
   a request; the API schemas reject the field outright.
 - Tests assert all of the above, including that the obvious share-URL shapes
   return 404.
+- **Chat is encrypted at rest with keys the database never holds.** Envelope
+  encryption: a random AES-256-GCM key per shared playlist, stored only wrapped
+  by a master key that lives in the host's secret store. Every sealed message
+  is bound to its playlist, its row and its kind, so one moved, copied or
+  edited in the database fails to decrypt and shows as "couldn't be
+  verified" — never as altered text. Once older messages are sealed, the
+  database itself refuses to store a message without ciphertext. Not
+  end-to-end (the server decrypts to show messages to the people on the set);
+  [docs/E2EE-DESIGN.md](./docs/E2EE-DESIGN.md) is the design for that step and
+  why it isn't the first one. Details in
+  [THREAT_MODEL.md §5](./THREAT_MODEL.md#chat-encryption-at-rest).
+- **Encrypted on every hop.** HTTPS with two-year HSTS preload to the browser;
+  to the database, TLS 1.2+ with the certificate verified and SCRAM channel
+  binding, decided in code so a pasted `sslmode=disable` can't switch it off.
 
 ### The one exception, and why it looks like one
 
@@ -854,9 +870,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 665 offline tests, the schema applied to a
+the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 722 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 153 API tests against a running server. CodeQL
+reached the client bundle, then 169 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -984,16 +1000,21 @@ scripts/
 ├── test-mark.mjs              the logo's three cuts
 ├── test-tempo.mjs             estimator vs synthetic signals
 ├── test-mixing.mjs            beatmatch maths, tiers and set length
-└── test-api.mjs               auth, CSRF, IDOR, sharing, privacy, validation
+├── test-envelope.mjs          chat encryption: tamper, wrong key, moved rows, rotation
+├── test-db-tls.mjs            the database TLS policy the URL can't override
+└── test-api.mjs               auth, CSRF, IDOR, sharing, privacy, validation, ciphertext at rest
 src/
 ├── proxy.ts                   per-request CSP + script nonce
 ├── lib/                       server-only
 │   ├── env.ts                 fail-fast, Zod-validated configuration
 │   ├── crypto.ts              AES-256-GCM seal/unseal, constant-time compare
+│   ├── envelope.ts            chat envelope encryption: per-playlist keys, AAD, rotation
+│   ├── chatKeys.ts            the chat master-key ring, from the environment
 │   ├── oauth1.ts              hand-rolled OAuth 1.0a HMAC-SHA1 signing
 │   ├── session.ts             sealed cookie sessions, CSRF, handshake state
 │   ├── auth.ts                the guard every route handler starts with
 │   ├── db.ts                  pooled Postgres, parameterised queries only
+│   ├── dbTls.ts               verified TLS + channel binding to Postgres, decided in code
 │   ├── repo.ts                data access — every query scoped by user_id
 │   ├── discogs.ts             signed client, graph traversal, search, writes
 │   ├── dig.ts                 links-first dig: versions, credits, artist, label, style, era
@@ -1042,13 +1063,13 @@ src/
 
 ```bash
 npm run test           # everything below
-npm run test:env        # 44 cases, no server needed
+npm run test:env        # 49 cases, no server needed
 npm run test:headers    # 24
 npm run test:playables  # 45
 npm run test:sorting    # 26
 npm run test:share      # 28
 npm run test:scrub      # 12
-npm run test:ownership  # 22
+npm run test:ownership  # 27
 npm run test:recent     # 12
 npm run test:adopt      # 15
 npm run test:search     # 11
@@ -1075,8 +1096,11 @@ npm run test:invites    # 28
 npm run test:manifest   # 8
 npm run test:collab     # 20
 npm run test:collab-view # 7
-npm run test:chat       # 38 — 665 offline in all
-npm run test:api        # 153 checks, needs a running server + Postgres
+npm run test:chat       # 39
+npm run test:audit-gate # 15
+npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
+npm run test:db-tls     # 10 — 722 offline in all
+npm run test:api        # 169 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci

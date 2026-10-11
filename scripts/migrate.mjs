@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { pgConnectionOptions } from "../src/lib/dbTls.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const schemaPath = join(here, "..", "db", "schema.sql");
@@ -49,8 +50,6 @@ try {
   process.exit(1);
 }
 
-const isLocal = target.hostname === "localhost" || target.hostname === "127.0.0.1";
-
 /*
  * Say which database this is about to change, before changing it — host and
  * database name only, never the credentials. Development and production can
@@ -66,10 +65,8 @@ console.log(
     : "  (DATABASE_URL from .env.local — your development database, if production has its own)",
 );
 
-const client = new pg.Client({
-  connectionString: url,
-  ssl: isLocal ? false : { rejectUnauthorized: true },
-});
+// The app's TLS policy, not the URL's: see src/lib/dbTls.ts.
+const client = new pg.Client(pgConnectionOptions(url));
 
 try {
   await client.connect();

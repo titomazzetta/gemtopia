@@ -19,6 +19,7 @@ import { createCipheriv, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import pg from "pg";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +39,31 @@ assert.equal(KEY.length, 32, "SESSION_SECRET must decode to 32 bytes");
 
 let failures = 0;
 let ran = 0;
+
+/**
+ * Direct database access, for the checks that have to look underneath the
+ * API — "is it really ciphertext in the table?", "does a tampered row get
+ * caught?". These write to rows by hand, so they only ever run against a
+ * database on this machine (CI's service container, a local Postgres), never
+ * a shared one; anywhere else they are skipped and say so.
+ */
+let dbClient;
+async function db() {
+  if (dbClient !== undefined) return dbClient;
+  dbClient = null;
+  const url = process.env.DATABASE_URL;
+  if (!url) return null;
+  let host;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return null;
+  }
+  if (!["127.0.0.1", "localhost", "::1", "[::1]"].includes(host)) return null;
+  dbClient = new pg.Client({ connectionString: url, ssl: false });
+  await dbClient.connect();
+  return dbClient;
+}
 
 async function check(name, fn) {
   ran += 1;
@@ -141,6 +167,20 @@ await check("a valid session can list playlists", async () => {
   const res = await alice.call("/api/playlists");
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(res.body.playlists));
+});
+
+console.log("\nattack surface");
+
+await check("the image optimizer fetches nothing remote (the app doesn't use it)", async () => {
+  // Next 16.3.6 had an SSRF in Image Optimization. The app never used
+  // next/image, so the optimizer is switched off (`unoptimized`, no allowed
+  // hosts): the route isn't served at all, so whatever the next advisory
+  // against it is, there is nothing here for it to reach.
+  for (const target of ["https://i.discogs.com/x.jpg", "http://169.254.169.254/latest/meta-data/"]) {
+    const res = await fetch(`${BASE}/_next/image?url=${encodeURIComponent(target)}&w=64&q=75`);
+    assert.ok([400, 404].includes(res.status), `${target}: ${res.status}`);
+    assert.doesNotMatch(res.headers.get("content-type") ?? "", /^image\//, target);
+  }
 });
 
 console.log("\nCSRF");
@@ -801,6 +841,8 @@ await check("every route rejects a revoked session, not just playlists", async (
     // The admin surface sits behind the same check before it asks who you are.
     ["/api/admin/invites", "GET", undefined],
     ["/api/admin/invites", "POST", { hours: 1 }],
+    ["/api/admin/encryption", "GET", undefined],
+    ["/api/admin/encryption", "POST", { action: "seal-older" }],
   ];
   for (const [path, method, body] of routes) {
     const res = await dead.call(path, { method, body, cookie: dead.cookie });
@@ -1611,6 +1653,97 @@ console.log("\ncollaborative playlists");
     );
   });
 
+  /* ---- chat encryption at rest ---- */
+  const sql = await db();
+  const rowsOf = async () =>
+    (
+      await sql.query(
+        `SELECT id::text AS id, author_id::text AS author_id, kind, body, meta, sealed
+           FROM playlist_messages WHERE playlist_id = $1 ORDER BY id`,
+        [playlistId],
+      )
+    ).rows;
+  const shownAs = async (id) => (await owner.call(chat)).body.messages.find((m) => m.id === id);
+
+  if (!sql) {
+    console.log("  skip database-level encryption checks (no local DATABASE_URL)");
+  } else {
+    await check("in the database every message and note is ciphertext, and nothing else", async () => {
+      const rows = await rowsOf();
+      assert.ok(rows.length >= 5, "messages and notes to look at");
+      for (const row of rows) {
+        assert.ok(Buffer.isBuffer(row.sealed) && row.sealed.length >= 29, `row ${row.id} is sealed`);
+        assert.equal(row.body, null, `row ${row.id} keeps no plaintext body`);
+        assert.equal(row.meta, null, `row ${row.id} keeps no plaintext metadata`);
+        for (const needle of ["Open with the Theo Parrish?", "Test Track", "Still counts", friend.username]) {
+          assert.equal(row.sealed.includes(Buffer.from(needle)), false, `"${needle}" visible in row ${row.id}`);
+        }
+      }
+      const key = (await sql.query(`SELECT kek_id, wrapped_key FROM playlist_chat_keys WHERE playlist_id = $1`, [playlistId])).rows[0];
+      assert.ok(key, "the playlist has its own key");
+      assert.equal(key.wrapped_key.length, 61, "stored only wrapped");
+      assert.match(key.kek_id, /^[A-Za-z0-9_-]{16}$/);
+      assert.equal((await shownAs(ownerMessageId)).body, "Open with the Theo Parrish?", "and readable through the API");
+    });
+
+    await check("a tampered ciphertext is shown as unreadable — never as altered text", async () => {
+      const [{ sealed }] = (await sql.query(`SELECT sealed FROM playlist_messages WHERE id = $1`, [ownerMessageId])).rows;
+      try {
+        await sql.query(
+          `UPDATE playlist_messages SET sealed = set_byte(sealed, 20, get_byte(sealed, 20) # 1) WHERE id = $1`,
+          [ownerMessageId],
+        );
+        const res = await owner.call(chat);
+        assert.equal(res.status, 200, "one bad row doesn't take the chat down");
+        const shown = res.body.messages.find((m) => m.id === ownerMessageId);
+        assert.equal(shown.unreadable, true);
+        assert.doesNotMatch(shown.body, /Theo Parrish/);
+      } finally {
+        await sql.query(`UPDATE playlist_messages SET sealed = $2 WHERE id = $1`, [ownerMessageId, sealed]);
+      }
+      assert.equal((await shownAs(ownerMessageId)).body, "Open with the Theo Parrish?", "restored");
+    });
+
+    await check("a ciphertext copied into another row doesn't open there", async () => {
+      const rows = await rowsOf();
+      const other = rows.find((r) => r.id !== ownerMessageId && r.kind === "text");
+      const source = rows.find((r) => r.id === ownerMessageId);
+      try {
+        await sql.query(`UPDATE playlist_messages SET sealed = $2 WHERE id = $1`, [other.id, source.sealed]);
+        const shown = await shownAs(other.id);
+        assert.equal(shown.unreadable, true);
+        assert.doesNotMatch(shown.body, /Theo Parrish/);
+      } finally {
+        await sql.query(`UPDATE playlist_messages SET sealed = $2 WHERE id = $1`, [other.id, other.sealed]);
+      }
+    });
+
+    await check("re-attributing a message to someone else in the database is caught", async () => {
+      const [{ author_id }] = (await sql.query(`SELECT author_id::text AS author_id FROM playlist_messages WHERE id = $1`, [ownerMessageId])).rows;
+      const [{ id: friendId }] = (await sql.query(`SELECT id::text AS id FROM users WHERE username_key = lower($1)`, [friend.username])).rows;
+      try {
+        await sql.query(`UPDATE playlist_messages SET author_id = $2 WHERE id = $1`, [ownerMessageId, friendId]);
+        const shown = await shownAs(ownerMessageId);
+        assert.equal(shown.unreadable, true, "shown under the friend's name, it must not read as theirs");
+      } finally {
+        await sql.query(`UPDATE playlist_messages SET author_id = $2 WHERE id = $1`, [ownerMessageId, author_id]);
+      }
+    });
+
+    await check("a message whose author deleted their account still reads", async () => {
+      const [{ author_id }] = (await sql.query(`SELECT author_id::text AS author_id FROM playlist_messages WHERE id = $1`, [ownerMessageId])).rows;
+      try {
+        await sql.query(`UPDATE playlist_messages SET author_id = NULL WHERE id = $1`, [ownerMessageId]);
+        const shown = await shownAs(ownerMessageId);
+        assert.equal(shown.unreadable, undefined);
+        assert.equal(shown.body, "Open with the Theo Parrish?");
+        assert.equal(shown.author, null);
+      } finally {
+        await sql.query(`UPDATE playlist_messages SET author_id = $2 WHERE id = $1`, [ownerMessageId, author_id]);
+      }
+    });
+  }
+
   /* ---- the set's BPM ---- */
   const bpmOf = async (who, key) =>
     (await find(who)).entries.find((e) => e.clipKey === key) ?? null;
@@ -1701,6 +1834,13 @@ console.log("\ncollaborative playlists");
     assert.equal((await owner.call(`/api/playlists/${playlistId}`, { method: "DELETE" })).status, 200);
     assert.equal(await find(owner), null);
   });
+
+  if (sql) {
+    await check("…its key, and with it the chat's ciphertext, goes too", async () => {
+      assert.equal((await sql.query(`SELECT 1 FROM playlist_chat_keys WHERE playlist_id = $1`, [playlistId])).rows.length, 0);
+      assert.equal((await sql.query(`SELECT 1 FROM playlist_messages WHERE playlist_id = $1`, [playlistId])).rows.length, 0);
+    });
+  }
 }
 
 console.log("\ninvite codes");
@@ -1882,6 +2022,124 @@ if (!admin) {
     assert.equal(res.status, 400);
   });
 }
+
+console.log("\nchat encryption administration");
+
+await check("the encryption admin routes are a 404 to a member", async () => {
+  assert.equal((await mallory.call("/api/admin/encryption")).status, 404);
+  assert.equal(
+    (await mallory.call("/api/admin/encryption", { method: "POST", body: { action: "seal-older" } })).status,
+    404,
+  );
+});
+
+if (admin) {
+  await check("status: a configured key, its public id only, and counts", async () => {
+    const res = await admin.call("/api/admin/encryption");
+    assert.equal(res.status, 200);
+    assert.equal(res.body.configured, true, "CHAT_MASTER_KEY must be set for the API tests");
+    assert.match(res.body.currentKeyId, /^[A-Za-z0-9_-]{16}$/);
+    assert.equal(typeof res.body.messages.sealed, "number");
+    const raw = JSON.stringify(res.body);
+    assert.ok(!raw.includes(process.env.CHAT_MASTER_KEY ?? "no-key-in-env"), "never the key itself");
+  });
+
+  await check("actions need CSRF and a known action", async () => {
+    assert.equal(
+      (await admin.call("/api/admin/encryption", { method: "POST", body: { action: "seal-older" }, csrfToken: "wrong" })).status,
+      403,
+    );
+    assert.equal((await admin.call("/api/admin/encryption", { method: "POST", body: { action: "decrypt-all" } })).status, 400);
+    assert.equal((await admin.call("/api/admin/encryption", { method: "POST", body: { action: "rewrap", key: "x" } })).status, 400);
+  });
+
+  const sql = await db();
+  if (!sql) {
+    console.log("  skip sealing older messages (no local DATABASE_URL)");
+  } else {
+    await check("messages from before encryption are read as before, then sealed in place", async () => {
+      // A shared playlist with a chat written by the old code: plaintext rows.
+      const created = await admin.call("/api/playlists", {
+        method: "POST",
+        body: { name: "From before", entries: [clip(7001, "kkkkkkkkkkk")] },
+      });
+      assert.equal(created.status, 201);
+      const id = created.body.playlist.id;
+      const [{ id: adminId }] = (await sql.query(`SELECT id::text AS id FROM users WHERE username_key = lower($1)`, [admin.username])).rows;
+
+      await sql.query(`ALTER TABLE playlist_messages DROP CONSTRAINT IF EXISTS playlist_messages_sealed_required`);
+      try {
+        await sql.query(
+          `INSERT INTO playlist_messages (playlist_id, author_id, kind, body, meta) VALUES
+             ($1, $2, 'text', 'Written before encryption', NULL),
+             ($1, $2, 'added', 'added Older Record', '{"clipKey":"7001:kkkkkkkkkkk","title":"Older Record"}'::jsonb)`,
+          [id, adminId],
+        );
+        const before = (await admin.call(`/api/playlists/${id}/messages`)).body.messages;
+        assert.deepEqual(before.map((m) => m.body).sort(), ["Written before encryption", "added Older Record"]);
+
+        const status = (await admin.call("/api/admin/encryption")).body;
+        assert.ok(status.messages.plaintext >= 2);
+        assert.equal(status.plaintextRefused, false);
+
+        const res = await admin.call("/api/admin/encryption", { method: "POST", body: { action: "seal-older" } });
+        assert.equal(res.status, 200);
+        assert.ok(res.body.result.sealed >= 2);
+        assert.equal(res.body.result.remaining, 0);
+        assert.equal(res.body.status.messages.plaintext, 0);
+
+        const rows = (await sql.query(`SELECT body, meta, sealed FROM playlist_messages WHERE playlist_id = $1`, [id])).rows;
+        for (const row of rows) {
+          assert.equal(row.body, null);
+          assert.equal(row.meta, null);
+          assert.equal(row.sealed.includes(Buffer.from("Older Record")), false);
+        }
+        const after = (await admin.call(`/api/playlists/${id}/messages`)).body.messages;
+        assert.deepEqual(after.map((m) => m.body).sort(), ["Written before encryption", "added Older Record"], "same text, now sealed");
+        assert.equal(after.find((m) => m.kind === "added").meta.title, "Older Record");
+      } finally {
+        // Re-add the lock exactly as db/schema.sql does once nothing is plaintext.
+        await sql.query(`ALTER TABLE playlist_messages ADD CONSTRAINT playlist_messages_sealed_required CHECK (sealed IS NOT NULL)`);
+        await admin.call(`/api/playlists/${id}`, { method: "DELETE" });
+      }
+    });
+
+    await check("once locked, the database itself refuses a plaintext message", async () => {
+      assert.equal((await admin.call("/api/admin/encryption")).body.plaintextRefused, true);
+      const created = await admin.call("/api/playlists", { method: "POST", body: { name: "Locked", entries: [] } });
+      const id = created.body.playlist.id;
+      try {
+        await assert.rejects(
+          sql.query(`INSERT INTO playlist_messages (playlist_id, kind, body) VALUES ($1, 'text', 'plain')`, [id]),
+          (error) => error.code === "23514",
+          "check_violation",
+        );
+      } finally {
+        await admin.call(`/api/playlists/${id}`, { method: "DELETE" });
+      }
+    });
+
+    await check("a key wrapped by a master key that's no longer configured is reported, not guessed at", async () => {
+      const created = await admin.call("/api/playlists", { method: "POST", body: { name: "Orphan key", entries: [] } });
+      const id = created.body.playlist.id;
+      try {
+        await sql.query(
+          `INSERT INTO playlist_chat_keys (playlist_id, kek_id, wrapped_key) VALUES ($1, 'AAAAAAAAAAAAAAAA', $2)`,
+          [id, Buffer.alloc(61, 7)],
+        );
+        const status = (await admin.call("/api/admin/encryption")).body;
+        assert.ok(status.playlistKeys.missing >= 1);
+        const rewrap = await admin.call("/api/admin/encryption", { method: "POST", body: { action: "rewrap" } });
+        assert.equal(rewrap.status, 200);
+        assert.ok(rewrap.body.result.missing >= 1, "left alone and counted, never replaced");
+      } finally {
+        await admin.call(`/api/playlists/${id}`, { method: "DELETE" });
+      }
+    });
+  }
+}
+
+await dbClient?.end();
 
 console.log(
   failures === 0

@@ -12,7 +12,7 @@ import {
 } from "@/client/chatView";
 import { useFinePointer } from "@/client/useFinePointer";
 import { MAX_MESSAGE_CHARS, canDeleteMessage, messageLength } from "@/lib/chat";
-import { ChatIcon, SendIcon, Users } from "./Icons";
+import { ChatIcon, Lock, SendIcon, Users } from "./Icons";
 
 /** How often an open chat asks for new messages. */
 const POLL_MS = 4_000;
@@ -279,7 +279,20 @@ export function ChatPanel({
           <ChatIcon className="mt-1 h-4 w-4 shrink-0 text-accent-alt" />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-neutral-100">{playlist.name}</h2>
-            <p className="truncate text-[11px] text-neutral-500">{people.join(", ")}</p>
+            {/*
+              Said plainly, and no more than is true: encrypted on the wire
+              and in the database, but not end-to-end — the server holds the
+              key that opens it, so it can show it to the people on the set.
+            */}
+            <p
+              className="flex min-w-0 items-center gap-1 text-[11px] text-neutral-500"
+              title="Encrypted in transit and at rest: messages travel over HTTPS and are stored encrypted (AES-256-GCM) with a key unique to this playlist, itself locked by a master key kept outside the database. Not end-to-end: Gemtopia's server unlocks them to show them to the people on this playlist."
+            >
+              <Lock className="h-3 w-3 shrink-0 text-neutral-600" />
+              <span className="shrink-0">Encrypted</span>
+              <span aria-hidden="true">·</span>
+              <span className="truncate">{people.join(", ")}</span>
+            </p>
           </div>
           <button
             type="button"
@@ -407,9 +420,16 @@ export function ChatPanel({
                             : "rounded-bl-md bg-ink-800 text-neutral-100"
                         } ${isSelected ? "ring-2 ring-accent-alt/60" : ""}`}
                       >
-                        <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-                          {message.body}
-                        </span>
+                        {message.unreadable ? (
+                          <span className="inline-flex items-center gap-1.5 italic text-neutral-500">
+                            <Lock className="h-3 w-3 shrink-0" />
+                            {message.body}
+                          </span>
+                        ) : (
+                          <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                            {message.body}
+                          </span>
+                        )}
                         <span className="ml-2 inline-block translate-y-0.5 text-[10px] text-neutral-500">
                           {time(message.at)}
                         </span>
