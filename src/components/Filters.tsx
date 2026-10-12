@@ -372,7 +372,7 @@ function ChipGroup({
           */}
           {onMatchAllChange && selected.length > 1 && (
             <div
-              className="flex overflow-hidden rounded border border-ink-700"
+              className="flex overflow-hidden rounded-sm border border-ink-700"
               role="group"
               aria-label={`${label} match mode`}
             >
@@ -578,7 +578,7 @@ export function Filters({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <div className="sticky top-0 z-10 bg-ink-900/95 px-4 py-3 backdrop-blur">
+      <div className="sticky top-0 z-10 bg-ink-900/95 px-4 py-3 backdrop-blur-sm">
         <label className="relative block">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-neutral-500" />
           <input
@@ -643,7 +643,7 @@ export function Filters({
           <button
             type="button"
             onClick={() => onChange({ ...filters, ...scaleRange(filters, 0.5) })}
-            className="flex-1 rounded border border-ink-700 py-1 font-mono text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+            className="flex-1 rounded-sm border border-ink-700 py-1 font-mono text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
             title="Halve the range — find the half-time versions"
           >
             ÷2
@@ -651,7 +651,7 @@ export function Filters({
           <button
             type="button"
             onClick={() => onChange({ ...filters, ...scaleRange(filters, 2) })}
-            className="flex-1 rounded border border-ink-700 py-1 font-mono text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+            className="flex-1 rounded-sm border border-ink-700 py-1 font-mono text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
             title="Double the range — find the double-time versions"
           >
             ×2
@@ -659,7 +659,7 @@ export function Filters({
           <button
             type="button"
             onClick={() => onChange({ ...filters, bpmFrom: BPM_FLOOR, bpmTo: BPM_CEILING })}
-            className="flex-[2] rounded border border-ink-700 py-1 text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+            className="flex-2 rounded-sm border border-ink-700 py-1 text-[10px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
             title={`Back to the default ${BPM_FLOOR}–${BPM_CEILING} window`}
           >
             {BPM_FLOOR}–{BPM_CEILING}
@@ -667,7 +667,7 @@ export function Filters({
           <button
             type="button"
             onClick={() => onChange({ ...filters, bpmFrom: null, bpmTo: null })}
-            className="flex-1 rounded border border-ink-700 py-1 text-[10px] text-neutral-500 hover:border-ink-600 hover:text-neutral-100"
+            className="flex-1 rounded-sm border border-ink-700 py-1 text-[10px] text-neutral-500 hover:border-ink-600 hover:text-neutral-100"
             title="No tempo constraint"
           >
             any
@@ -732,7 +732,7 @@ export function Filters({
                     onPitchChange(Number(event.target.value));
                   }}
                   aria-label="Deck pitch range"
-                  className="min-w-0 flex-1 rounded border border-ink-700 bg-ink-900 px-1.5 py-0.5 text-[10px] text-neutral-300"
+                  className="min-w-0 flex-1 rounded-sm border border-ink-700 bg-ink-900 px-1.5 py-0.5 text-[10px] text-neutral-300"
                 >
                   {DECK_PRESETS.map((deck) => (
                     <option key={deck.id} value={deck.percent}>
@@ -760,7 +760,7 @@ export function Filters({
                     );
                   }}
                   aria-label="Custom deck pitch range percent"
-                  className="w-10 shrink-0 rounded border border-ink-700 bg-ink-900 px-1 py-0.5 text-center font-mono text-[10px] text-neutral-300"
+                  className="w-10 shrink-0 rounded-sm border border-ink-700 bg-ink-900 px-1 py-0.5 text-center font-mono text-[10px] text-neutral-300"
                 />
               </div>
             )}
@@ -808,7 +808,7 @@ export function Filters({
 
         {facets.bpmKnown === 0 && (
           <p className="mt-2 text-[10px] leading-relaxed text-neutral-600">
-            No tempos catalogued yet. Hit <kbd className="rounded bg-ink-800 px-1">T</kbd>{" "}
+            No tempos catalogued yet. Hit <kbd className="rounded-sm bg-ink-800 px-1">T</kbd>{" "}
             in time while something plays, or turn on auto-detect in the player.
             Style bands appear here once there are a few readings.
           </p>
@@ -819,7 +819,7 @@ export function Filters({
             type="checkbox"
             checked={filters.withBpmOnly}
             onChange={(e) => onChange({ ...filters, withBpmOnly: e.target.checked })}
-            className="h-3.5 w-3.5 rounded border-ink-600 bg-ink-850 accent-accent"
+            className="h-3.5 w-3.5 rounded-sm border-ink-600 bg-ink-850 accent-accent"
           />
           Only clips with a known BPM
         </label>
@@ -844,7 +844,7 @@ export function Filters({
             type="checkbox"
             checked={filters.tracksOnly}
             onChange={(e) => onChange({ ...filters, tracksOnly: e.target.checked })}
-            className="h-3.5 w-3.5 rounded border-ink-600 bg-ink-850 accent-accent"
+            className="h-3.5 w-3.5 rounded-sm border-ink-600 bg-ink-850 accent-accent"
           />
           Only clips matched to a single track
         </label>

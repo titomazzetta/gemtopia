@@ -166,7 +166,7 @@ export function InvitePanel({
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-stretch justify-center bg-black/70 lg:items-center lg:p-8"
+      className="fixed inset-0 z-60 flex items-stretch justify-center bg-black/70 lg:items-center lg:p-8"
       role="dialog"
       aria-modal="true"
       aria-label="Invites"

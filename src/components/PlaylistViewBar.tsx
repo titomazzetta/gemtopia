@@ -46,7 +46,7 @@ export function PlaylistViewBar({
       <div
         role="radiogroup"
         aria-label="Show this playlist by"
-        className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 [scrollbar-width:none]"
+        className="-mx-1 flex items-center gap-1 overflow-x-auto px-1 scrollbar-none"
       >
         {PLAYLIST_VIEWS.map((view) => {
           const active = state.view === view;

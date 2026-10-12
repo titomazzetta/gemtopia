@@ -109,10 +109,13 @@ check("the lockup ratio is stated once and is not 1", () => {
 
 /* ---- the palette ---- */
 
-const tailwind = readFileSync(new URL("../tailwind.config.ts", import.meta.url), "utf8");
+// Tailwind 4 keeps the theme in CSS: `--color-ink-950: #050806;` and so on.
+const theme = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
+const TOKENS = { "950": "--color-ink-950", DEFAULT: "--color-accent", alt: "--color-accent-alt" };
 const hex = (name) => {
-  const m = new RegExp(`${name}:\\s*"(#[0-9a-f]{6})"`, "i").exec(tailwind);
-  assert.ok(m, `${name} is missing from the palette`);
+  const token = TOKENS[name] ?? name;
+  const m = new RegExp(`${token}:\\s*(#[0-9a-f]{6})\\s*;`, "i").exec(theme);
+  assert.ok(m, `${token} is missing from the palette`);
   return m[1];
 };
 

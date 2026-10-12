@@ -90,8 +90,8 @@ export function Sheet({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`relative flex flex-col rounded-t-2xl border-t border-ink-700 bg-ink-900 outline-none ${
-          aboveBar ? "max-h-[calc(85vh_-_var(--mobile-bar-h,0px))] border-b" : "max-h-[85vh]"
+        className={`relative flex flex-col rounded-t-2xl border-t border-ink-700 bg-ink-900 outline-hidden ${
+          aboveBar ? "max-h-[calc(85vh-var(--mobile-bar-h,0px))] border-b" : "max-h-[85vh]"
         }`}
       >
         {/* The grab handle. Purely a signal that this thing dismisses. */}

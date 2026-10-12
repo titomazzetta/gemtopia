@@ -304,7 +304,7 @@ export function PullList({
 
   return (
     <div
-      className="fixed inset-x-0 top-0 z-[60] flex items-stretch justify-center bg-black/70 lg:items-center lg:p-8"
+      className="fixed inset-x-0 top-0 z-60 flex items-stretch justify-center bg-black/70 lg:items-center lg:p-8"
       // Stops above the phone's player bar, so the transport and the scrubber
       // stay in reach while you audition and reorder. 0 on desktop.
       style={{ bottom: "var(--mobile-bar-h, 0px)" }}
@@ -441,7 +441,7 @@ export function PullList({
                           {playing && <Play className="mr-1 inline h-3 w-3" />}
                           {row.recordOnly && (
                             <span
-                              className="mr-1.5 inline-block -translate-y-px rounded border border-neutral-700 px-1 align-middle text-[9px] font-medium uppercase leading-[14px] tracking-wide text-neutral-400"
+                              className="mr-1.5 inline-block -translate-y-px rounded-sm border border-neutral-700 px-1 align-middle text-[9px] font-medium uppercase leading-[14px] tracking-wide text-neutral-400"
                               title="No YouTube clip — play it from the record"
                             >
                               record only
@@ -547,7 +547,7 @@ function PitchChip({ check }: { check: MixCheck }) {
   return (
     <span
       title={`${STRAIN_META[check.strain].label} — ${check.summary}`}
-      className={`rounded border px-1 py-px text-[10px] leading-none ${CHIP_TONE[tone] ?? CHIP_TONE.muted}`}
+      className={`rounded-sm border px-1 py-px text-[10px] leading-none ${CHIP_TONE[tone] ?? CHIP_TONE.muted}`}
     >
       {shift}
       {pitch === null ? "no BPM" : `±${pitch.toFixed(1)}%`}

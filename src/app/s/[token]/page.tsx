@@ -110,7 +110,7 @@ export default async function SharedPlaylistPage({
               <span className="block truncate text-[13px] text-neutral-200">
                 {item.videoId === null && (
                   <span
-                    className="mr-1.5 rounded border border-neutral-700 px-1 align-middle text-[9px] uppercase tracking-wide text-neutral-500"
+                    className="mr-1.5 rounded-sm border border-neutral-700 px-1 align-middle text-[9px] uppercase tracking-wide text-neutral-500"
                     title="No YouTube clip — play it from the record"
                   >
                     record only

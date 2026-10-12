@@ -229,7 +229,7 @@ export function SetPrepBar({
               if (event.target.value === "custom") return;
               onPitchChange(Number(event.target.value));
             }}
-            className="rounded border border-ink-700 bg-ink-850 px-1.5 py-0.5 text-[11px] text-neutral-300"
+            className="rounded-sm border border-ink-700 bg-ink-850 px-1.5 py-0.5 text-[11px] text-neutral-300"
             aria-label="Deck pitch range"
           >
             {DECK_PRESETS.map((deck) => (
@@ -280,7 +280,7 @@ export function SetPrepBar({
                 ),
               );
             }}
-            className="w-12 rounded border border-ink-700 bg-ink-850 px-1 py-0.5 text-center font-mono text-[11px] text-neutral-300"
+            className="w-12 rounded-sm border border-ink-700 bg-ink-850 px-1 py-0.5 text-center font-mono text-[11px] text-neutral-300"
             title="Any range you like — the presets are just the common ones"
           />
           <span aria-hidden="true">%</span>

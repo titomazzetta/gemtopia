@@ -130,7 +130,7 @@ export function MobileBar({
   };
 
   return (
-    <div ref={barRef} className="shrink-0 border-t border-ink-800 bg-ink-900/95 backdrop-blur lg:hidden">
+    <div ref={barRef} className="shrink-0 border-t border-ink-800 bg-ink-900/95 backdrop-blur-sm lg:hidden">
       {/*
         There is no B key on a phone, so the way back from a record lives in
         the one bar that is always on screen. Full width and 36px tall: this is

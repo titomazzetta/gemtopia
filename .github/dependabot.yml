@@ -7,12 +7,9 @@ updates:
     open-pull-requests-limit: 5
     ignore:
       # Majors deferred deliberately, each needing its own migration pass.
-      # Scoped to these three by name rather than blanket-ignoring every major,
-      # so a major that does matter still opens a PR and still gets looked at.
-      - dependency-name: tailwindcss
-        # v4 moves configuration out of tailwind.config.ts and into CSS, and
-        # changes the @tailwind directives and @apply semantics this app uses.
-        update-types: ["version-update:semver-major"]
+      # Scoped to these by name rather than blanket-ignoring every major, so a
+      # major that does matter still opens a PR and still gets looked at.
+      # (Tailwind was on this list until its v4 migration landed.)
       - dependency-name: zod
         # v4 changes error shapes and parsing semantics across 15 files — every
         # API route boundary plus env.ts. The one where a quiet behavioural

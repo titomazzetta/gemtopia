@@ -68,7 +68,7 @@ export function RecordOnlyCard({
 
   return (
     <div
-      className="fixed inset-x-0 top-0 z-[60] flex items-end justify-center bg-black/60 lg:items-center lg:p-8"
+      className="fixed inset-x-0 top-0 z-60 flex items-end justify-center bg-black/60 lg:items-center lg:p-8"
       style={{ bottom: "var(--mobile-bar-h, 0px)" }}
       role="dialog"
       aria-modal="true"
@@ -121,7 +121,7 @@ export function RecordOnlyCard({
               event.preventDefault();
               tap(event.timeStamp);
             }}
-            className="flex flex-1 select-none flex-col items-center justify-center rounded-xl border border-accent/40 bg-accent/10 py-4 text-accent active:bg-accent/20 [-webkit-touch-callout:none] [touch-action:manipulation]"
+            className="flex flex-1 select-none flex-col items-center justify-center rounded-xl border border-accent/40 bg-accent/10 py-4 text-accent active:bg-accent/20 [-webkit-touch-callout:none] touch-manipulation"
             aria-label="Tap along to the beat"
           >
             <span className="text-sm font-semibold tracking-wider">TAP</span>

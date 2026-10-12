@@ -27,7 +27,7 @@ function Bars({ title, items }: { title: string; items: Weighted[] }) {
         {items.slice(0, 6).map((item) => (
           <li key={item.name} className="relative">
             <div
-              className="absolute inset-y-0 left-0 rounded-sm bg-accent/10"
+              className="absolute inset-y-0 left-0 rounded-xs bg-accent/10"
               style={{ width: `${(item.count / max) * 100}%` }}
               aria-hidden="true"
             />
@@ -69,7 +69,7 @@ export function InsightsPanel({
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-4 py-2.5 backdrop-blur">
+      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-ink-800 bg-ink-900/95 px-4 py-2.5 backdrop-blur-sm">
         <h3 className="min-w-0 flex-1 truncate text-xs font-medium text-neutral-200">
           {playlistName}
         </h3>
@@ -79,7 +79,7 @@ export function InsightsPanel({
             onClick={onRefresh}
             disabled={loading}
             title="Re-run the analysis"
-            className="rounded border border-ink-700 p-1.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-40"
+            className="rounded-sm border border-ink-700 p-1.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-40"
           >
             <Refresh className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
           </button>
@@ -97,7 +97,7 @@ export function InsightsPanel({
       </div>
 
       {error && (
-        <p role="alert" className="m-4 rounded border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
+        <p role="alert" className="m-4 rounded-sm border border-red-500/30 bg-red-500/10 px-3 py-2 text-[11px] text-red-300">
           {error}
         </p>
       )}
@@ -133,7 +133,7 @@ export function InsightsPanel({
           )}
 
           {!data.usedLlm && data.llmSkipped === "no_key" && (
-            <p className="rounded border border-ink-700 bg-ink-850 px-2.5 py-2 text-[10px] leading-relaxed text-neutral-500">
+            <p className="rounded-sm border border-ink-700 bg-ink-850 px-2.5 py-2 text-[10px] leading-relaxed text-neutral-500">
               Written analysis is off — no <code>ANTHROPIC_API_KEY</code> is set
               on this deployment. Recommendations below are the deterministic
               graph results, which is the part that finds the records anyway.
@@ -141,7 +141,7 @@ export function InsightsPanel({
           )}
 
           {!data.usedLlm && data.llmSkipped === "budget" && (
-            <p className="rounded border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[10px] text-amber-300">
+            <p className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[10px] text-amber-300">
               Daily AI budget reached. Graph recommendations still shown.
             </p>
           )}
@@ -153,13 +153,13 @@ export function InsightsPanel({
             </h4>
 
             <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div className="rounded border border-ink-800 bg-ink-850 px-2 py-1.5">
+              <div className="rounded-sm border border-ink-800 bg-ink-850 px-2 py-1.5">
                 <div className="text-neutral-600">Tracks</div>
                 <div className="font-mono text-neutral-200">
                   {data.profile.trackCount}
                 </div>
               </div>
-              <div className="rounded border border-ink-800 bg-ink-850 px-2 py-1.5">
+              <div className="rounded-sm border border-ink-800 bg-ink-850 px-2 py-1.5">
                 <div className="text-neutral-600">Era</div>
                 <div className="font-mono text-neutral-200">
                   {data.profile.yearRange
@@ -167,7 +167,7 @@ export function InsightsPanel({
                     : "—"}
                 </div>
               </div>
-              <div className="col-span-2 rounded border border-ink-800 bg-ink-850 px-2 py-1.5">
+              <div className="col-span-2 rounded-sm border border-ink-800 bg-ink-850 px-2 py-1.5">
                 <div className="text-neutral-600">Tempo</div>
                 <div className="font-mono text-neutral-200">
                   {data.profile.bpm.median !== null
@@ -210,10 +210,10 @@ export function InsightsPanel({
               {data.recommendations.map((rec) => (
                 <li
                   key={rec.releaseId}
-                  className="rounded border border-ink-800 bg-ink-850 p-2"
+                  className="rounded-sm border border-ink-800 bg-ink-850 p-2"
                 >
                   <div className="flex gap-2">
-                    <span className="h-10 w-10 shrink-0 overflow-hidden rounded bg-ink-800">
+                    <span className="h-10 w-10 shrink-0 overflow-hidden rounded-sm bg-ink-800">
                       {rec.thumb ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -254,7 +254,7 @@ export function InsightsPanel({
                     {rec.signals.slice(0, 3).map((signal) => (
                       <span
                         key={signal}
-                        className="rounded bg-ink-800 px-1.5 py-0.5 text-[9px] text-neutral-500"
+                        className="rounded-sm bg-ink-800 px-1.5 py-0.5 text-[9px] text-neutral-500"
                       >
                         {signal}
                       </span>

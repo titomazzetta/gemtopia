@@ -389,7 +389,7 @@ export function TrackList({
                   onClick={() => onPlay(index)}
                   className="flex min-w-0 flex-1 items-center gap-3 py-2 text-left"
                 >
-                  <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded bg-ink-800">
+                  <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-sm bg-ink-800">
                     {item.thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -440,7 +440,7 @@ export function TrackList({
                       {recordOnly && (
                         // On a phone the disc on the artwork says it; the
                         // title needs the width more than the tag does.
-                        <span className="mr-1.5 hidden -translate-y-px rounded border border-neutral-700 px-1 align-middle text-[9px] font-medium uppercase leading-[14px] tracking-wide text-neutral-400 sm:inline-block">
+                        <span className="mr-1.5 hidden -translate-y-px rounded-sm border border-neutral-700 px-1 align-middle text-[9px] font-medium uppercase leading-[14px] tracking-wide text-neutral-400 sm:inline-block">
                           record only
                         </span>
                       )}
@@ -489,7 +489,7 @@ export function TrackList({
                   {/* In a tight list the numbers move into the second line (above). */}
                   <span className={`hidden shrink-0 items-center gap-2 ${tight && phoneMeta ? "" : "sm:flex"}`}>
                     {item.styles[0] && !tight && (
-                      <span className="rounded bg-ink-800 px-1.5 py-0.5 text-[10px] text-neutral-500">
+                      <span className="rounded-sm bg-ink-800 px-1.5 py-0.5 text-[10px] text-neutral-500">
                         {item.styles[0]}
                       </span>
                     )}
@@ -564,7 +564,7 @@ export function TrackList({
                     type="button"
                     onClick={() => onAdd(item)}
                     title="Add to playlist"
-                    className="shrink-0 rounded p-1.5 text-neutral-600 transition-opacity hover:bg-ink-800 hover:text-accent focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                    className="shrink-0 rounded-sm p-1.5 text-neutral-600 transition-opacity hover:bg-ink-800 hover:text-accent focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
                     <Plus className="h-3.5 w-3.5" />
                   </button>
@@ -582,7 +582,7 @@ export function TrackList({
                     type="button"
                     onClick={() => onRemove(item, index)}
                     title="Remove from playlist"
-                    className="shrink-0 rounded p-1.5 text-neutral-600 transition-opacity hover:bg-ink-800 hover:text-red-400 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                    className="shrink-0 rounded-sm p-1.5 text-neutral-600 transition-opacity hover:bg-ink-800 hover:text-red-400 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
                     <Trash className="h-3.5 w-3.5" />
                   </button>
