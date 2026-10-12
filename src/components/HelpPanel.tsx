@@ -22,7 +22,7 @@ interface Section {
 }
 
 const k = (key: string) => (
-  <kbd className="rounded border border-ink-600 bg-ink-850 px-1 font-mono text-[10px] text-neutral-200">{key}</kbd>
+  <kbd className="rounded-sm border border-ink-600 bg-ink-850 px-1 font-mono text-[10px] text-neutral-200">{key}</kbd>
 );
 
 export const HELP: ReadonlyArray<Section> = [
@@ -179,7 +179,7 @@ export function HelpPanel({
                 role="tab"
                 aria-selected={tab === value}
                 onClick={() => setTab(value)}
-                className={`rounded px-2 py-0.5 ${tab === value ? "bg-ink-700 text-neutral-100" : "text-neutral-400"}`}
+                className={`rounded-sm px-2 py-0.5 ${tab === value ? "bg-ink-700 text-neutral-100" : "text-neutral-400"}`}
               >
                 {value === "how" ? "Features" : "Keyboard"}
               </button>
@@ -189,7 +189,7 @@ export function HelpPanel({
             ref={closeRef}
             type="button"
             onClick={onClose}
-            className="ml-auto rounded border border-ink-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:text-neutral-100"
+            className="ml-auto rounded-sm border border-ink-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:text-neutral-100"
           >
             Close
           </button>
@@ -218,7 +218,7 @@ export function HelpPanel({
                     {keys.map((key) => (
                       <kbd
                         key={key}
-                        className="min-w-[1.6rem] rounded border border-ink-600 bg-ink-850 px-1.5 py-0.5 text-center font-mono text-[11px] text-neutral-200"
+                        className="min-w-[1.6rem] rounded-sm border border-ink-600 bg-ink-850 px-1.5 py-0.5 text-center font-mono text-[11px] text-neutral-200"
                       >
                         {key}
                       </kbd>

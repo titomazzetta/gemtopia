@@ -2226,7 +2226,7 @@ export function CrateApp({
           onClick={() => setShowKeys(true)}
           title="How it works (?)"
           aria-label="How it works"
-          className="flex h-6 w-6 shrink-0 items-center justify-center rounded border border-ink-700 font-mono text-[11px] text-neutral-500 hover:text-neutral-200"
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-sm border border-ink-700 font-mono text-[11px] text-neutral-500 hover:text-neutral-200"
         >
           ?
         </button>
@@ -2346,7 +2346,7 @@ export function CrateApp({
                   event.currentTarget.closest("details")?.removeAttribute("open");
                   setInvitesOpen(true);
                 }}
-                className="mb-0.5 w-full rounded px-2 py-1.5 text-left text-xs text-accent hover:bg-ink-800"
+                className="mb-0.5 w-full rounded-sm px-2 py-1.5 text-left text-xs text-accent hover:bg-ink-800"
               >
                 Invite someone
                 <span className="mt-0.5 block text-[10px] leading-snug text-neutral-600">
@@ -2358,7 +2358,7 @@ export function CrateApp({
             <button
               type="button"
               onClick={signOut}
-              className="w-full rounded px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-ink-800"
+              className="w-full rounded-sm px-2 py-1.5 text-left text-xs text-neutral-300 hover:bg-ink-800"
             >
               Sign out &amp; wipe local cache
             </button>
@@ -2366,7 +2366,7 @@ export function CrateApp({
             <button
               type="button"
               onClick={() => void revokeEverywhere()}
-              className="mt-0.5 w-full rounded px-2 py-1.5 text-left text-xs text-red-300/90 hover:bg-ink-800"
+              className="mt-0.5 w-full rounded-sm px-2 py-1.5 text-left text-xs text-red-300/90 hover:bg-ink-800"
               title="Invalidate every session for this account, on every device"
             >
               Sign out everywhere
@@ -3475,7 +3475,7 @@ export function CrateApp({
                         would be a lie.
                       */}
                       {isDefault && !added && (
-                        <span className="shrink-0 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">
+                        <span className="shrink-0 rounded-sm bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent">
                           last used
                         </span>
                       )}
@@ -3532,7 +3532,7 @@ export function CrateApp({
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-ink-700 bg-ink-850/95 px-4 py-2 text-xs text-neutral-200 shadow-xl backdrop-blur"
+          className="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-ink-700 bg-ink-850/95 px-4 py-2 text-xs text-neutral-200 shadow-xl backdrop-blur-sm"
         >
           {toast}
         </div>

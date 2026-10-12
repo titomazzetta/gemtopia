@@ -1,6 +1,145 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/*
+ * Phosphor.
+ *
+ * The ink ramp is tinted green rather than neutral, which is the whole
+ * difference between "a dark UI" and a room with a colour in it. Seven steps,
+ * same structure as before — only the hue moved, so every `bg-ink-850` and
+ * `text-neutral-500` in the app carried over untouched.
+ *
+ * Chosen for legibility as much as for looks: on a green-black ground both
+ * accents clear AAA rather than scraping AA, which matters when the screen is
+ * being read at arm's length in a dark booth. The amber is the second voice —
+ * BPM readouts, "in collection" badges — and green-on-amber is the one pairing
+ * here with real history behind it, because it is what monochrome terminals
+ * actually did.
+ *
+ * Tailwind 4 reads the theme from here; there is no tailwind.config.ts.
+ * scripts/test-mark.mjs reads these values to check the accents' contrast.
+ */
+@theme {
+  --color-ink-500: #6f8a78;
+  --color-ink-600: #2a4231;
+  --color-ink-700: #1b2a1f;
+  --color-ink-800: #131d16;
+  --color-ink-850: #0d140f;
+  --color-ink-900: #0a100c;
+  --color-ink-950: #050806;
+
+  --color-accent: #5ef08a;
+  --color-accent-dim: #3fc76b;
+  --color-accent-alt: #ffb000;
+
+  /*
+   * The stock colours this app uses, at their Tailwind 3 values. Tailwind 4
+   * redrew its palette in wide-gamut colour, so on an iPhone or Mac screen
+   * its reds, ambers and greens come out hotter than they were, and a few
+   * moved even in sRGB (red-500 went from #ef4444 to #fb2c36). They're status
+   * colours here — errors, "pushing it", the collab amber — and they stay put.
+   */
+  --color-neutral-100: #f5f5f5;
+  --color-neutral-200: #e5e5e5;
+  --color-neutral-300: #d4d4d4;
+  --color-neutral-400: #a3a3a3;
+  --color-neutral-500: #737373;
+  --color-neutral-600: #525252;
+  --color-neutral-700: #404040;
+  --color-amber-300: #fcd34d;
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+  --color-emerald-400: #34d399;
+  --color-red-200: #fecaca;
+  --color-red-300: #fca5a5;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-sky-300: #7dd3fc;
+  --color-sky-400: #38bdf8;
+  --color-gray-200: #e5e7eb;
+  --color-gray-400: #9ca3af;
+
+  /*
+   * Tailwind 3's sans stack. Tailwind 4.3 lists named fonts first
+   * (-apple-system, "Segoe UI", Roboto, …): the same faces on Apple, Windows
+   * and Android, but a different one on Linux, where system-ui used to win.
+   * Pinned so the upgrade changes no glyph anywhere.
+   */
+  --font-sans:
+    ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /*
+   * Tailwind 3's line heights were lengths (text-xs: 1rem); Tailwind 4's are
+   * ratios (text-xs: 1.333). The same on the element itself, but a ratio is
+   * inherited as a ratio: a `text-[10px]` badge inside a `text-xs` row got
+   * 13px lines instead of 16px, and a phone input forced to 16px (so iOS
+   * doesn't zoom) grew from 16px to 21px. Lengths again, so nothing moves.
+   */
+  --text-xs--line-height: 1rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
+
+  /* The thin sync line's "working on it" sweep (SyncBanner). */
+  --animate-sync-sweep: sync-sweep 1.4s ease-in-out infinite;
+  /*
+   * Slower than a real 33rpm platter. At true speed the label fleck strobes
+   * against a 60Hz refresh and reads as juddering rather than turning, which
+   * looks broken — the opposite of the point.
+   */
+  --animate-spin-record: spin-record 1.8s linear infinite;
+
+  @keyframes sync-sweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
+  @keyframes spin-record {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+/*
+ * Tailwind 3's defaults, kept where version 4 changed them, so the upgrade
+ * changes nothing you can see:
+ *
+ * - A bare `border` was gray-200 and is now `currentcolor`.
+ * - A placeholder was gray-400 and is now the text colour at half opacity.
+ * - Buttons had the pointer cursor and now have the arrow. On a desktop the
+ *   hand is how you know a thing is clickable, and every button here is.
+ */
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
 
 :root {
   color-scheme: dark;
@@ -48,7 +187,7 @@ body {
 
 /* Focus rings that are actually visible on a dark UI, and only for keyboard. */
 :where(a, button, input, select, [tabindex]):focus-visible {
-  @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-ink-950;
+  @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-ink-950;
 }
 
 /* Scrollbars that do not scream "default browser widget" */

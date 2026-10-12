@@ -265,7 +265,7 @@ export function ChatPanel({
 
   return (
     <div
-      className="fixed inset-x-0 top-0 z-[60] flex justify-end bg-black/60"
+      className="fixed inset-x-0 top-0 z-60 flex justify-end bg-black/60"
       style={{ bottom: keyboardInset > 0 ? `${keyboardInset}px` : "var(--mobile-bar-h, 0px)" }}
       role="dialog"
       aria-modal="true"
@@ -426,7 +426,7 @@ export function ChatPanel({
                             {message.body}
                           </span>
                         ) : (
-                          <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                          <span className="whitespace-pre-wrap wrap-anywhere">
                             {message.body}
                           </span>
                         )}
@@ -483,7 +483,7 @@ export function ChatPanel({
               aria-label="Message"
               autoComplete="off"
               spellCheck
-              className="block w-full resize-none rounded-2xl border border-ink-700 bg-ink-900 px-3 py-2 text-base text-neutral-100 placeholder:text-neutral-600 focus:border-accent-alt/60 focus:outline-none lg:text-sm"
+              className="block w-full resize-none rounded-2xl border border-ink-700 bg-ink-900 px-3 py-2 text-base text-neutral-100 placeholder:text-neutral-600 focus:border-accent-alt/60 focus:outline-hidden lg:text-sm"
             />
             {left <= COUNTER_FROM && (
               <span

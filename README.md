@@ -923,7 +923,7 @@ Also covered in [DEPLOYING.md](./DEPLOYING.md).
 |---|---|---|
 | Framework | **Next.js 16** (App Router, Turbopack), **React 19** | Server route handlers keep every credential off the client |
 | Language | **TypeScript 5.9**, `strict` + `noUncheckedIndexedAccess` | Staying on 5.x until the TS 7 (Go) toolchain settles |
-| Styling | **Tailwind CSS 3.4**, one token set (Phosphor) | Small, readable diffs; dark by design |
+| Styling | **Tailwind CSS 4**, one token set (Phosphor) in `globals.css` | Small, readable diffs; dark by design |
 | Validation | **Zod** at every boundary: env, request bodies, Discogs responses | An unexpected upstream shape is a 502, not a crash |
 | Auth | **Discogs OAuth 1.0a**, signed in-repo (~80 lines, HMAC-SHA1) | No npm package ever holds the consumer secret |
 | Sessions | Sealed **AES-256-GCM** `HttpOnly` cookie | Stateless; the Discogs token is never in a database |

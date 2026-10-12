@@ -86,7 +86,7 @@ export function ShareButton({
        * you guess they are. Sharing is the one action most likely to happen on
        * a phone, so it cannot be the one hidden there.
        */
-      className={`shrink-0 rounded p-1.5 transition-opacity hover:bg-ink-800 hover:text-accent focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 ${
+      className={`shrink-0 rounded-sm p-1.5 transition-opacity hover:bg-ink-800 hover:text-accent focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 ${
         said ? "text-accent" : "text-neutral-600"
       } ${className}`}
     >

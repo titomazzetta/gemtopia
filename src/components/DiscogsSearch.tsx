@@ -306,7 +306,7 @@ export function DiscogsSearch({
           return (
             <li key={hit.id} className="border-t border-ink-800">
               <div className="flex items-start gap-3 px-4 py-3">
-              <span className="h-11 w-11 shrink-0 overflow-hidden rounded bg-ink-800">
+              <span className="h-11 w-11 shrink-0 overflow-hidden rounded-sm bg-ink-800">
                 {hit.thumb ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -353,7 +353,7 @@ export function DiscogsSearch({
                 </span>
 
                 {badge && openId !== hit.id && (
-                  <span className="mt-1 inline-flex items-center gap-1 rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+                  <span className="mt-1 inline-flex items-center gap-1 rounded-sm bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
                     <InCollection className="h-2.5 w-2.5" />
                     {badge}
                   </span>

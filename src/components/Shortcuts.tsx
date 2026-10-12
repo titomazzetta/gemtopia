@@ -64,7 +64,7 @@ export function Shortcuts({ onClose }: { onClose: () => void }) {
             ref={closeRef}
             type="button"
             onClick={onClose}
-            className="rounded border border-ink-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:text-neutral-100"
+            className="rounded-sm border border-ink-700 px-2 py-0.5 text-[11px] text-neutral-400 hover:text-neutral-100"
           >
             Close
           </button>
@@ -76,7 +76,7 @@ export function Shortcuts({ onClose }: { onClose: () => void }) {
                 {keys.map((key) => (
                   <kbd
                     key={key}
-                    className="min-w-[1.6rem] rounded border border-ink-600 bg-ink-850 px-1.5 py-0.5 text-center font-mono text-[11px] text-neutral-200"
+                    className="min-w-[1.6rem] rounded-sm border border-ink-600 bg-ink-850 px-1.5 py-0.5 text-center font-mono text-[11px] text-neutral-200"
                   >
                     {key}
                   </kbd>

@@ -84,7 +84,7 @@ export function PlaylistPanel({
         {playlists.length === 0 ? (
           <p className="p-4 text-center text-xs text-neutral-600">
             No playlists yet. Build one while you listen — hit{" "}
-            <kbd className="rounded bg-ink-800 px-1 font-mono">A</kbd> on
+            <kbd className="rounded-sm bg-ink-800 px-1 font-mono">A</kbd> on
             anything you like.
           </p>
         ) : (
@@ -121,7 +121,7 @@ export function PlaylistPanel({
                     collab ? "border-l-accent-alt" : "border-l-transparent"
                   } ${
                     dropTarget === playlist.id
-                      ? "bg-accent/15 outline outline-1 -outline-offset-1 outline-accent/60"
+                      ? "bg-accent/15 outline-solid outline-1 -outline-offset-1 outline-accent/60"
                       : active
                         ? "bg-accent/10"
                         : "hover:bg-ink-850"
@@ -142,7 +142,7 @@ export function PlaylistPanel({
                           if (e.key === "Enter") e.currentTarget.blur();
                           if (e.key === "Escape") setEditingId(null);
                         }}
-                        className="min-w-0 flex-1 rounded border border-ink-600 bg-ink-900 px-1.5 py-0.5 text-xs"
+                        className="min-w-0 flex-1 rounded-sm border border-ink-600 bg-ink-900 px-1.5 py-0.5 text-xs"
                         aria-label="Playlist name"
                       />
                     ) : (
@@ -189,7 +189,7 @@ export function PlaylistPanel({
                         type="button"
                         onClick={() => onPlay(playlist.id, false)}
                         title="Play in order"
-                        className="rounded p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-accent"
+                        className="rounded-sm p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-accent"
                       >
                         <Play className="h-3 w-3" />
                       </button>
@@ -197,7 +197,7 @@ export function PlaylistPanel({
                         type="button"
                         onClick={() => onPlay(playlist.id, true)}
                         title="Play shuffled"
-                        className="rounded p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-accent"
+                        className="rounded-sm p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-accent"
                       >
                         <Shuffle className="h-3 w-3" />
                       </button>
@@ -257,7 +257,7 @@ export function PlaylistPanel({
                           }
                         }}
                         title="Delete playlist"
-                        className="rounded p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-red-400"
+                        className="rounded-sm p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-red-400"
                       >
                         <Trash className="h-3 w-3" />
                       </button>

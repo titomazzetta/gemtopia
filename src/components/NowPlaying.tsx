@@ -85,7 +85,7 @@ function RangeEditor({
   const commit = () => onChange(Number(low), Number(high));
 
   return (
-    <div className="mt-1.5 flex items-center gap-1.5 rounded border border-ink-800 bg-ink-900/60 px-2 py-1.5 text-[10px] text-neutral-500">
+    <div className="mt-1.5 flex items-center gap-1.5 rounded-sm border border-ink-800 bg-ink-900/60 px-2 py-1.5 text-[10px] text-neutral-500">
       <label className="flex items-center gap-1">
         from
         <input
@@ -96,7 +96,7 @@ function RangeEditor({
           onChange={(e) => setLow(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => e.key === "Enter" && commit()}
-          className="w-11 rounded border border-ink-700 bg-ink-850 px-1 py-0.5 font-mono text-neutral-200"
+          className="w-11 rounded-sm border border-ink-700 bg-ink-850 px-1 py-0.5 font-mono text-neutral-200"
         />
       </label>
       <label className="flex items-center gap-1">
@@ -109,7 +109,7 @@ function RangeEditor({
           onChange={(e) => setHigh(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => e.key === "Enter" && commit()}
-          className="w-11 rounded border border-ink-700 bg-ink-850 px-1 py-0.5 font-mono text-neutral-200"
+          className="w-11 rounded-sm border border-ink-700 bg-ink-850 px-1 py-0.5 font-mono text-neutral-200"
         />
       </label>
       <span className="ml-auto leading-tight">
@@ -181,7 +181,7 @@ function TempoPanel({
               type="button"
               onClick={() => onScaleBpm(0.5)}
               title="Halve — for when a 174 track reads as 87"
-              className="rounded px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 hover:bg-ink-800 hover:text-neutral-200"
+              className="rounded-sm px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 hover:bg-ink-800 hover:text-neutral-200"
             >
               ÷2
             </button>
@@ -189,7 +189,7 @@ function TempoPanel({
               type="button"
               onClick={() => onScaleBpm(2)}
               title="Double"
-              className="rounded px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 hover:bg-ink-800 hover:text-neutral-200"
+              className="rounded-sm px-1.5 py-0.5 font-mono text-[10px] text-neutral-500 hover:bg-ink-800 hover:text-neutral-200"
             >
               ×2
             </button>
@@ -197,7 +197,7 @@ function TempoPanel({
               type="button"
               onClick={onClearBpm}
               title="Clear this reading"
-              className="rounded px-1.5 py-0.5 text-[10px] text-neutral-600 hover:bg-ink-800 hover:text-red-400"
+              className="rounded-sm px-1.5 py-0.5 text-[10px] text-neutral-600 hover:bg-ink-800 hover:text-red-400"
             >
               ✕
             </button>
@@ -238,7 +238,7 @@ function TempoPanel({
             <button
               type="button"
               onClick={() => setEditingRange((open) => !open)}
-              className="ml-auto rounded px-1 text-neutral-600 hover:text-neutral-300"
+              className="ml-auto rounded-sm px-1 text-neutral-600 hover:text-neutral-300"
               aria-expanded={editingRange}
             >
               {editingRange ? "done" : "range"}
@@ -269,10 +269,10 @@ function TempoPanel({
           }}
           disabled={disabled}
           title="Tap in time with the beat — or press T"
-          className="flex flex-1 touch-manipulation select-none items-center justify-center gap-1.5 rounded border border-ink-700 py-1 text-[10px] font-medium text-neutral-300 hover:border-ink-600 hover:text-white active:bg-ink-800 disabled:opacity-40"
+          className="flex flex-1 touch-manipulation select-none items-center justify-center gap-1.5 rounded-sm border border-ink-700 py-1 text-[10px] font-medium text-neutral-300 hover:border-ink-600 hover:text-white active:bg-ink-800 disabled:opacity-40"
         >
           TAP
-          <kbd className="rounded border border-ink-600 px-1 font-mono text-[9px] leading-tight text-neutral-500">
+          <kbd className="rounded-sm border border-ink-600 px-1 font-mono text-[9px] leading-tight text-neutral-500">
             T
           </kbd>
           {tapCount > 0 && (
@@ -285,7 +285,7 @@ function TempoPanel({
             type="button"
             onClick={onStopDetector}
             title="Stop listening"
-            className="flex items-center gap-1 rounded border border-accent/50 bg-accent/10 px-2 py-1 text-[10px] text-accent"
+            className="flex items-center gap-1 rounded-sm border border-accent/50 bg-accent/10 px-2 py-1 text-[10px] text-accent"
           >
             <Waveform className="h-3 w-3" />
             live
@@ -295,7 +295,7 @@ function TempoPanel({
             type="button"
             onClick={() => onStartDetector("tab")}
             title="Detect BPM from this tab's audio (Chrome / Edge)"
-            className="flex items-center gap-1.5 rounded border border-accent/40 bg-accent/10 px-2.5 py-1 text-[10px] font-medium text-accent hover:bg-accent/20"
+            className="flex items-center gap-1.5 rounded-sm border border-accent/40 bg-accent/10 px-2.5 py-1 text-[10px] font-medium text-accent hover:bg-accent/20"
           >
             <Waveform className="h-3 w-3" />
             Detect
@@ -315,7 +315,7 @@ function TempoPanel({
         it and the BPM catalogue stayed empty.
       */}
       {!listening && (
-        <div className="mt-1.5 rounded border border-ink-800 bg-ink-900/60 px-2 py-1.5">
+        <div className="mt-1.5 rounded-sm border border-ink-800 bg-ink-900/60 px-2 py-1.5">
           <p className="text-[10px] leading-relaxed text-neutral-500">
             <span className="text-neutral-300">Detect</span> reads the tempo
             from this tab&rsquo;s audio. Chrome asks once — pick this tab and
@@ -455,7 +455,7 @@ export function NowPlaying({
    */
   return (
     <aside
-      className={`order-first w-full flex-col border-b border-ink-800 bg-ink-900 lg:order-none lg:flex lg:w-[320px] lg:shrink-0 lg:border-b-0 lg:border-l ${
+      className={`order-first w-full flex-col border-b border-ink-800 bg-ink-900 lg:order-0 lg:flex lg:w-[320px] lg:shrink-0 lg:border-b-0 lg:border-l ${
         /*
          * On a phone the video strip collapses entirely when nothing is
          * queued. YouTube's visibility requirement applies to a player that is
@@ -589,7 +589,7 @@ export function NowPlaying({
                 {current.labels[0] ? ` · ${current.labels[0]}` : ""}
               </span>
               {detour && (
-                <div className="mt-1.5 flex items-center gap-2 rounded border border-accent/30 bg-accent/5 px-2 py-1 text-[10px]">
+                <div className="mt-1.5 flex items-center gap-2 rounded-sm border border-accent/30 bg-accent/5 px-2 py-1 text-[10px]">
                   <span className="min-w-0 flex-1 truncate text-neutral-400">
                     Exploring <span className="text-neutral-200">{detour.label}</span>
                   </span>
@@ -597,7 +597,7 @@ export function NowPlaying({
                     type="button"
                     onClick={onBackToShuffle}
                     title="Back to where you were in the shuffle (B)"
-                    className="shrink-0 rounded px-1.5 py-0.5 font-medium text-accent hover:bg-accent/10"
+                    className="shrink-0 rounded-sm px-1.5 py-0.5 font-medium text-accent hover:bg-accent/10"
                   >
                     ← Back to shuffle
                   </button>
@@ -612,7 +612,7 @@ export function NowPlaying({
         </div>
 
         {api.error && (
-          <p role="status" className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-300">
+          <p role="status" className="rounded-sm bg-red-500/10 px-2 py-1 text-[11px] text-red-300">
             {api.error}
           </p>
         )}
@@ -728,7 +728,7 @@ export function NowPlaying({
           >
             <Compass className="h-3.5 w-3.5" />
             {digging ? "Digging" : "Dig from this"}
-            <kbd className="ml-1 rounded bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">D</kbd>
+            <kbd className="ml-1 rounded-sm bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">D</kbd>
           </button>
 
           <button
@@ -739,7 +739,7 @@ export function NowPlaying({
           >
             <Plus className="h-3.5 w-3.5" />
             Add to playlist
-            <kbd className="ml-1 rounded bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">A</kbd>
+            <kbd className="ml-1 rounded-sm bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">A</kbd>
           </button>
 
           <ShareButton track={current} variant="wide" />

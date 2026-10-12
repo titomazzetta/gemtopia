@@ -164,7 +164,7 @@ export function SharedPlayer({ tracks }: { tracks: SharedTrack[] }) {
           YouTube's API terms require the player stay visible at a minimum
           size and unobscured. It sits here doing the job album art would.
         */}
-        <div className="w-[200px] shrink-0 overflow-hidden rounded bg-black">
+        <div className="w-[200px] shrink-0 overflow-hidden rounded-sm bg-black">
           <div ref={mountRef} className="aspect-video w-full" />
         </div>
 
@@ -186,7 +186,7 @@ export function SharedPlayer({ tracks }: { tracks: SharedTrack[] }) {
             <button
               type="button"
               onClick={() => advance(-1)}
-              className="rounded p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-neutral-100"
+              className="rounded-sm p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-neutral-100"
               aria-label="Previous track"
             >
               <Prev className="h-3.5 w-3.5" />
@@ -207,7 +207,7 @@ export function SharedPlayer({ tracks }: { tracks: SharedTrack[] }) {
             <button
               type="button"
               onClick={() => advance(1)}
-              className="rounded p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-neutral-100"
+              className="rounded-sm p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-neutral-100"
               aria-label="Next track"
             >
               <Next className="h-3.5 w-3.5" />

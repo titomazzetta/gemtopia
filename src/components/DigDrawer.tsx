@@ -99,7 +99,7 @@ function LocalRow({
       className="group flex w-56 shrink-0 flex-col rounded-md border border-ink-800 bg-ink-850 p-2 hover:border-ink-600"
     >
       <button type="button" onClick={onPlay} className="flex items-start gap-2 text-left">
-        <span className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded bg-ink-800">
+        <span className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-sm bg-ink-800">
           {item.thumb ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={item.thumb} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
@@ -118,7 +118,7 @@ function LocalRow({
 
       <div className="mt-1.5 flex items-center gap-1 text-[10px] text-neutral-600">
         {item.bpm !== null && (
-          <span className="rounded bg-ink-800 px-1 font-mono text-accent/80">{formatBpm(item.bpm, { precise: true })}</span>
+          <span className="rounded-sm bg-ink-800 px-1 font-mono text-accent/80">{formatBpm(item.bpm, { precise: true })}</span>
         )}
         {item.year && <span>{item.year}</span>}
         {item.duration && <span className="ml-auto font-mono">{formatTime(item.duration)}</span>}
@@ -126,7 +126,7 @@ function LocalRow({
           type="button"
           onClick={onAdd}
           title="Add to playlist"
-          className="ml-auto rounded p-0.5 text-neutral-600 hover:bg-ink-800 hover:text-accent"
+          className="ml-auto rounded-sm p-0.5 text-neutral-600 hover:bg-ink-800 hover:text-accent"
         >
           <Plus className="h-3 w-3" />
         </button>
@@ -155,7 +155,7 @@ function BeyondCard({
   return (
     <li className="flex w-60 shrink-0 flex-col rounded-md border border-ink-800 bg-ink-850 p-2">
       <div className="flex gap-2">
-        <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded bg-ink-800">
+        <span className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-sm bg-ink-800">
           {result.thumb ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={result.thumb} alt="" loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
@@ -190,14 +190,14 @@ function BeyondCard({
               href={result.marketplaceUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded bg-ink-800 px-1 py-0.5 text-accent/80 hover:text-accent"
+              className="rounded-sm bg-ink-800 px-1 py-0.5 text-accent/80 hover:text-accent"
             >
               {result.market.forSale} for sale
               {result.market.lowestPrice ? ` · from ${result.market.lowestPrice}` : ""}
             </a>
           )}
           {result.market && result.market.forSale === 0 && (
-            <span className="rounded bg-ink-800 px-1 py-0.5">none for sale</span>
+            <span className="rounded-sm bg-ink-800 px-1 py-0.5">none for sale</span>
           )}
         </div>
       )}
@@ -207,7 +207,7 @@ function BeyondCard({
           type="button"
           onClick={onPreview}
           disabled={previewState === "loading" || previewState === "none"}
-          className="flex flex-1 items-center justify-center gap-1 rounded border border-ink-700 py-1 text-[10px] text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40"
+          className="flex flex-1 items-center justify-center gap-1 rounded-sm border border-ink-700 py-1 text-[10px] text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40"
           title={
             previewState === "none"
               ? "Discogs has no audio for this release"
@@ -236,7 +236,7 @@ function BeyondCard({
           type="button"
           onClick={onDigFrom}
           title="Dig from this record instead"
-          className="rounded border border-ink-700 px-1.5 py-1 text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
+          className="rounded-sm border border-ink-700 px-1.5 py-1 text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
         >
           <Search className="h-3 w-3" />
         </button>
@@ -726,7 +726,7 @@ export function DigDrawer({
     <div className="flex h-full flex-col overflow-y-auto overscroll-contain bg-ink-950 lg:overflow-hidden">
       {/* ---- seed header ---- */}
       <header className="flex shrink-0 items-start gap-3 border-b border-ink-800 bg-ink-900 p-4">
-        <span className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded bg-ink-800">
+        <span className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-sm bg-ink-800">
           {seed.thumb ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={seed.thumb} alt="" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
@@ -747,7 +747,7 @@ export function DigDrawer({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 rounded border border-ink-700 px-2 py-1 text-[11px] text-neutral-400 hover:text-neutral-100"
+              className="shrink-0 rounded-sm border border-ink-700 px-2 py-1 text-[11px] text-neutral-400 hover:text-neutral-100"
             >
               Close
             </button>
@@ -931,7 +931,7 @@ export function DigDrawer({
             )}
 
             {error && (
-              <p role="alert" className="mx-4 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+              <p role="alert" className="mx-4 rounded-sm border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
                 {error}
               </p>
             )}

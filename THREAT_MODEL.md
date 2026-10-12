@@ -723,8 +723,9 @@ can't reach users, and expires within 180 days; an expired or undated entry
 fails the build, so every exception gets reviewed again rather than becoming
 permanent. If `npm audit` can't produce a report (the registry is down), the
 gate fails rather than reading silence as clean. Without this, an advisory
-with no upstream fix (October 2026: `braces`, reached only through Tailwind 3
-and the Next ESLint config) keeps CI red until everyone stops reading CI. The
+with no upstream fix (October 2026: `braces`, reached only through the Next
+ESLint config since the Tailwind 4 upgrade removed the other path) keeps CI red
+until everyone stops reading CI. The
 same run that introduced the gate found a real production advisory — an SSRF
 in Next.js image optimisation — and that one was fixed by upgrading, because
 the gate allows nothing else. Dependabot opens grouped patch/minor PRs weekly and separate PRs for

@@ -160,7 +160,7 @@ export function SignIn({
               autoCorrect="off"
               spellCheck={false}
               placeholder="XXXX-XXXX"
-              className="h-11 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-3 text-center font-mono text-base uppercase tracking-[0.2em] text-neutral-100 placeholder:text-neutral-700 focus:border-accent/60 focus:outline-none"
+              className="h-11 min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-900 px-3 text-center font-mono text-base uppercase tracking-[0.2em] text-neutral-100 placeholder:text-neutral-700 focus:border-accent/60 focus:outline-hidden"
             />
             <button
               type="submit"
