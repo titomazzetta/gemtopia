@@ -223,7 +223,9 @@ export function CrateApp({
     adopt,
     markCollected,
     markWanted,
+    setSync,
   } = crate;
+
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   /*
    * Playlist ids, most recently added-to first. Session-scoped and in memory
@@ -241,6 +243,30 @@ export function CrateApp({
   const [rail, setRail] = useState<Rail>("filters");
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
+  /** A mouse or trackpad: hover, drag and keyboard hints apply. */
+  const finePointer = useFinePointer();
+
+  /*
+   * Collection or wantlist — the same on a phone and a desktop. The phone's
+   * "Play from" sheet used to set the source and nothing else, so the first
+   * time you opened your wantlist there it said "Nothing cached… hit refresh"
+   * and waited, while the desktop toggle checked and synced it.
+   */
+  const switchSource = useCallback(
+    (value: Source) => {
+      setSource(value);
+      setActivePlaylistId(null);
+      void (async () => {
+        const state = await getSyncState(username, value);
+        setSync(state);
+        // Same rule as boot. This used to be its own inline copy,
+        // in the pre-fix form that never re-checked a finished sync.
+        if (needsSync(state)) runSync(value);
+      })();
+    },
+    [username, setSync, runSync],
+  );
+
   /** Which playlist's pull list is open, if any. An id, so it never reopens on another playlist. */
   const [pullListFor, setPullListFor] = useState<string | null>(null);
   const [invitesOpen, setInvitesOpen] = useState(false);
@@ -1278,7 +1304,7 @@ export function CrateApp({
     const where = sync.source === "wantlist" ? "wantlist" : "collection";
     say(
       fresh === sync.total
-        ? `Your ${where} is ready — ${fresh.toLocaleString()} records.`
+        ? `Your ${where} is ready — ${fresh.toLocaleString()} record${fresh === 1 ? "" : "s"}.`
         : `${fresh.toLocaleString()} new record${fresh === 1 ? "" : "s"} in your ${where}.`,
     );
   }, [sync, say]);
@@ -1306,9 +1332,10 @@ export function CrateApp({
       const saved = { queue, index: queueIndex };
       if (!loadQueue(items, index)) return;
       setDetour((existing) => beginDetour(existing, saved.queue, saved.index, label));
-      say(`Exploring ${label} — B or Back to shuffle returns you`);
+      // B is a key: only worth saying where there's a keyboard.
+      say(`Exploring ${label} — ${finePointer ? "B or " : ""}Back to shuffle returns you`);
     },
-    [loadQueue, queue, queueIndex, say],
+    [loadQueue, queue, queueIndex, say, finePointer],
   );
 
   /**
@@ -1930,17 +1957,6 @@ export function CrateApp({
     [applyWantlistChange],
   );
 
-  /**
-   * The heart on the player, for whatever is playing that you don't own: a
-   * dig preview, a search preview, a friend's record on a shared set.
-   *
-   * Pessimistic, like every other Discogs write here: the heart fills when
-   * Discogs says yes, not when you tap. A ref, not just the state, guards the
-   * double tap — two taps inside one render would otherwise both see "not
-   * busy" and send an add and then a remove.
-   */
-  const finePointer = useFinePointer();
-
   /*
    * The account menu is a <details>, which on its own only closes when its
    * summary is pressed again — a tap anywhere else, or Esc, left it hanging
@@ -1964,6 +1980,16 @@ export function CrateApp({
       document.removeEventListener("keydown", close);
     };
   }, []);
+
+  /**
+   * The heart on the player, for whatever is playing that you don't own: a
+   * dig preview, a search preview, a friend's record on a shared set.
+   *
+   * Pessimistic, like every other Discogs write here: the heart fills when
+   * Discogs says yes, not when you tap. A ref, not just the state, guards the
+   * double tap — two taps inside one render would otherwise both see "not
+   * busy" and send an add and then a remove.
+   */
   const [wantBusy, setWantBusy] = useState(false);
   const wantBusyRef = useRef(false);
   const toggleWant = useCallback(
@@ -2289,17 +2315,7 @@ export function CrateApp({
             <button
               key={value}
               type="button"
-              onClick={() => {
-                setSource(value);
-                setActivePlaylistId(null);
-                void (async () => {
-                  const state = await getSyncState(username, value);
-                  crate.setSync(state);
-                  // Same rule as boot. This used to be its own inline copy,
-                  // in the pre-fix form that never re-checked a finished sync.
-                  if (needsSync(state)) runSync(value);
-                })();
-              }}
+              onClick={() => switchSource(value)}
               className={`rounded px-2.5 py-1 text-xs capitalize transition-colors ${
                 source === value
                   ? "bg-accent/15 font-medium text-accent"
@@ -3226,8 +3242,7 @@ export function CrateApp({
                 key={value}
                 type="button"
                 onClick={() => {
-                  setActivePlaylistId(null);
-                  setSource(value);
+                  switchSource(value);
                   setSheet("none");
                 }}
                 className={`rounded-lg border px-3 py-2.5 text-xs font-medium capitalize ${
@@ -3614,7 +3629,11 @@ export function CrateApp({
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-full border border-ink-700 bg-ink-850/95 px-4 py-2 text-xs text-neutral-200 shadow-xl backdrop-blur-sm"
+          // Above the phone's player bar, not over its transport: a toast
+          // there covered play/pause and the track name for its whole life.
+          // No bar on a desktop, so this is the old bottom-4.
+          style={{ bottom: "calc(var(--mobile-bar-h, 0px) + 1rem)" }}
+          className="pointer-events-none fixed left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-full border border-ink-700 bg-ink-850/95 px-4 py-2 text-center text-xs text-neutral-200 shadow-xl backdrop-blur-sm"
         >
           {toast}
         </div>
