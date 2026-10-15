@@ -221,6 +221,21 @@ one playlist*, never what anyone can read about anyone else.
 - **What it does not do.** Anyone holding a live link who has an account can
   join — that is what a link is. The owner sees who joined, can remove them,
   and can kill the link.
+- **Duplicating copies only what you can already read.** `POST
+  /api/playlists/:id/duplicate` takes the id and nothing else; there is no
+  client-supplied content. `repo.duplicatePlaylist` checks `CAN_EDIT` in the
+  same transaction that copies, under a share lock on the source row (so the
+  copy is one version of the list), and a playlist you have no part in is the
+  same 404 as reading it. The copy is owned by the caller and carries no
+  members, join link, share link or chat — a collaborator can't use it to
+  widen anything, only to take the records and order they could already see.
+  The set's BPMs come with it, attributed to whoever measured them. Same CSRF,
+  Origin and rate limit as creating a playlist; eight API cases cover it.
+- **Export files carry no people.** A playlist file holds names, records and
+  order — not who added a record or whose BPM a set holds — so a file passed
+  on doesn't pass on your collaborators. Import treats any file as hostile: a
+  size cap in the browser, then the server's strict Zod schema decides, and
+  one bad entry refuses the whole file rather than importing half of it.
 - **The set's BPM is shared; the catalogue isn't.** Each person's BPM
   catalogue stays theirs. What is shared is one reading per record *on a
   playlist you are on*: when you log a BPM, it is copied onto the matching

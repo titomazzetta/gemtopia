@@ -16,6 +16,7 @@ import {
   badgeFor,
   confirmAddMessage,
   wantlistHeart,
+  groupBySet,
 } from "../src/client/ownership.ts";
 
 let ran = 0;
@@ -235,6 +236,41 @@ check("a dig preview from a synced crate is offered", () => {
   const sets = { collection: new Set([1, 2, 3]), wantlist: new Set() };
   assert.deepEqual(wantlistHeart(ownershipFrom(sets, 99)), { wanted: false });
   assert.equal(wantlistHeart(ownershipFrom(sets, 2)), null);
+});
+
+/* ---- search results: yours first ---- */
+
+const hit = (id) => ({ id, title: `r${id}` });
+const order = (grouped) => grouped.map((g) => g.hit.id);
+
+check("search results: your collection, then your wantlist, then the rest", () => {
+  const sets = { collection: new Set([4, 6]), wantlist: new Set([2]) };
+  const grouped = groupBySet([1, 2, 3, 4, 5, 6].map(hit), sets);
+  assert.deepEqual(order(grouped), [4, 6, 2, 1, 3, 5]);
+  assert.deepEqual(grouped.map((g) => g.group), ["collection", "collection", "wantlist", "discogs", "discogs", "discogs"]);
+});
+
+check("each group keeps Discogs' own ranking", () => {
+  const sets = { collection: new Set([9, 3, 7]), wantlist: new Set([8]) };
+  assert.deepEqual(order(groupBySet([9, 1, 3, 8, 7].map(hit), sets)), [9, 3, 7, 8, 1]);
+});
+
+check("owning beats wanting when a record is on both lists", () => {
+  const sets = { collection: new Set([5]), wantlist: new Set([5, 6]) };
+  const grouped = groupBySet([6, 5].map(hit), sets);
+  assert.deepEqual(order(grouped), [5, 6]);
+  assert.equal(grouped[0].group, "collection");
+});
+
+check("unsynced lists move nothing: the Discogs order stands", () => {
+  const sets = { collection: new Set(), wantlist: new Set() };
+  const grouped = groupBySet([3, 1, 2].map(hit), sets);
+  assert.deepEqual(order(grouped), [3, 1, 2]);
+  assert.ok(grouped.every((g) => g.group === "discogs"));
+});
+
+check("no results is no groups", () => {
+  assert.deepEqual(groupBySet([], { collection: new Set([1]), wantlist: new Set([2]) }), []);
 });
 
 // The early exit above only covers the checks before it.

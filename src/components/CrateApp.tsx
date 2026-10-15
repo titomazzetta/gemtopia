@@ -109,6 +109,7 @@ import { DigDrawer, RecordSection } from "./DigDrawer";
 import { recordQueue, runningOrder } from "@/client/recordOrder";
 import { isClipDrag } from "@/client/clipDrag";
 import { searchRecord } from "@/client/searchPlay";
+import { PLAYLIST_FILE_MAX_BYTES, playlistFile, readPlaylistFile } from "@/client/playlistFile";
 import { SyncBanner } from "./SyncBanner";
 import { SetPrepBar } from "./SetPrepBar";
 import { PlaylistViewBar } from "./PlaylistViewBar";
@@ -140,6 +141,7 @@ import type { SearchHit } from "@/lib/discogs";
 import {
   ChatIcon,
   Compass,
+  CopyIcon,
   ListIcon,
   Metronome,
   Refresh,
@@ -1559,58 +1561,92 @@ export function CrateApp({
     [activePlaylist, mutateEntries],
   );
 
-  const exportPlaylists = useCallback(() => {
-    const payload = {
-      app: "gemtopia",
-      version: 2,
-      exportedAt: new Date().toISOString(),
-      playlists: playlists.map((p) => ({
-        name: p.name,
-        entries: p.entries.map(reEntry),
-      })),
-    };
-
-    const blob = new Blob([JSON.stringify(payload, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
+  /** Hand the browser a file to save. Revoked a moment later: Safari needs the beat. */
+  const download = useCallback((filename: string, json: string) => {
+    const url = URL.createObjectURL(new Blob([json], { type: "application/json" }));
     const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `gemtopia-playlists-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.download = filename;
     anchor.click();
-    URL.revokeObjectURL(url);
-  }, [playlists]);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }, []);
+
+  const exportPlaylists = useCallback(() => {
+    const file = playlistFile(playlists, { all: true });
+    download(file.filename, file.json);
+  }, [playlists, download]);
+
+  /** One playlist, in the same format as the full export, so Import takes either. */
+  const exportPlaylist = useCallback(
+    (id: string) => {
+      const playlist = playlists.find((p) => p.id === id);
+      if (!playlist) return;
+      const file = playlistFile([playlist]);
+      download(file.filename, file.json);
+      say(`Saved "${playlist.name}" as ${file.filename}`);
+    },
+    [playlists, download, say],
+  );
+
+  /*
+   * Your own copy of a playlist — yours or a shared one — to rework the order
+   * or borrow from, without touching the original or anyone else's view of
+   * it. The copy opens straight away, since working on it is why you made it.
+   */
+  const duplicatePlaylist = useCallback(
+    async (id: string) => {
+      const source = playlists.find((p) => p.id === id);
+      try {
+        const copy = await playlistsApi.duplicate(id);
+        setPlaylists((previous) => [copy, ...previous.filter((p) => p.id !== copy.id)]);
+        setActivePlaylistId(copy.id);
+        setDigTarget(null);
+        say(
+          source && isCollabPlaylist(source)
+            ? `"${copy.name}" is yours alone — the shared one is untouched.`
+            : `Made "${copy.name}". The original is untouched.`,
+        );
+      } catch (error) {
+        say(error instanceof ApiError ? error.message : "Could not copy that playlist.");
+        if (error instanceof ApiError && error.status === 404) void refreshPlaylists();
+      }
+    },
+    [playlists, say, refreshPlaylists],
+  );
 
   const importPlaylists = useCallback(
     async (file: File) => {
       // Treat the file as hostile: cap the size, and let the server's Zod
       // schema be the thing that decides what a valid entry looks like.
-      if (file.size > 5_000_000) {
+      if (file.size > PLAYLIST_FILE_MAX_BYTES) {
         say("That file is too big to be a playlist export.");
         return;
       }
       try {
-        const raw: unknown = JSON.parse(await file.text());
-        const lists = (raw as { playlists?: unknown })?.playlists;
-        if (!Array.isArray(lists)) throw new Error("shape");
+        let raw: unknown = null;
+        try {
+          raw = JSON.parse(await file.text());
+        } catch {
+          /* not JSON: falls through to the message below */
+        }
+        const payload = readPlaylistFile(raw);
+        if (!payload) {
+          say("That does not look like a Gemtopia export.");
+          return;
+        }
 
-        const payload = lists
-          .filter(
-            (l): l is { name: string; entries: unknown[] } =>
-              typeof l === "object" &&
-              l !== null &&
-              typeof (l as { name?: unknown }).name === "string",
-          )
-          .map((l) => ({
-            name: String(l.name).slice(0, 80),
-            entries: Array.isArray(l.entries)
-              ? (l.entries as Omit<PlaylistItemRow, "position">[])
-              : [],
-          }));
-
+        const before = new Set(playlists.map((p) => p.id));
         const result = await playlistsApi.importAll(payload);
         setPlaylists(result.playlists);
-        say(`Imported ${result.imported} playlist(s)`);
+        const fresh = result.playlists.filter((p) => !before.has(p.id));
+        if (fresh.length === 1) {
+          // One set in, one set open: that's what you were importing it for.
+          setActivePlaylistId(fresh[0]!.id);
+          setDigTarget(null);
+          say(`Imported "${fresh[0]!.name}"`);
+        } else {
+          say(`Imported ${result.imported} playlists`);
+        }
       } catch (error) {
         say(
           error instanceof ApiError
@@ -1619,7 +1655,7 @@ export function CrateApp({
         );
       }
     },
-    [say],
+    [playlists, say],
   );
 
   /* ================= insights ================= */
@@ -2015,8 +2051,20 @@ export function CrateApp({
 
   /* ================= keyboard ================= */
 
+  /*
+   * The record card owns the keyboard while it is open: T taps *its* tempo
+   * and A adds *it* (RecordOnlyCard listens for those). Left to this handler,
+   * T would tap the track on the decks and A would add that one instead —
+   * the wrong track, silently, while you're tapping along to the record.
+   */
+  const recordCardOpen = useRef(false);
+  useEffect(() => {
+    recordCardOpen.current = recordCard !== null;
+  }, [recordCard]);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (recordCardOpen.current) return;
       const target = event.target as HTMLElement | null;
       if (
         target &&
@@ -2445,6 +2493,8 @@ export function CrateApp({
                 onRename={(id, name) => void renamePlaylist(id, name)}
                 onPlay={playPlaylist}
                 onExport={exportPlaylists}
+                onExportOne={exportPlaylist}
+                onDuplicate={(id) => void duplicatePlaylist(id)}
                 onShare={(id, shared) => void sharePlaylist(id, shared)}
                 sharedIds={sharedIds}
                 onImport={(file) => void importPlaylists(file)}
@@ -2472,6 +2522,8 @@ export function CrateApp({
                   localDetail={(id) => detailById.get(id) ?? null}
                   onPlay={playFromSearch}
                   playingKey={current?.key ?? null}
+                  onRecordOnly={setRecordCard}
+                  onAddToPlaylist={queueForPlaylist}
                 />
               </div>
             )}
@@ -2763,6 +2815,21 @@ export function CrateApp({
             {activePlaylist && (
               <button
                 type="button"
+                onClick={() => void duplicatePlaylist(activePlaylist.id)}
+                title={
+                  isCollabPlaylist(activePlaylist)
+                    ? "Your own private copy, to rework the order or borrow from — the shared one stays as it is"
+                    : "A copy to rework the order — this one stays as it is"
+                }
+                className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-ink-700 px-3 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
+              >
+                <CopyIcon className="h-3 w-3" />
+                Duplicate
+              </button>
+            )}
+            {activePlaylist && (
+              <button
+                type="button"
                 onClick={() => setActivePlaylistId(null)}
                 className="shrink-0 whitespace-nowrap text-[11px] text-neutral-500 hover:text-neutral-200"
               >
@@ -2828,6 +2895,7 @@ export function CrateApp({
                 onPlayLocal={playFrom}
                 onPlayRecord={playRecord}
                 onAddToPlaylist={queueForPlaylist}
+                onRecordOnly={setRecordCard}
                 onPivot={pivotFilter}
                 onPreviewExternal={previewExternal}
                 onWantlistChange={applyWantlistChange}
@@ -3138,6 +3206,8 @@ export function CrateApp({
             localDetail={(id) => detailById.get(id) ?? null}
             onPlay={playFromSearch}
             playingKey={current?.key ?? null}
+            onRecordOnly={setRecordCard}
+            onAddToPlaylist={queueForPlaylist}
           />
         </div>
       </Sheet>
@@ -3187,6 +3257,12 @@ export function CrateApp({
               setSheet("none");
             }}
             onExport={exportPlaylists}
+            onExportOne={exportPlaylist}
+            onDuplicate={(id) => {
+              // The copy opens behind the sheet: close it so you're looking at it.
+              setSheet("none");
+              void duplicatePlaylist(id);
+            }}
             onImport={(file) => void importPlaylists(file)}
             onShare={(id, shared) => void sharePlaylist(id, shared)}
             sharedIds={sharedIds}
@@ -3313,6 +3389,8 @@ export function CrateApp({
                     onPlayExtra={(item) =>
                       playRecord([item], 0, current.releaseTitle || "this record")
                     }
+                    onRecordOnly={setRecordCard}
+                    onAdd={queueForPlaylist}
                   />
                 </div>
               )}
@@ -3384,8 +3462,12 @@ export function CrateApp({
             floating in the middle of a phone puts the thing you have to tap
             where the thumb does not reach, and every music app on a handset
             solved this the same way for the same reason.
+
+            sm:justify-center matters: justify-end (for the phone's sheet)
+            also applies to the grid, where it pushed the one column — and
+            the dialog with it — against the right edge of the window.
           */
-          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 sm:grid sm:place-items-center sm:p-4"
+          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 sm:grid sm:place-items-center sm:justify-center sm:p-4"
           role="dialog"
           aria-modal="true"
           aria-label="Add to playlist"

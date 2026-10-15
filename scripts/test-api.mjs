@@ -1810,6 +1810,94 @@ console.log("\ncollaborative playlists");
     assert.equal((await bpmOf(friend, "5010:jjjjjjjjjjj")).bpm, 122);
   });
 
+  /* ---- duplicating ---- */
+  let copyId = null;
+  let copyName = null;
+
+  await check("a collaborator can duplicate the shared set into a private copy", async () => {
+    const original = await find(friend);
+    const res = await friend.call(`/api/playlists/${playlistId}/duplicate`, { method: "POST" });
+    assert.equal(res.status, 201);
+    const copy = res.body.playlist;
+    copyId = copy.id;
+    copyName = copy.name;
+    assert.notEqual(copy.id, playlistId);
+    assert.equal(copy.name, `${original.name} (copy)`);
+    assert.equal(copy.role, "owner");
+    assert.deepEqual(copy.collaborators, []);
+    assert.equal(copy.joinLinkOn, false);
+    assert.deepEqual(
+      copy.entries.map((e) => e.clipKey),
+      original.entries.map((e) => e.clipKey),
+      "the same running order",
+    );
+    const kept = copy.entries.find((e) => e.clipKey === "5010:jjjjjjjjjjj");
+    assert.equal(kept.bpm, 122, "the set's BPM comes with it");
+    assert.equal(kept.bpmBy, friend.username, "and who measured it");
+    assert.ok(copy.entries.every((e) => e.addedBy === friend.username), "every row is the copier's now");
+  });
+
+  await check("the copy is the copier's alone: no one else can see it", async () => {
+    for (const who of [owner, third, stranger]) {
+      assert.equal((await who.call(`/api/playlists/${copyId}`)).status, 404, who.username);
+      const listed = (await who.call("/api/playlists")).body.playlists.some((p) => p.id === copyId);
+      assert.equal(listed, false, who.username);
+    }
+  });
+
+  await check("the copy brings no chat, and no share link", async () => {
+    const chat = await friend.call(`/api/playlists/${copyId}/messages`);
+    assert.equal(chat.status, 200);
+    assert.deepEqual(chat.body.messages, []);
+    const list = (await friend.call("/api/playlists")).body.playlists.find((p) => p.id === copyId);
+    assert.ok(!("shareToken" in list) && !("shareUrl" in list));
+  });
+
+  await check("reworking the copy leaves the shared set as it was", async () => {
+    const before = await find(owner);
+    const copy = (await friend.call(`/api/playlists/${copyId}`)).body.playlist;
+    const res = await friend.call(`/api/playlists/${copyId}`, {
+      method: "PATCH",
+      body: { entries: asEntries(copy).reverse().slice(1), version: copy.version },
+    });
+    assert.equal(res.status, 200);
+    const after = await find(owner);
+    assert.deepEqual(after.entries.map((e) => e.clipKey), before.entries.map((e) => e.clipKey));
+    assert.equal(after.version, before.version);
+  });
+
+  await check("a second copy is told apart from the first", async () => {
+    const res = await friend.call(`/api/playlists/${playlistId}/duplicate`, { method: "POST" });
+    assert.equal(res.status, 201);
+    assert.equal(res.body.playlist.name, copyName.replace(/ \(copy\)$/, " (copy 2)"));
+    assert.equal((await friend.call(`/api/playlists/${res.body.playlist.id}`, { method: "DELETE" })).status, 200);
+  });
+
+  await check("someone not on the playlist can't copy it — the same 404 as reading it", async () => {
+    const res = await stranger.call(`/api/playlists/${playlistId}/duplicate`, { method: "POST" });
+    assert.equal(res.status, 404);
+    const theirs = (await stranger.call("/api/playlists")).body.playlists;
+    assert.ok(!theirs.some((p) => p.name.startsWith("B2B at the Lot")), "nothing was created");
+  });
+
+  await check("duplicating needs a session, a CSRF token and a real id", async () => {
+    assert.equal(
+      (await friend.call(`/api/playlists/${playlistId}/duplicate`, { method: "POST", cookie: "" })).status,
+      401,
+    );
+    assert.equal(
+      (await friend.call(`/api/playlists/${playlistId}/duplicate`, { method: "POST", csrfToken: null })).status,
+      403,
+    );
+    assert.equal((await friend.call(`/api/playlists/not-a-uuid/duplicate`, { method: "POST" })).status, 400);
+    assert.equal((await friend.call(`/api/playlists/${playlistId}/duplicate`)).status, 405, "GET is not a copy");
+  });
+
+  await check("the copy outlives its original's changes, and deletes on its own", async () => {
+    assert.equal((await friend.call(`/api/playlists/${copyId}`, { method: "DELETE" })).status, 200);
+    assert.ok(await find(owner), "deleting the copy leaves the original");
+  });
+
   await check("a collaborator can leave", async () => {
     const res = await friend.call(`/api/playlists/${playlistId}/members`, {
       method: "DELETE",

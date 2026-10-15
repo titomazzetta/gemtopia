@@ -1,15 +1,18 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { Fragment, useCallback, useRef, useState } from "react";
 import type { SearchHit } from "@/lib/discogs";
-import type { ReleaseDetail } from "@/lib/types";
+import type { Playable, ReleaseDetail } from "@/lib/types";
 import { releasesApi } from "@/client/api";
 import { releaseUrl } from "@/lib/discogs-links";
 import {
   badgeFor,
   confirmAddMessage,
+  groupBySet,
   ownershipFrom,
+  SEARCH_GROUP_LABELS,
   type RowAction,
+  type SearchGroup,
 } from "@/client/ownership";
 import {
   SEARCH_FIELDS,
@@ -53,6 +56,13 @@ interface Props {
   onPlay?: (detail: ReleaseDetail, startKey: string) => void;
   /** What is on the decks, so an open tracklist highlights it. */
   playingKey?: string | null;
+  /**
+   * A track with no preview was tapped: open its record card (tap its BPM,
+   * add it to a set). Without this a pressing with no clips is a dead list.
+   */
+  onRecordOnly?: (item: Playable) => void;
+  /** Put a track from an open tracklist in a playlist (the usual picker). */
+  onAddToPlaylist?: (item: Playable) => void;
 }
 
 /*
@@ -71,10 +81,17 @@ export function DiscogsSearch({
   localDetail,
   onPlay,
   playingKey = null,
+  onRecordOnly,
+  onAddToPlaylist,
 }: Props) {
   const [query, setQuery] = useState(initialQuery);
   const [field, setField] = useState<SearchField>("all");
-  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  /*
+   * Grouped when they land — your collection, your wantlist, then the rest
+   * (ownership.groupBySet) — and kept in that order after, so a record you
+   * add from here doesn't jump to the top from under the pointer.
+   */
+  const [hits, setHits] = useState<Array<{ hit: SearchHit; group: SearchGroup }> | null>(null);
   const [status, setStatus] = useState<"idle" | "searching" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<number, RowState>>({});
@@ -201,7 +218,7 @@ export function DiscogsSearch({
       }
 
       const body = (await response.json()) as { results: SearchHit[] };
-      setHits(body.results);
+      setHits(groupBySet(body.results, sets));
       // A pending confirmation belongs to a row that no longer exists.
       setConfirmId(null);
       setStatus("idle");
@@ -221,7 +238,9 @@ export function DiscogsSearch({
       setStatus("error");
       setMessage("Couldn't reach Discogs.");
     }
-  }, [query, field]);
+  }, [query, field, sets]);
+
+  const grouped = (hits ?? []).some((h) => h.group !== "discogs");
 
   const act = async (hit: SearchHit, kind: "collection" | "wantlist") => {
     setConfirmId(null);
@@ -299,12 +318,27 @@ export function DiscogsSearch({
       )}
 
       <ul>
-        {(hits ?? []).map((hit) => {
+        {(hits ?? []).map(({ hit, group }, index, all) => {
           const state = rows[hit.id] ?? "idle";
           const badge = badgeFor(ownershipFrom(sets, hit.id), state);
+          // Headings only when there's something to separate: a search that
+          // turned up nothing of yours is just the Discogs list.
+          const heading =
+            grouped && (index === 0 || all[index - 1]!.group !== group)
+              ? `${SEARCH_GROUP_LABELS[group]} · ${all.filter((h) => h.group === group).length}`
+              : null;
 
           return (
-            <li key={hit.id} className="border-t border-ink-800">
+            <Fragment key={hit.id}>
+            {heading && (
+              <li
+                role="presentation"
+                className="border-t border-ink-800 bg-ink-950/50 px-4 pb-1.5 pt-2.5 text-[10px] font-medium uppercase tracking-wider text-neutral-500"
+              >
+                {heading}
+              </li>
+            )}
+            <li className="border-t border-ink-800">
               <div className="flex items-start gap-3 px-4 py-3">
               <span className="h-11 w-11 shrink-0 overflow-hidden rounded-sm bg-ink-800">
                 {hit.thumb ? (
@@ -352,7 +386,8 @@ export function DiscogsSearch({
                     .join(" · ")}
                 </span>
 
-                {badge && openId !== hit.id && (
+                {/* Under its own heading, the tag would only repeat it — until you press something. */}
+                {badge && openId !== hit.id && !(grouped && group !== "discogs" && state === "idle") && (
                   <span className="mt-1 inline-flex items-center gap-1 rounded-sm bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
                     <InCollection className="h-2.5 w-2.5" />
                     {badge}
@@ -445,9 +480,12 @@ export function DiscogsSearch({
                   owned={badge}
                   onPlay={onPlay}
                   playingKey={playingKey}
+                  onRecordOnly={onRecordOnly}
+                  onAdd={onAddToPlaylist}
                 />
               )}
             </li>
+            </Fragment>
           );
         })}
       </ul>
@@ -471,12 +509,16 @@ function ReleasePanel({
   owned,
   onPlay,
   playingKey,
+  onRecordOnly,
+  onAdd,
 }: {
   hit: SearchHit;
   detail: ReleaseDetail | "loading" | "failed" | undefined;
   owned: string | null;
   onPlay?: (detail: ReleaseDetail, startKey: string) => void;
   playingKey: string | null;
+  onRecordOnly?: (item: Playable) => void;
+  onAdd?: (item: Playable) => void;
 }) {
   const record =
     onPlay && detail !== undefined && detail !== "loading" && detail !== "failed"
@@ -506,10 +548,17 @@ function ReleasePanel({
       ) : (
         <>
           {detail.videos.length === 0 ? (
-            <p className="mb-2 flex items-center gap-1.5 text-[11px] text-amber-400/90">
-              <NoPreview className="h-3 w-3" />
-              No previews on Discogs for this pressing — you can own it, but it
-              won&apos;t play here.
+            <p className="mb-2 flex items-start gap-1.5 text-[11px] text-amber-400/90">
+              <NoPreview className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>
+                No previews on Discogs for this pressing, so it won&apos;t play here.
+                {record && onRecordOnly && record.order.rows.length > 0 && (
+                  <span className="text-neutral-400">
+                    {" "}
+                    Open a track to tap its BPM along to the record, or add it to a set.
+                  </span>
+                )}
+              </span>
             </p>
           ) : (
             <p className="mb-2 text-[11px] text-neutral-500">
@@ -534,6 +583,8 @@ function ReleasePanel({
                   if (start) onPlay(detail, start.key);
                 }}
                 onPlayExtra={(item) => onPlay(detail, item.key)}
+                onRecordOnly={onRecordOnly}
+                onAdd={onAdd}
               />
             </div>
           ) : detail.tracks.length > 0 && (

@@ -183,6 +183,32 @@ export const ListIcon = ({ className = base }: Props) => (
   </svg>
 );
 
+/** Two overlapping sheets — duplicate. */
+export const CopyIcon = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+  </svg>
+);
+
+/** An arrow into a tray — save a file. */
+export const DownloadIcon = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4" />
+    <path d="M12 3v12" />
+    <path d="m7 10 5 5 5-5" />
+  </svg>
+);
+
+/** Three dots — more actions. */
+export const MoreIcon = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+    <circle cx="5" cy="12" r="2" />
+    <circle cx="12" cy="12" r="2" />
+    <circle cx="19" cy="12" r="2" />
+  </svg>
+);
+
 /** A speech bubble — the chat on a shared playlist. */
 export const ChatIcon = ({ className = base }: Props) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
