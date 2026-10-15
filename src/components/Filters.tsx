@@ -598,7 +598,8 @@ export function Filters({
               {matched.toLocaleString()}
             </span>
             {" of "}
-            {total.toLocaleString()} clips
+            {/* Tracks, like the header: record-only ones are in here too. */}
+            {total.toLocaleString()} tracks
           </span>
           {dirty && (
             <button
@@ -821,7 +822,7 @@ export function Filters({
             onChange={(e) => onChange({ ...filters, withBpmOnly: e.target.checked })}
             className="h-3.5 w-3.5 rounded-sm border-ink-600 bg-ink-850 accent-accent"
           />
-          Only clips with a known BPM
+          Only tracks with a known BPM
         </label>
       </section>
 
