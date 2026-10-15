@@ -521,8 +521,15 @@ export function NowPlaying({
         the whole page taller than a laptop screen (1027px at 1280x800 and
         1440x900), so reaching "Add to playlist" scrolled everything, header
         included, and left a blank band under the crate.
+
+        *:shrink-0 because nothing in here may be squeezed: the column
+        scrolls instead. Flex items shrink by default, and the title block's
+        min-h-[52px] replaces the content-based minimum that would otherwise
+        stop it — so once this column became a scroller, the block was
+        crushed to 52px and its 89px of title, artist, record and "Exploring
+        … ← Back to shuffle" ran under the seek bar.
       */}
-      <div className="hidden min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4 lg:flex">
+      <div className="hidden min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4 *:shrink-0 lg:flex">
         {/*
           The drag source is this whole block, and nothing inside it is a
           <button>: Safari and Firefox won't start a drag that begins on a
