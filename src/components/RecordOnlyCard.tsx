@@ -17,6 +17,8 @@ import { Disc, Plus } from "./Icons";
  * gets written from the shelf.
  *
  * Full width from the bottom on a phone, a card on desktop; × or Escape.
+ * On a keyboard, T taps (the same key as the player's tap tempo) and A adds
+ * it to a playlist — so on a laptop at the decks it's open, tap-tap-tap, A.
  */
 export function RecordOnlyCard({
   item,
@@ -37,19 +39,6 @@ export function RecordOnlyCard({
   const [taps, setTaps] = useState(0);
   const [reading, setReading] = useState<number | null>(null);
 
-  const onCloseRef = useRef(onClose);
-  useEffect(() => {
-    onCloseRef.current = onClose;
-  }, [onClose]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onCloseRef.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
-
   const tap = (at: number) => {
     const estimate = tapper.current.tap(at);
     setTaps(tapper.current.count);
@@ -57,6 +46,55 @@ export function RecordOnlyCard({
     setReading(estimate.bpm);
     onSaveBpm(estimate.bpm, estimate.confidence);
   };
+
+  // The window listener is added once; these keep it calling the latest props.
+  const latest = useRef({ onClose, onAdd, tap });
+  useEffect(() => {
+    latest.current = { onClose, onAdd, tap };
+  });
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape") {
+        latest.current.onClose();
+      } else if (event.key === "t" || event.key === "T") {
+        event.preventDefault();
+        // Held down, the keyboard's auto-repeat would be thirty taps a second.
+        if (!event.repeat) latest.current.tap(event.timeStamp);
+      } else if ((event.key === "a" || event.key === "A") && latest.current.onAdd) {
+        event.preventDefault();
+        latest.current.onAdd();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  /*
+   * Focus moves into the card, so Tab and Enter act on it and not on the row
+   * behind it that opened it; it goes back to that row on close — unless
+   * something else took it meanwhile (Add opens the playlist picker, whose
+   * name field focuses itself).
+   */
+  const panel = useRef<HTMLDivElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const before = document.activeElement;
+    // Only the first time: StrictMode runs this twice, and by the second run
+    // the focused element is the card itself.
+    if (opener.current === null && before instanceof HTMLElement && !panel.current?.contains(before)) {
+      opener.current = before;
+    }
+    panel.current?.focus({ preventScroll: true });
+    return () => {
+      const now = document.activeElement;
+      const back = opener.current;
+      if (back?.isConnected && (now === null || now === document.body)) {
+        back.focus({ preventScroll: true });
+      }
+    };
+  }, []);
 
   const shown = reading ?? bpm;
   const facts = [
@@ -77,7 +115,12 @@ export function RecordOnlyCard({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="w-full rounded-t-2xl border-t border-ink-700 bg-ink-950 px-5 pb-5 pt-4 lg:max-w-md lg:rounded-2xl lg:border">
+      <div
+        ref={panel}
+        tabIndex={-1}
+        // Focus parks here so keys act on the card; it isn't a control, so no ring.
+        className="w-full rounded-t-2xl border-t border-ink-700 bg-ink-950 px-5 pb-5 pt-4 outline-none focus-visible:ring-0 focus-visible:ring-offset-0 lg:max-w-md lg:rounded-2xl lg:border"
+      >
         <div className="flex items-start gap-3">
           <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md bg-ink-800">
             {item.thumb ? (
@@ -127,6 +170,7 @@ export function RecordOnlyCard({
             <span className="text-sm font-semibold tracking-wider">TAP</span>
             <span className="mt-0.5 text-[10px] text-accent/70">
               {taps === 0 ? "with the kick" : taps < 3 ? `${taps}…` : `${taps} taps`}
+              {taps === 0 && <span className="hidden pointer-fine:inline"> · or press T</span>}
             </span>
           </button>
           <div className="flex w-28 flex-col items-center justify-center rounded-xl border border-ink-700 bg-ink-900">
@@ -146,6 +190,9 @@ export function RecordOnlyCard({
             >
               <Plus className="h-4 w-4" />
               Add to playlist
+              <kbd className="ml-1 hidden rounded-sm border border-ink-950/30 px-1 font-mono text-[10px] font-medium pointer-fine:inline">
+                A
+              </kbd>
             </button>
           )}
           <a

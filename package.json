@@ -17,7 +17,7 @@
     "db:migrate": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/migrate.mjs",
     "verify:discogs": "node scripts/verify-discogs.mjs",
     "verify:db": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/verify-db.mjs",
-    "test": "npm run test:env && npm run test:headers && npm run test:playables && npm run test:sorting && npm run test:share && npm run test:scrub && npm run test:ownership && npm run test:recent && npm run test:adopt && npm run test:search && npm run test:writes && npm run test:playback && npm run test:watchdog && npm run test:freshness && npm run test:tempo && npm run test:mixing && npm run test:bpm-range && npm run test:beat-meter && npm run test:record && npm run test:mark && npm run test:api && npm run test:bpm-scale && npm run test:order && npm run test:views && npm run test:dig-feed && npm run test:dig-links && npm run test:sync-queue && npm run test:clip-drag && npm run test:pull-list && npm run test:search-play && npm run test:invites && npm run test:manifest && npm run test:collab && npm run test:collab-view && npm run test:chat && npm run test:audit-gate && npm run test:envelope && npm run test:db-tls",
+    "test": "npm run test:env && npm run test:headers && npm run test:playables && npm run test:sorting && npm run test:share && npm run test:scrub && npm run test:ownership && npm run test:recent && npm run test:adopt && npm run test:search && npm run test:writes && npm run test:playback && npm run test:watchdog && npm run test:freshness && npm run test:tempo && npm run test:mixing && npm run test:bpm-range && npm run test:beat-meter && npm run test:record && npm run test:mark && npm run test:api && npm run test:bpm-scale && npm run test:order && npm run test:views && npm run test:dig-feed && npm run test:dig-links && npm run test:sync-queue && npm run test:clip-drag && npm run test:pull-list && npm run test:search-play && npm run test:invites && npm run test:manifest && npm run test:collab && npm run test:collab-view && npm run test:chat && npm run test:audit-gate && npm run test:envelope && npm run test:db-tls && npm run test:playlist-file",
     "test:env": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-env.mjs",
     "test:headers": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-headers.mjs",
     "test:playables": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playables.mjs",
@@ -55,7 +55,8 @@
     "test:chat": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-chat.mjs",
     "test:audit-gate": "node scripts/test-audit-gate.mjs",
     "test:envelope": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-envelope.mjs",
-    "test:db-tls": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-db-tls.mjs"
+    "test:db-tls": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-db-tls.mjs",
+    "test:playlist-file": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-playlist-file.mjs"
   },
   "dependencies": {
     "next": "16.3.8",

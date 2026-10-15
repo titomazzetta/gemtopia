@@ -9,7 +9,7 @@ import { addedCount, appendLanes, finishedLanes, nextDigPage, revealMore, visibl
 import { writeClipDrag } from "@/client/clipDrag";
 import { useFinePointer } from "@/client/useFinePointer";
 import { formatTime } from "./NowPlaying";
-import { Disc, Heart, Play, Plus, Search, Shuffle, Sparkle } from "./Icons";
+import { Disc, Heart, NoPreview, Play, Plus, Search, Shuffle, Sparkle } from "./Icons";
 import { formatBpm } from "@/lib/mixing";
 
 /**
@@ -92,13 +92,21 @@ function LocalRow({
   onAdd: () => void;
 }) {
   const finePointer = useFinePointer();
+  const recordOnly = item.silence === "record-only";
   return (
     <li
-      draggable={finePointer && item.videoId !== null}
+      // A record-only track drags into a playlist like a clip: it is a track
+      // in a set, it just has nothing to play here.
+      draggable={finePointer && (item.videoId !== null || item.silence === "record-only")}
       onDragStart={(event) => writeClipDrag(event.dataTransfer, item.key)}
       className="group flex w-56 shrink-0 flex-col rounded-md border border-ink-800 bg-ink-850 p-2 hover:border-ink-600"
     >
-      <button type="button" onClick={onPlay} className="flex items-start gap-2 text-left">
+      <button
+        type="button"
+        onClick={onPlay}
+        title={recordOnly ? "No preview — open it to tap its BPM or add it to a set" : undefined}
+        className="flex items-start gap-2 text-left"
+      >
         <span className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-sm bg-ink-800">
           {item.thumb ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -107,12 +115,15 @@ function LocalRow({
             <Disc className="h-4 w-4 text-neutral-700" />
           )}
           <span className="absolute inset-0 hidden place-items-center bg-black/60 group-hover:grid">
-            <Play className="h-3 w-3 text-white" />
+            {recordOnly ? <Disc className="h-3 w-3 text-white" /> : <Play className="h-3 w-3 text-white" />}
           </span>
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[12px] text-neutral-200">{item.title}</span>
-          <span className="block truncate text-[10px] text-neutral-500">{item.artist}</span>
+          <span className="block truncate text-[10px] text-neutral-500">
+            {recordOnly ? <span className="text-neutral-600">Record only · </span> : null}
+            {item.artist}
+          </span>
         </span>
       </button>
 
@@ -309,12 +320,20 @@ function EndTile({
   );
 }
 
+const tracksLabel = (count: number) => `${count} ${count === 1 ? "track" : "tracks"}`;
+
 /**
  * The whole record, in the order it was pressed. See client/recordOrder.ts.
  *
  * Tracks Discogs has no clip for are listed anyway, dimmed. Hiding them would
  * make a four-track EP look like a two-track single, which is the opposite of
  * what someone opening "the whole record" wants to know.
+ *
+ * Dimmed is not dead, though. A track with no clip opens its record card —
+ * tap its BPM while the record plays in the room, add it to a set — and every
+ * row has a + for the playlist picker. Before, the only way to get a track
+ * like that into a set was to find it again in your crate (or on a phone),
+ * which is no use mid-dig with a friend at the same screen.
  */
 export function RecordSection({
   order,
@@ -322,6 +341,8 @@ export function RecordSection({
   year,
   onPlay,
   onPlayExtra,
+  onRecordOnly,
+  onAdd,
 }: {
   order: RunningOrder;
   releaseTitle: string;
@@ -329,6 +350,10 @@ export function RecordSection({
   /** Index into the playable tracks, in running order. */
   onPlay: (index: number) => void;
   onPlayExtra: (item: Playable) => void;
+  /** Open a track with no clip: its record card, with a tap pad and Add. */
+  onRecordOnly?: (item: Playable) => void;
+  /** Put a track in a playlist (the usual picker). */
+  onAdd?: (item: Playable) => void;
 }) {
   const playable = order.rows.filter((row) => row.playable !== null);
   if (order.rows.length === 0 && order.extras.length === 0) return null;
@@ -339,7 +364,7 @@ export function RecordSection({
   const queueIndex = order.rows.map((row) => (row.playable ? cursor++ : -1));
 
   return (
-    <section className="mx-4 mb-4 rounded-md border border-ink-800 bg-ink-850/50">
+    <section className="@container mx-4 mb-4 rounded-md border border-ink-800 bg-ink-850/50">
       <header className="flex items-center gap-2 border-b border-ink-800 px-3 py-2">
         <Disc className="h-3.5 w-3.5 shrink-0 text-accent" />
         <div className="min-w-0 flex-1">
@@ -350,8 +375,10 @@ export function RecordSection({
           <p className="text-[10px] text-neutral-600">
             {order.rows.length > 0
               ? playable.length === order.rows.length
-                ? `${order.rows.length} tracks · all with a preview`
-                : `${order.rows.length} tracks · ${playable.length} with a preview · ${order.rows.length - playable.length} without`
+                ? `${tracksLabel(order.rows.length)} · all with a preview`
+                : playable.length === 0
+                  ? `${tracksLabel(order.rows.length)} · none with a preview`
+                  : `${tracksLabel(order.rows.length)} · ${playable.length} with a preview · ${order.rows.length - playable.length} without`
               : "Clips on YouTube for this release"}
           </p>
         </div>
@@ -372,6 +399,8 @@ export function RecordSection({
         <ol className="max-h-72 overflow-y-auto py-1">
           {order.rows.map((row, index) => {
             const at = queueIndex[index]!;
+            // A track with no clip opens its record card, when there is one to open.
+            const openItem = row.playable === null && onRecordOnly ? row.recordOnly : null;
             const content = (
               <>
                 <span className="w-7 shrink-0 font-mono text-[10px] text-neutral-600">
@@ -383,7 +412,9 @@ export function RecordSection({
                       ? "font-medium text-accent"
                       : row.playable
                         ? "text-neutral-200"
-                        : "text-neutral-600"
+                        : openItem
+                          ? "text-neutral-500 group-hover/row:text-neutral-200"
+                          : "text-neutral-600"
                   }`}
                 >
                   {row.title}
@@ -393,7 +424,16 @@ export function RecordSection({
                     playing
                   </span>
                 ) : !row.playable ? (
-                  <span className="shrink-0 text-[9px] text-neutral-600">no preview</span>
+                  /* Words where there's room; in the 300px search rail the
+                     title needs the space more, so it's the icon there. */
+                  <span
+                    className={`flex shrink-0 items-center text-[9px] ${
+                      openItem ? "text-neutral-500 group-hover/row:text-neutral-300" : "text-neutral-600"
+                    }`}
+                  >
+                    <NoPreview className="h-3 w-3 @xs:hidden" />
+                    <span className="sr-only @xs:not-sr-only">no preview</span>
+                  </span>
                 ) : (
                   <Play className="h-3 w-3 shrink-0 text-neutral-500" aria-hidden="true" />
                 )}
@@ -404,24 +444,51 @@ export function RecordSection({
                 )}
               </>
             );
+            const rowClass = "flex min-w-0 flex-1 items-center gap-2 py-2.5 pl-3 text-left text-xs lg:py-1.5";
+            const addable = row.playable ?? row.recordOnly;
 
             return (
-              <li key={`${row.position}:${index}`}>
+              <li
+                key={`${row.position}:${index}`}
+                className={`group/row flex items-stretch ${row.current ? "bg-accent/5" : ""}`}
+              >
                 {row.playable ? (
                   <button
                     type="button"
                     onClick={() => onPlay(at)}
-                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-ink-800 lg:py-1.5 ${
-                      row.current ? "bg-accent/5" : ""
-                    }`}
+                    className={`${rowClass} hover:bg-ink-800 ${onAdd ? "pr-1" : "pr-3"}`}
                     title="Play from here, then return to your shuffle"
                     aria-current={row.current ? "true" : undefined}
                   >
                     {content}
                   </button>
+                ) : openItem ? (
+                  <button
+                    type="button"
+                    onClick={() => onRecordOnly?.(openItem)}
+                    className={`${rowClass} hover:bg-ink-800 ${onAdd ? "pr-1" : "pr-3"}`}
+                    title="No preview — open it to tap its BPM or add it to a set"
+                    aria-haspopup="dialog"
+                  >
+                    {content}
+                  </button>
                 ) : (
-                  <div className="flex items-center gap-2 px-3 py-2.5 text-xs lg:py-1.5">{content}</div>
+                  <div className={`${rowClass} ${onAdd ? "pr-1" : "pr-3"}`}>{content}</div>
                 )}
+                {onAdd &&
+                  (addable ? (
+                    <button
+                      type="button"
+                      onClick={() => onAdd(addable)}
+                      aria-label={`Add ${row.title} to a playlist`}
+                      title="Add to playlist"
+                      className="flex w-9 shrink-0 items-center justify-center text-neutral-600 hover:bg-ink-800 hover:text-accent focus-visible:text-accent"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                  ) : (
+                    <span className="w-9 shrink-0" aria-hidden="true" />
+                  ))}
               </li>
             );
           })}
@@ -464,6 +531,7 @@ export function DigDrawer({
   onPlayLocal,
   onPlayRecord,
   onAddToPlaylist,
+  onRecordOnly,
   onPivot,
   onPreviewExternal,
   onWantlistChange,
@@ -489,6 +557,8 @@ export function DigDrawer({
   /** Play the record in running order as a detour from the shuffle. */
   onPlayRecord: (items: Playable[], index: number, label: string) => void;
   onAddToPlaylist: (item: Playable) => void;
+  /** A track on the record with no clip: open its record card. */
+  onRecordOnly: (item: Playable) => void;
   /** Apply a facet to the main crate filter and close the drawer. */
   onPivot: (facet: "artists" | "labels" | "styles" | "genres" | "countries", value: string) => void;
   /** Play a release that is not in the collection. */
@@ -857,6 +927,8 @@ export function DigDrawer({
             onPlayRecord(recordQueue(record), index, seed.releaseTitle || "this record")
           }
           onPlayExtra={(item) => onPlayRecord([item], 0, seed.releaseTitle || "this record")}
+          onRecordOnly={onRecordOnly}
+          onAdd={onAddToPlaylist}
         />
 
         {half === "crate" ? (

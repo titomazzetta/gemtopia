@@ -19,6 +19,7 @@
  */
 
 import type { Playable, ReleaseDetail } from "@/lib/types";
+import { recordOnlyFor } from "./playables";
 
 export interface RecordRow {
   /** Discogs position: "A1", "B2", "3". */
@@ -28,6 +29,12 @@ export interface RecordRow {
   duration: string | null;
   /** The clip for this track, or null when Discogs has no audio for it. */
   playable: Playable | null;
+  /**
+   * The track as a "record only" entry, when no clip plays it: what a tap on
+   * the row opens (tap its BPM, add it to a set). Null when it has a clip, and
+   * when there is no tracklist to name it from.
+   */
+  recordOnly: Playable | null;
   /** This is what is playing now. */
   current: boolean;
 }
@@ -89,6 +96,7 @@ export function runningOrder(
         title: c.title,
         duration: null,
         playable: c,
+        recordOnly: null,
         current: isCurrent(c),
       })),
       extras: ordered.filter((c) => c.matchKind !== "track"),
@@ -107,6 +115,7 @@ export function runningOrder(
     title: track.title,
     duration: track.duration,
     playable: null,
+    recordOnly: null,
     current: false,
   }));
 
@@ -122,6 +131,27 @@ export function runningOrder(
   rows.forEach((row) => {
     row.current = isCurrent(row.playable);
   });
+
+  /*
+   * What's left has no clip, but it is still a track on the record: one you
+   * can tap a BPM for while it plays in the room, and put in a set. The
+   * crate's own row wins when there is one (it carries your catalogue's BPM
+   * and when you added the record); otherwise it is built the same way the
+   * crate builds it, so the key matches either way.
+   */
+  if (detail && rows.some((row) => row.playable === null)) {
+    const asRecordOnly = recordOnlyFor(detail);
+    const inCrate = new Map(
+      pool
+        .filter((p) => p.releaseId === detail.id && p.silence === "record-only")
+        .map((p) => [p.key, p]),
+    );
+    rows.forEach((row, i) => {
+      if (row.playable) return;
+      const built = asRecordOnly(tracks[i]!);
+      row.recordOnly = inCrate.get(built.key) ?? built;
+    });
+  }
 
   return { rows, extras: clips.filter((c) => unused.has(c.key)) };
 }

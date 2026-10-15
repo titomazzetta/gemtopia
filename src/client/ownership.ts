@@ -124,3 +124,44 @@ export function wantlistHeart(state: OwnershipState): { wanted: boolean } | null
   if (state.inCollection === true) return null;
   return { wanted: state.onWantlist === true };
 }
+
+/** Where a search result sits: what you own, what you want, everything else. */
+export type SearchGroup = "collection" | "wantlist" | "discogs";
+
+export const SEARCH_GROUP_LABELS: Record<SearchGroup, string> = {
+  collection: "In your collection",
+  wantlist: "On your wantlist",
+  discogs: "Everything else on Discogs",
+};
+
+const GROUP_RANK: Record<SearchGroup, number> = { collection: 0, wantlist: 1, discogs: 2 };
+
+/**
+ * Search results with what you have first: your collection, then your
+ * wantlist, then the rest — each group in the order Discogs ranked it.
+ *
+ * A search for an artist or a catalogue number usually turns up the pressing
+ * on your shelf among a dozen that aren't, and it's the one you were after:
+ * it should be the first row, not the ninth. Same for a want — searching it
+ * is usually "is that the one I've been looking for".
+ *
+ * Grouped on what is known only, like every other ownership answer here: an
+ * unsynced list moves nothing up, and owning beats wanting when a record is
+ * on both (Discogs never drops a want when you add the release). Callers
+ * group once, when results land, so a record you add from the list doesn't
+ * jump away from under the pointer.
+ */
+export function groupBySet<T extends { id: number }>(
+  hits: readonly T[],
+  sets: { collection: Set<number>; wantlist: Set<number> },
+): Array<{ hit: T; group: SearchGroup }> {
+  return hits
+    .map((hit, index) => {
+      const state = ownershipFrom(sets, hit.id);
+      const group: SearchGroup =
+        state.inCollection === true ? "collection" : state.onWantlist === true ? "wantlist" : "discogs";
+      return { hit, group, index };
+    })
+    .sort((a, b) => GROUP_RANK[a.group] - GROUP_RANK[b.group] || a.index - b.index)
+    .map(({ hit, group }) => ({ hit, group }));
+}

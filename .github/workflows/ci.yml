@@ -140,7 +140,8 @@ jobs:
         # first broken suite.
         run: |
           for suite in mark bpm-range beat-meter record views dig-feed dig-links \
-                       sync-queue clip-drag pull-list search-play invites manifest collab collab-view chat; do
+                       sync-queue clip-drag pull-list search-play invites manifest collab collab-view chat \
+                       playlist-file; do
             npm run "test:$suite"
           done
 

@@ -11,6 +11,7 @@ import {
   wrapDataKey,
 } from "./envelope";
 import { chatKeyRing, requireChatKeyRing } from "./chatKeys";
+import { copyName } from "./playlistCopy";
 import {
   MAX_COLLABORATORS,
   carryAddedBy,
@@ -575,6 +576,72 @@ export async function createPlaylist(
 
   const playlist = await getPlaylist(userId, id);
   if (!playlist) throw new Error("created playlist not readable");
+  return playlist;
+}
+
+/**
+ * Your own private copy of a playlist you can see — yours, or one you
+ * collaborate on — so a sequence can be reworked, or borrowed from, without
+ * touching the one everyone else is looking at.
+ *
+ * Copies the running order and every row, with the set's BPMs and who
+ * measured them: transitions in the copy read exactly as they did in the
+ * original. Copies nothing else — no collaborators, no join link, no share
+ * link, no chat. Every row is credited to the person making the copy, since
+ * it's their list now.
+ *
+ * Access is the same rule as reading it (CAN_EDIT), checked in the same
+ * transaction that copies, under a share lock on the source row: an edit in
+ * flight finishes first (replaceItems holds FOR UPDATE), and none starts
+ * until the copy is done, so the copy is one version of the list. Someone
+ * else's playlist is null — a 404 — like everywhere else. The request
+ * carries nothing but the id; there is no client-supplied content to trust.
+ */
+export async function duplicatePlaylist(
+  userId: string,
+  playlistId: string,
+): Promise<Playlist | null> {
+  const id = await tx(async (client) => {
+    const source = await client.query<{ name: string }>(
+      `SELECT p.name FROM playlists p
+        WHERE p.id = $2 AND ${CAN_EDIT("p", "$1")}
+        FOR SHARE OF p`,
+      [userId, playlistId],
+    );
+    const from = source.rows[0];
+    if (!from) return null;
+
+    const names = await client.query<{ name: string }>(
+      `SELECT p.name FROM playlists p WHERE ${CAN_EDIT("p", "$1")}`,
+      [userId],
+    );
+    const created = await client.query<{ id: string }>(
+      `INSERT INTO playlists (user_id, name)
+            VALUES ($1, $2)
+         RETURNING id`,
+      [userId, copyName(from.name, names.rows.map((r) => r.name))],
+    );
+    const row = created.rows[0];
+    if (!row) throw new Error("insert returned no row");
+
+    await client.query(
+      `INSERT INTO playlist_items
+          (playlist_id, position, clip_key, release_id, video_id,
+           title, artist, release_title, year, added_by,
+           bpm, bpm_source, bpm_by)
+       SELECT $1, i.position, i.clip_key, i.release_id, i.video_id,
+              i.title, i.artist, i.release_title, i.year, $2,
+              i.bpm, i.bpm_source, i.bpm_by
+         FROM playlist_items i
+        WHERE i.playlist_id = $3`,
+      [row.id, userId, playlistId],
+    );
+    return row.id;
+  });
+
+  if (id === null) return null;
+  const playlist = await getPlaylist(userId, id);
+  if (!playlist) throw new Error("copied playlist not readable");
   return playlist;
 }
 

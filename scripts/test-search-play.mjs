@@ -35,8 +35,29 @@ check("a record plays in running order, not the order videos arrived in", () => 
   assert.equal(record.order.rows.length, 3, "the track with no preview is still listed");
 });
 
-check("nothing to play is null, not an empty queue", () => {
-  assert.equal(searchRecord(detail({ videos: [] })), null);
+check("a pressing with no previews is still its tracklist, every track record only", () => {
+  const record = searchRecord(detail({ videos: [] }));
+  assert.ok(record, "not a dead list of titles");
+  assert.equal(record.queue.length, 0, "nothing to play");
+  assert.deepEqual(record.order.rows.map((r) => r.recordOnly?.key), ["77:t.A", "77:t.B1", "77:t.B2"]);
+  assert.ok(record.order.rows.every((r) => r.playable === null));
+});
+
+check("the track with no preview on a playing record opens as record only", () => {
+  const record = searchRecord(detail());
+  const b2 = record.order.rows.find((r) => r.position === "B2");
+  assert.equal(b2.playable, null);
+  assert.equal(b2.recordOnly.key, "77:t.B2");
+  assert.equal(b2.recordOnly.title, "Surface Static (Iteration X Mix)");
+});
+
+check("a BPM you've logged comes with the record-only row", () => {
+  const record = searchRecord(detail({ videos: [] }), null, new Map([["77:t.B1", 126]]));
+  assert.equal(record.order.rows.find((r) => r.position === "B1").recordOnly.bpm, 126);
+});
+
+check("no clips and no tracklist is null: there is nothing to list", () => {
+  assert.equal(searchRecord(detail({ videos: [], tracks: [] })), null);
 });
 
 check("a track-name search starts on that track", () => {

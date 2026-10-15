@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { comparePositions, recordQueue, runningOrder } from "../src/client/recordOrder.ts";
 import { beginDetour, detourEnds, resumePoint } from "../src/client/detour.ts";
+import { buildPlayables } from "../src/client/playables.ts";
 
 let ran = 0;
 let failed = 0;
@@ -50,8 +51,28 @@ function clip(videoId, { position = null, title = videoId, matchKind = "track", 
   };
 }
 
-function detail(tracks) {
-  return { id: RELEASE, tracks, videos: [], notes: null, market: null, fetchedAt: 0 };
+function detail(tracks, videos = []) {
+  return {
+    id: RELEASE,
+    title: "Melon Ball EP",
+    artist: "Din",
+    year: 2019,
+    genres: ["Electronic"],
+    styles: ["Deep House"],
+    labels: ["Clone Basement Series"],
+    formats: ["Vinyl"],
+    country: "Netherlands",
+    artistIds: [],
+    labelIds: [],
+    addedAt: null,
+    thumb: "",
+    coverImage: "",
+    tracks,
+    videos,
+    notes: null,
+    market: { forSale: 0, lowestPrice: null, have: null, want: null },
+    fetchedAt: 0,
+  };
 }
 
 const t = (position, title, duration = null) => ({ position, title, duration, artists: [] });
@@ -176,6 +197,62 @@ check("the queue is the playable tracks, in order", () => {
 });
 
 /* ---- the detour ---- */
+
+/* ---- tracks with no clip: still a track you can tap and set ---- */
+
+console.log("\nno preview, still a track");
+
+check("a track with no clip is a record-only row, under the crate's key", () => {
+  const order = runningOrder(A1, detail(TRACKS), [A1, A2, B2]);
+  const b1 = order.rows.find((r) => r.position === "B1");
+  assert.equal(b1.playable, null);
+  assert.ok(b1.recordOnly, "B1 has something to open");
+  assert.equal(b1.recordOnly.key, `${RELEASE}:t.B1`);
+  assert.equal(b1.recordOnly.silence, "record-only");
+  assert.equal(b1.recordOnly.videoId, null);
+  assert.equal(b1.recordOnly.title, "Seed");
+  assert.equal(b1.recordOnly.artist, "Din");
+  assert.equal(b1.recordOnly.releaseTitle, "Melon Ball EP");
+});
+
+check("a row with a clip has no record-only twin", () => {
+  const order = runningOrder(A1, detail(TRACKS), [A1, A2, B2]);
+  for (const row of order.rows.filter((r) => r.playable)) assert.equal(row.recordOnly, null);
+});
+
+check("the crate's own record-only row wins — it carries your BPM", () => {
+  const mine = { ...clip("unused"), key: `${RELEASE}:t.B1`, videoId: null, title: "Seed", silence: "record-only", bpm: 123 };
+  const order = runningOrder(A1, detail(TRACKS), [A1, A2, B2, mine]);
+  assert.equal(order.rows.find((r) => r.position === "B1").recordOnly, mine);
+});
+
+check("keys agree with the crate's, even for two tracks printed at one position", () => {
+  // A misprinted tracklist: two A1s. trackOnlyKey keeps them apart, and a
+  // row opened from the record list must be the same track as the crate's.
+  const tracks = [t("A1", "Dub"), t("A1", "Dub (Version)", "6:00"), t("B1", "Seed")];
+  const release = detail(tracks, [{ id: "vB1aaaaaaaa", title: "Din - Seed", duration: 300 }]);
+  const crate = buildPlayables([release]);
+  const keysInCrate = crate.filter((p) => p.silence === "record-only").map((p) => p.key).sort();
+  const seed = crate.find((p) => p.videoId !== null);
+  const order = runningOrder(seed, release, crate);
+  const keysInRows = order.rows.filter((r) => r.recordOnly).map((r) => r.recordOnly.key).sort();
+  assert.deepEqual(keysInRows, keysInCrate);
+  assert.deepEqual(keysInRows, [`${RELEASE}:t.A1`, `${RELEASE}:t.A1-2`]);
+});
+
+check("a record with no clips at all is every track, record only", () => {
+  const release = detail(TRACKS);
+  const [first] = buildPlayables([release]);
+  const order = runningOrder(first, release, []);
+  assert.equal(order.rows.length, 4);
+  assert.ok(order.rows.every((r) => r.playable === null && r.recordOnly !== null));
+  assert.equal(recordQueue(order).length, 0, "nothing in the queue: nothing plays");
+});
+
+check("without a tracklist there is nothing to name, so nothing is record-only", () => {
+  const order = runningOrder(A1, null, [A1, A2]);
+  assert.ok(order.rows.every((r) => r.recordOnly === null));
+});
 
 console.log("\nleaving the shuffle and coming back");
 

@@ -109,6 +109,15 @@ export const playlistsApi = {
   remove: (id: string) =>
     request<{ ok: true }>(`/api/playlists/${id}`, { method: "DELETE" }),
 
+  /**
+   * Your own private copy of a playlist you can see, set BPMs and all. The
+   * server copies what it already lets you read; see repo.duplicatePlaylist.
+   */
+  duplicate: (id: string) =>
+    request<{ playlist: Playlist }>(`/api/playlists/${id}/duplicate`, {
+      method: "POST",
+    }).then((r) => r.playlist),
+
   /** Owner only: the join link, to copy again. `url` is null when it's off. */
   joinLink: (id: string) =>
     request<{ on: boolean; url: string | null }>(`/api/playlists/${id}/collab`),

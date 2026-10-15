@@ -259,6 +259,58 @@ export function pendingPlayables(
   return out;
 }
 
+/**
+ * Makes "record only" rows for a release's tracks: tracklist entries with no
+ * clip, which can still go in a set and carry a tapped BPM.
+ *
+ * The one place such a row is built, so the crate, the dig drawer and a
+ * Discogs search result all agree on it, above all on its key. That key is
+ * what a playlist entry and a tapped BPM are stored against, and it is worked
+ * out over the whole tracklist (see trackOnlyKey: two tracks printed with the
+ * same position must not share one), so it is computed once here for every
+ * track, whichever ones the caller asks for. B2 opened from a search result
+ * and B2 in your crate are then the same track.
+ */
+export function recordOnlyFor(
+  release: ReleaseDetail,
+  bpmByClip: ReadonlyMap<string, number> = new Map(),
+  addedAt: string | null = release.addedAt,
+): (track: Track) => Playable {
+  // Notes markings apply to the whole record; per-track ones in the title win.
+  const releaseBpm = parseBpmFromText(release.notes);
+  const taken = new Set<string>();
+  const keys = new Map<Track, string>(
+    release.tracks.map((track, i) => [track, trackOnlyKey(release.id, track.position, i, taken)]),
+  );
+
+  return (track) => {
+    // Every caller passes one of this release's own tracks. Anything else
+    // gets a fresh key of its own, never one borrowed from a real track.
+    const key = keys.get(track) ?? trackOnlyKey(release.id, track.position, release.tracks.length, taken);
+    return {
+      key,
+      releaseId: release.id,
+      videoId: null,
+      title: track.title,
+      artist: track.artists.length > 0 ? track.artists.join(", ") : release.artist,
+      releaseTitle: release.title,
+      year: release.year,
+      genres: distinct(release.genres),
+      styles: distinct(release.styles),
+      labels: distinct(release.labels),
+      thumb: release.thumb,
+      country: release.country,
+      formats: release.formats,
+      duration: parseDuration(track.duration),
+      position: track.position || null,
+      bpm: bpmByClip.get(key) ?? parseBpmFromText(track.title) ?? releaseBpm,
+      matchKind: "track",
+      silence: "record-only",
+      addedAt,
+    };
+  };
+}
+
 export function buildPlayables(
   details: ReleaseDetail[],
   bpmByClip: Map<string, number> = new Map(),
@@ -292,15 +344,6 @@ export function buildPlayables(
      * to the release at all. Calling that "Discogs has no audio" would be a
      * confident wrong answer about a record you can hear on Discogs right now.
      */
-    // Keys for every track on the tracklist, worked out once over the whole
-    // list, so a track's key is the same whether or not YouTube covers its
-    // neighbours.
-    const taken = new Set<string>();
-    const trackKeys = new Map<Track, string>(
-      release.tracks.map((track, i) => [track, trackOnlyKey(release.id, track.position, i, taken)]),
-    );
-    const addedAt = addedAtByRelease.get(release.id) ?? release.addedAt;
-
     /*
      * Tracks YouTube has no clip for, as rows of their own: "record only".
      * Most of a vinyl collection is like this. They can go in a set, carry a
@@ -308,31 +351,12 @@ export function buildPlayables(
      * length — so a set list can be written from the shelf. The player
      * skips them; there is nothing to play.
      */
-    const recordOnly = (tracks: readonly Track[]): Playable[] =>
-      tracks.map((track) => {
-        const key = trackKeys.get(track)!;
-        return {
-          key,
-          releaseId: release.id,
-          videoId: null,
-          title: track.title,
-          artist: track.artists.length > 0 ? track.artists.join(", ") : release.artist,
-          releaseTitle: release.title,
-          year: release.year,
-          genres: distinct(release.genres),
-          styles: distinct(release.styles),
-          labels: distinct(release.labels),
-          thumb: release.thumb,
-          country: release.country,
-          formats: release.formats,
-          duration: parseDuration(track.duration),
-          position: track.position || null,
-          bpm: bpmByClip.get(key) ?? parseBpmFromText(track.title) ?? releaseBpm,
-          matchKind: "track",
-          silence: "record-only",
-          addedAt,
-        };
-      });
+    const asRecordOnly = recordOnlyFor(
+      release,
+      bpmByClip,
+      addedAtByRelease.get(release.id) ?? release.addedAt,
+    );
+    const recordOnly = (tracks: readonly Track[]): Playable[] => tracks.map(asRecordOnly);
 
     // Detailed, no clips at all, but a tracklist: every track, record only.
     if (release.videos.length === 0 && release.market !== null && release.tracks.length > 0) {
