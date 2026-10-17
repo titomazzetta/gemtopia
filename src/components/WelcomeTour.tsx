@@ -67,7 +67,7 @@ export function WelcomeTour({ username, onClose }: { username: string; onClose: 
       title: "Build the set",
       body: [
         fine
-          ? "Drag any record onto a playlist in the sidebar, or press A (or +) to pick one."
+          ? "Drag any record onto a playlist in the sidebar, or press A (or +): the first time you pick a set, then it's one tap to that set."
           : "Tap + on any record, or on the player bar while it plays, to put it in a playlist.",
         "Set prep checks every transition against your decks' pitch range, and Whole list shows the set at once — the list you take to the shelf.",
       ],

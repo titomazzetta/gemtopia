@@ -8,8 +8,9 @@ import {
   putDetails,
   putSummaries,
 } from "@/client/db";
-import { startSync, type SyncHandle } from "@/client/sync";
+import { listSource, startSync, type SyncHandle } from "@/client/sync";
 import { mergeDetail, summaryOf } from "@/client/adopt";
+import { applyWantEdits, retireWantEdits, type WantEdit } from "@/client/wantEdits";
 
 /**
  * The crate: what you own, when you got it, and how fresh that knowledge is.
@@ -60,6 +61,13 @@ export interface CrateCache {
   setLoading: (value: boolean) => void;
 
   /**
+   * Re-read a source's listing in the background — membership only, no
+   * tracklists (sync.listSource) — then refresh what the app knows. One at a
+   * time; a call while one is running is dropped.
+   */
+  refreshListing: (source: Source) => Promise<void>;
+
+  /**
    * A record just added to the collection, folded in where a sync would have
    * put it. Writes IndexedDB and moves details, addedAt and sourceIds
    * together — three pieces of state that are wrong apart.
@@ -87,6 +95,8 @@ export function useCrateCache(username: string): CrateCache {
   const syncRunning = useRef(false);
   /** Listing emits once per page; re-reading the cache on every one is waste. */
   const lastListingReload = useRef(0);
+  /** The hearts pressed on this page, until a listing reads them back (wantEdits.ts). */
+  const wantEdits = useRef(new Map<number, WantEdit>());
 
   const reload = useCallback(async () => {
     const [cachedDetails, collection, wantlist] = await Promise.all([
@@ -101,7 +111,7 @@ export function useCrateCache(username: string): CrateCache {
     );
     setSourceIds({
       collection: new Set(collection.map((s) => s.id)),
-      wantlist: new Set(wantlist.map((s) => s.id)),
+      wantlist: applyWantEdits(new Set(wantlist.map((s) => s.id)), wantEdits.current),
     });
     setAddedAt(
       new Map(
@@ -157,6 +167,25 @@ export function useCrateCache(username: string): CrateCache {
     [runSync],
   );
 
+  const listing = useRef(false);
+  const refreshListing = useCallback(
+    async (target: Source) => {
+      if (listing.current) return;
+      listing.current = true;
+      try {
+        const startedAt = Date.now();
+        const result = await listSource({ owner: username, source: target });
+        if (result.complete && target === "wantlist") {
+          retireWantEdits(wantEdits.current, startedAt);
+        }
+        if (result.listed > 0 || result.pruned > 0) await reload();
+      } finally {
+        listing.current = false;
+      }
+    },
+    [username, reload],
+  );
+
   const markCollected = useCallback((releaseId: number) => {
     setSourceIds((previous) => {
       const collection = new Set(previous.collection);
@@ -166,6 +195,7 @@ export function useCrateCache(username: string): CrateCache {
   }, []);
 
   const markWanted = useCallback((releaseId: number, wanted: boolean) => {
+    wantEdits.current.set(releaseId, { wanted, at: Date.now() });
     setSourceIds((previous) => {
       const wantlist = new Set(previous.wantlist);
       if (wanted) wantlist.add(releaseId);
@@ -201,6 +231,7 @@ export function useCrateCache(username: string): CrateCache {
     prioritize,
     setSync,
     setLoading,
+    refreshListing,
     adopt,
     markCollected,
     markWanted,

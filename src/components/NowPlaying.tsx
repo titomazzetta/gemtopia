@@ -357,6 +357,8 @@ export function NowPlaying({
   onPrev,
   onNext,
   onAddToPlaylist,
+  onChoosePlaylist,
+  addTo = null,
   onDig,
   onTrackDragStart,
   want,
@@ -377,7 +379,12 @@ export function NowPlaying({
   onToggleRepeat: () => void;
   onPrev: () => void;
   onNext: () => void;
+  /** Your current set, in one tap (A). */
   onAddToPlaylist: () => void;
+  /** The picker, for any other set (Shift+A). */
+  onChoosePlaylist: () => void;
+  /** The set one tap adds to, by name — null before there is one. */
+  addTo?: string | null;
   onDig: () => void;
   /** The playing track was picked up: show the playlists to drop it on. */
   onTrackDragStart?: () => void;
@@ -738,16 +745,35 @@ export function NowPlaying({
             <kbd className="ml-1 rounded-sm bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">D</kbd>
           </button>
 
-          <button
-            type="button"
-            onClick={onAddToPlaylist}
-            disabled={!current}
-            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 py-2 text-xs font-medium text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add to playlist
-            <kbd className="ml-1 rounded-sm bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">A</kbd>
-          </button>
+          {/*
+            One tap to your current set — named on the button — and Other…
+            beside it for any other one. Before there's a set to name, the
+            button is the picker, and the first choice becomes the set.
+          */}
+          <div className="flex gap-1.5">
+            <button
+              type="button"
+              onClick={onAddToPlaylist}
+              disabled={!current}
+              title={`${addTo ? `Add to ${addTo}` : "Add to playlist"} (A)`}
+              className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md border border-ink-700 bg-ink-850 px-2 py-2 text-xs font-medium text-neutral-300 hover:border-ink-600 hover:text-white disabled:opacity-40"
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 truncate">{addTo ? `Add to ${addTo}` : "Add to playlist"}</span>
+              <kbd className="ml-1 shrink-0 rounded-sm bg-ink-800 px-1 font-mono text-[10px] text-neutral-500">A</kbd>
+            </button>
+            {addTo && (
+              <button
+                type="button"
+                onClick={onChoosePlaylist}
+                disabled={!current}
+                title="Add to another playlist (Shift+A)"
+                className="shrink-0 rounded-md border border-ink-700 bg-ink-850 px-2.5 py-2 text-xs text-neutral-400 hover:border-ink-600 hover:text-white disabled:opacity-40"
+              >
+                Other…
+              </button>
+            )}
+          </div>
 
           <ShareButton track={current} variant="wide" />
 

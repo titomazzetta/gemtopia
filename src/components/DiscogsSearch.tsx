@@ -61,8 +61,10 @@ interface Props {
    * add it to a set). Without this a pressing with no clips is a dead list.
    */
   onRecordOnly?: (item: Playable) => void;
-  /** Put a track from an open tracklist in a playlist (the usual picker). */
-  onAddToPlaylist?: (item: Playable) => void;
+  /** Put a track from an open tracklist in a playlist: one tap, or `choose`. */
+  onAddToPlaylist?: (item: Playable, choose?: boolean) => void;
+  /** "Add to B2B at the Lot", for the + buttons' labels. */
+  addLabel?: string;
 }
 
 /*
@@ -83,6 +85,7 @@ export function DiscogsSearch({
   playingKey = null,
   onRecordOnly,
   onAddToPlaylist,
+  addLabel,
 }: Props) {
   const [query, setQuery] = useState(initialQuery);
   const [field, setField] = useState<SearchField>("all");
@@ -405,7 +408,9 @@ export function DiscogsSearch({
                   type="button"
                   onClick={() => void act(hit, "wantlist")}
                   disabled={state === "working"}
-                  aria-label="Add to wantlist"
+                  // With the title in it: a list of these read aloud was
+                  // otherwise "Add to wantlist" a dozen times over.
+                  aria-label={`Add ${hit.title} to your wantlist`}
                   title="Add to wantlist"
                   className="rounded-full p-2 text-neutral-500 hover:text-accent active:bg-ink-800 disabled:opacity-40"
                 >
@@ -419,7 +424,7 @@ export function DiscogsSearch({
                     )
                   }
                   disabled={state === "working"}
-                  aria-label="Add to collection"
+                  aria-label={`Add ${hit.title} to your collection`}
                   aria-expanded={confirmId === hit.id}
                   title="Add to collection"
                   className={`rounded-full p-2 active:bg-ink-800 disabled:opacity-40 ${
@@ -482,6 +487,7 @@ export function DiscogsSearch({
                   playingKey={playingKey}
                   onRecordOnly={onRecordOnly}
                   onAdd={onAddToPlaylist}
+                  addLabel={addLabel}
                 />
               )}
             </li>
@@ -511,6 +517,7 @@ function ReleasePanel({
   playingKey,
   onRecordOnly,
   onAdd,
+  addLabel,
 }: {
   hit: SearchHit;
   detail: ReleaseDetail | "loading" | "failed" | undefined;
@@ -518,7 +525,8 @@ function ReleasePanel({
   onPlay?: (detail: ReleaseDetail, startKey: string) => void;
   playingKey: string | null;
   onRecordOnly?: (item: Playable) => void;
-  onAdd?: (item: Playable) => void;
+  onAdd?: (item: Playable, choose?: boolean) => void;
+  addLabel?: string;
 }) {
   const record =
     onPlay && detail !== undefined && detail !== "loading" && detail !== "failed"
@@ -585,6 +593,7 @@ function ReleasePanel({
                 onPlayExtra={(item) => onPlay(detail, item.key)}
                 onRecordOnly={onRecordOnly}
                 onAdd={onAdd}
+                addLabel={addLabel}
               />
             </div>
           ) : detail.tracks.length > 0 && (

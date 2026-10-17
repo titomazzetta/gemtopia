@@ -1,56 +1,110 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Playable } from "@/lib/types";
-import { TapTempo } from "@/client/tempo";
+import type { BpmSource, Playable } from "@/lib/types";
+import { TapTempo, type FoldWindow } from "@/client/tempo";
+import { useTempoDetector } from "@/client/useTempoDetector";
 import { formatBpm } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
-import { Disc, Plus } from "./Icons";
+import { Disc, Mic, Plus } from "./Icons";
 
 /**
  * A track YouTube has no clip for — "record only".
  *
  * Tapping one in a list opens this instead of playing anything: where it is
- * on the record, how long it runs, and a tap pad, so you can put the record on
- * the deck in the room, tap along, and have its BPM in your catalogue like any
- * other track. From here it can go into a playlist, which is how a set list
- * gets written from the shelf.
+ * on the record, how long it runs, and two ways to get its tempo while the
+ * record plays in the room — tap along, or press Listen and let the
+ * microphone hear it. Either way the BPM lands in your catalogue like any
+ * other track's. From here it goes into a set in one tap, which is how a set
+ * list gets written from the shelf.
  *
  * Full width from the bottom on a phone, a card on desktop; × or Escape.
- * On a keyboard, T taps (the same key as the player's tap tempo) and A adds
- * it to a playlist — so on a laptop at the decks it's open, tap-tap-tap, A.
+ * On a keyboard, T taps (the same key as the player's tap tempo), A adds it
+ * to your current set and Shift+A picks another — so at the decks it's open,
+ * tap-tap-tap, A.
  */
 export function RecordOnlyCard({
   item,
   bpm,
+  bpmFrom = null,
   onSaveBpm,
+  addTo = null,
   onAdd,
+  onChoose,
+  fold,
   onClose,
 }: {
   item: Playable;
   /** What the catalogue holds for it now. */
   bpm: number | null;
-  onSaveBpm: (bpm: number, confidence: number) => void;
-  /** Put it in a playlist (the usual picker). Omitted inside a playlist. */
+  /** How that reading was made. A tap (or a typed one) outranks the mic. */
+  bpmFrom?: BpmSource | null;
+  /** A reading for this track: tapped here, or heard through the mic. */
+  onSaveBpm: (bpm: number, confidence: number, source: "tap" | "auto") => void;
+  /** The set one tap adds to, by name. Null: Add opens the picker instead. */
+  addTo?: string | null;
+  /** Add it to that set (or, with no set yet, open the picker). */
   onAdd?: () => void;
+  /** The picker, for any other set. */
+  onChoose?: () => void;
+  /** The BPM window to read the mic in: the record's genre pocket, or your range. */
+  fold?: FoldWindow;
   onClose: () => void;
 }) {
   const tapper = useRef(new TapTempo());
   const [taps, setTaps] = useState(0);
-  const [reading, setReading] = useState<number | null>(null);
+  const [reading, setReading] = useState<{
+    bpm: number;
+    /** "kept": heard, but a tap you made before stays the reading. */
+    how: "tapped" | "heard" | "kept";
+  } | null>(null);
+
+  /*
+   * The latest props and actions, for the two listeners added once: the
+   * window's keydown and the detector's commit. Filled in after every render.
+   */
+  const latest = useRef({
+    onClose,
+    onAdd,
+    onChoose,
+    onSaveBpm,
+    bpmFrom,
+    tap: (_at: number) => {},
+    stopListening: () => {},
+  });
+
+  /*
+   * Listen: the same detector the player uses for its microphone mode, run
+   * for this card alone. It needs a reading to hold steady before it says
+   * anything (useTempoDetector commits only after agreeing estimates), and
+   * once it has one, the mic is released — there's nothing left to hear.
+   */
+  const listener = useTempoDetector({
+    fold,
+    onCommit: (estimate) => {
+      latest.current.stopListening();
+      // The catalogue never lets a detection replace a tap (the server's
+      // precedence rule), so don't claim it did: show what was heard, and
+      // leave the tap standing.
+      const tapped = latest.current.bpmFrom === "tap" || latest.current.bpmFrom === "manual";
+      setReading({ bpm: estimate.bpm, how: tapped ? "kept" : "heard" });
+      if (!tapped) latest.current.onSaveBpm(estimate.bpm, estimate.confidence, "auto");
+    },
+  });
+  const listening = listener.status === "listening" || listener.status === "requesting";
 
   const tap = (at: number) => {
+    // A tap is someone saying what the tempo is: it outranks the mic.
+    if (listening) listener.stop();
     const estimate = tapper.current.tap(at);
     setTaps(tapper.current.count);
     if (!estimate) return;
-    setReading(estimate.bpm);
-    onSaveBpm(estimate.bpm, estimate.confidence);
+    setReading({ bpm: estimate.bpm, how: "tapped" });
+    onSaveBpm(estimate.bpm, estimate.confidence, "tap");
   };
 
-  // The window listener is added once; these keep it calling the latest props.
-  const latest = useRef({ onClose, onAdd, tap });
   useEffect(() => {
-    latest.current = { onClose, onAdd, tap };
+    latest.current = { onClose, onAdd, onChoose, onSaveBpm, bpmFrom, tap, stopListening: listener.stop };
   });
 
   useEffect(() => {
@@ -62,9 +116,13 @@ export function RecordOnlyCard({
         event.preventDefault();
         // Held down, the keyboard's auto-repeat would be thirty taps a second.
         if (!event.repeat) latest.current.tap(event.timeStamp);
-      } else if ((event.key === "a" || event.key === "A") && latest.current.onAdd) {
+      } else if (event.key === "a" && latest.current.onAdd) {
         event.preventDefault();
         latest.current.onAdd();
+      } else if (event.key === "A" && (latest.current.onChoose ?? latest.current.onAdd)) {
+        // Shift+A: choose the set.
+        event.preventDefault();
+        (latest.current.onChoose ?? latest.current.onAdd)!();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -74,7 +132,7 @@ export function RecordOnlyCard({
   /*
    * Focus moves into the card, so Tab and Enter act on it and not on the row
    * behind it that opened it; it goes back to that row on close — unless
-   * something else took it meanwhile (Add opens the playlist picker, whose
+   * something else took it meanwhile (Other… opens the playlist picker, whose
    * name field focuses itself).
    */
   const panel = useRef<HTMLDivElement>(null);
@@ -96,13 +154,25 @@ export function RecordOnlyCard({
     };
   }, []);
 
-  const shown = reading ?? bpm;
+  // A heard reading that a tap outranks is shown in the status line, not here.
+  const shown = reading && reading.how !== "kept" ? reading.bpm : bpm;
   const facts = [
     item.position,
     item.duration ? formatTime(item.duration) : null,
     item.labels[0] ?? null,
     item.year ? String(item.year) : null,
   ].filter((f): f is string => Boolean(f));
+
+  const listenLine =
+    listener.status === "requesting"
+      ? "Allow the microphone…"
+      : listener.status === "listening"
+        ? listener.live
+          ? `Hearing about ${formatBpm(listener.live.bpm)} — hold on`
+          : "Listening — put the needle down"
+        : reading?.how === "kept"
+          ? `Heard ${formatBpm(reading.bpm)}. Your tapped ${formatBpm(bpm)} stays — tap again to change it.`
+          : null;
 
   return (
     <div
@@ -148,16 +218,25 @@ export function RecordOnlyCard({
           </button>
         </div>
 
-        {facts.length > 0 && (
-          <p className="mt-3 font-mono text-xs tabular-nums text-neutral-300">{facts.join(" · ")}</p>
-        )}
+        <p className="mt-3 flex flex-wrap items-baseline gap-x-2 font-mono text-xs tabular-nums text-neutral-300">
+          {facts.length > 0 && <span>{facts.join(" · ")}</span>}
+          <a
+            href={`https://www.discogs.com/release/${item.releaseId}`}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="font-sans text-[11px] text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-200"
+          >
+            On Discogs ↗
+          </a>
+        </p>
 
         <p className="mt-3 text-xs leading-relaxed text-neutral-500">
           There&apos;s no YouTube clip of this track, so it won&apos;t play here and shuffle skips it.
-          Put the record on, tap along to log its BPM, and add it to a set like any other track.
+          Put the record on and tap along — or press Listen and let the mic hear it — to log its BPM,
+          and add it to a set like any other track.
         </p>
 
-        <div className="mt-4 flex items-stretch gap-3">
+        <div className="mt-4 flex items-stretch gap-2">
           <button
             type="button"
             onPointerDown={(event) => {
@@ -173,37 +252,75 @@ export function RecordOnlyCard({
               {taps === 0 && <span className="hidden pointer-fine:inline"> · or press T</span>}
             </span>
           </button>
-          <div className="flex w-28 flex-col items-center justify-center rounded-xl border border-ink-700 bg-ink-900">
+          {listener.status !== "unsupported" && (
+            <button
+              type="button"
+              onClick={() => (listening ? listener.stop() : void listener.start("mic"))}
+              aria-pressed={listening}
+              title="Measure it from the record playing in the room, through the microphone"
+              className={`flex w-24 flex-col items-center justify-center rounded-xl border py-4 text-xs font-semibold ${
+                listening
+                  ? "border-accent/60 bg-accent/15 text-accent"
+                  : "border-ink-700 bg-ink-900 text-neutral-200 hover:border-ink-600"
+              }`}
+            >
+              <Mic className={`h-4 w-4 ${listening ? "animate-pulse" : ""}`} />
+              <span className="mt-1">{listening ? "Stop" : "Listen"}</span>
+            </button>
+          )}
+          <div className="flex w-24 flex-col items-center justify-center rounded-xl border border-ink-700 bg-ink-900">
             <span className="font-mono text-2xl tabular-nums text-neutral-100">{formatBpm(shown)}</span>
             <span className="text-[10px] uppercase tracking-wider text-neutral-500">
-              {reading !== null ? "saved" : "BPM"}
+              {reading && reading.how !== "kept"
+                ? reading.how === "heard"
+                  ? "heard · saved"
+                  : "saved"
+                : bpmFrom === "tap"
+                  ? "tapped"
+                  : "BPM"}
             </span>
           </div>
         </div>
 
-        <div className="mt-4 flex gap-2">
-          {onAdd && (
+        {(listenLine || listener.error) && (
+          <p
+            role="status"
+            className={`mt-2 text-[11px] ${listener.error ? "text-amber-300" : "text-neutral-400"}`}
+          >
+            {listener.error ?? listenLine}
+          </p>
+        )}
+
+        {onAdd && (
+          <div className="mt-4 flex gap-2">
+            {/*
+              One tap to the set it names; Other… for any other one. With no
+              set yet, the one button is the picker, and what you pick there
+              becomes the set.
+            */}
             <button
               type="button"
               onClick={onAdd}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-ink-950"
+              className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-ink-950"
             >
-              <Plus className="h-4 w-4" />
-              Add to playlist
-              <kbd className="ml-1 hidden rounded-sm border border-ink-950/30 px-1 font-mono text-[10px] font-medium pointer-fine:inline">
+              <Plus className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">{addTo ? `Add to ${addTo}` : "Add to playlist"}</span>
+              <kbd className="ml-1 hidden shrink-0 rounded-sm border border-ink-950/30 px-1 font-mono text-[10px] font-medium pointer-fine:inline">
                 A
               </kbd>
             </button>
-          )}
-          <a
-            href={`https://www.discogs.com/release/${item.releaseId}`}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="flex flex-1 items-center justify-center rounded-lg border border-ink-700 px-3 py-2.5 text-sm text-neutral-200 hover:border-neutral-500"
-          >
-            On Discogs
-          </a>
-        </div>
+            {addTo && onChoose && (
+              <button
+                type="button"
+                onClick={onChoose}
+                title="Add to another playlist (Shift+A)"
+                className="shrink-0 rounded-lg border border-ink-700 px-3 py-2.5 text-sm text-neutral-200 hover:border-neutral-500"
+              >
+                Other…
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

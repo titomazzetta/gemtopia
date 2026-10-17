@@ -48,6 +48,7 @@ export function MobileBar({
   duration,
   onSeek,
   onAddToPlaylist,
+  addLabel = "Add to playlist",
   want = null,
   onTap,
   detour = null,
@@ -64,7 +65,10 @@ export function MobileBar({
   currentTime: number;
   duration: number;
   onSeek: (seconds: number) => void;
+  /** Your current set in one tap; the player sheet has Other…. */
   onAddToPlaylist: () => void;
+  /** "Add to B2B at the Lot", for the + button's label. */
+  addLabel?: string;
   /** The wantlist heart, when what's playing isn't in your collection. */
   want?: WantHeart | null;
   /**
@@ -272,7 +276,7 @@ export function MobileBar({
             type="button"
             onClick={onAddToPlaylist}
             disabled={!current}
-            aria-label="Add to playlist"
+            aria-label={addLabel}
             className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
           >
             <Plus className="h-4 w-4" />

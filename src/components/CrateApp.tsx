@@ -15,6 +15,7 @@ import {
   clearLegacyPlaylists,
   getAllDetails,
   getLegacyPlaylists,
+  getListedAt,
   getSyncState,
   isMigrated,
   markMigrated,
@@ -34,7 +35,7 @@ import {
   type InsightsResponse,
 } from "@/client/api";
 import type { FacetKey } from "./Filters";
-import { needsSync } from "@/client/crateFreshness";
+import { needsListing, needsSync } from "@/client/crateFreshness";
 import { scaleReading, type ScaleFactor } from "@/client/bpmScaling";
 import { moveEntry } from "@/client/playlistOrder";
 import {
@@ -128,6 +129,7 @@ import { MobileBar } from "./MobileBar";
 import { WantButton, type WantHeart } from "./WantButton";
 import { ShareButton } from "./ShareButton";
 import { useFinePointer } from "@/client/useFinePointer";
+import { useWideLayout } from "@/client/useWideLayout";
 import { ownershipFrom, wantlistHeart } from "@/client/ownership";
 import { promote, orderByRecent } from "@/client/recentPlaylists";
 import {
@@ -151,7 +153,7 @@ import {
   Users,
 } from "./Icons";
 
-type Rail = "filters" | "playlists" | "insights" | "search";
+type Rail = "filters" | "playlists" | "insights";
 
 type NewEntry = Omit<PlaylistItemRow, "position">;
 
@@ -245,6 +247,8 @@ export function CrateApp({
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   /** A mouse or trackpad: hover, drag and keyboard hints apply. */
   const finePointer = useFinePointer();
+  /** The desktop layout (lg): search lives in the middle column there. */
+  const isDesktop = useWideLayout();
 
   /*
    * Collection or wantlist — the same on a phone and a desktop. The phone's
@@ -314,6 +318,14 @@ export function CrateApp({
    * Discogs, rather than making you type them a second time.
    */
   const [searchSeed, setSearchSeed] = useState("");
+  /*
+   * Desktop: Discogs search takes the middle column, like Dig — the left rail
+   * was 300px, which cut off titles and tracklists. Once opened it stays
+   * mounted (hidden when closed), so closing it to look at a playlist and
+   * coming back finds the same results.
+   */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchMounted, setSearchMounted] = useState(false);
 
   /*
    * Column sort for the crate. Null means the list's own order, which for a
@@ -1310,6 +1322,34 @@ export function CrateApp({
   }, [sync, say]);
 
   /*
+   * Your wantlist's membership, kept current in the background while you're
+   * in your collection — the listing only, one Discogs request per hundred
+   * wants, no tracklists. It's what lets a search put your wants second and
+   * the heart know a record is already wanted on a device that has never
+   * opened wantlist mode. Waits for the crate's own sync to finish so the two
+   * never share the rate limit, and runs once per visit at most (the rule in
+   * crateFreshness.needsListing decides whether it's due at all).
+   */
+  const wantlistListed = useRef(false);
+  const { refreshListing } = crate;
+  useEffect(() => {
+    if (loading || wantlistListed.current || source !== "collection") return;
+    if (sync && sync.status !== "done") return;
+    wantlistListed.current = true;
+    void (async () => {
+      try {
+        const [listedAt, state] = await Promise.all([
+          getListedAt(username, "wantlist"),
+          getSyncState(username, "wantlist"),
+        ]);
+        if (needsListing(listedAt, state)) await refreshListing("wantlist");
+      } catch (error) {
+        console.warn("[listing] wantlist", error);
+      }
+    })();
+  }, [loading, source, sync, username, refreshListing]);
+
+  /*
    * Searching or filtering during a first sync: whatever matches and is still
    * loading jumps the queue, so the records you are looking for are the next
    * ones to become playable. A hint only — it never starts a sync.
@@ -1424,6 +1464,7 @@ export function CrateApp({
   const openPlaylist = useCallback((id: string) => {
     setActivePlaylistId(id);
     setDigTarget(null);
+    setSearchOpen(false);
   }, []);
 
   const openUnreadChat = useCallback(() => {
@@ -1513,7 +1554,7 @@ export function CrateApp({
         setPlaylists((previous) =>
           previous.map((p) => (p.id === updated.id ? updated : p)),
         );
-        say(`Added to "${playlist.name}"`);
+        say(`Added “${item.title}” to ${playlist.name}`);
       } catch (error) {
         say(error instanceof ApiError ? error.message : "Could not add that.");
         // A collaborator changed it first, or it's gone: show what's true now.
@@ -1543,6 +1584,44 @@ export function CrateApp({
     },
     [],
   );
+
+  /*
+   * Where one tap adds: the set you last added to on this visit, else the one
+   * you have open. Neither — a fresh visit, the crate showing — and there is
+   * no guess to make, so the first add asks (the picker), and that answer is
+   * the target from then on.
+   *
+   * This is the shortcut queueForPlaylist's comment warns about, done the way
+   * it says it has to be: never silent. Every button that adds this way names
+   * the set it will add to ("Add to B2B at the Lot"), the toast names it
+   * again, and Other… (Shift+A, Shift-click on a +) is always one step away.
+   */
+  const quickTarget = useMemo(() => {
+    for (const id of recentPlaylists) {
+      const recent = playlists.find((p) => p.id === id);
+      if (recent) return recent;
+    }
+    return activePlaylist;
+  }, [recentPlaylists, playlists, activePlaylist]);
+
+  const quickAdd = useCallback(
+    (item: Playable | null, options: { choose?: boolean } = {}) => {
+      if (!item) return;
+      if (options.choose || !quickTarget) {
+        queueForPlaylist(item);
+        return;
+      }
+      setRecentPlaylists((r) => promote(r, quickTarget.id));
+      void addToPlaylist(quickTarget.id, item);
+    },
+    [quickTarget, queueForPlaylist, addToPlaylist],
+  );
+  const addLabel = quickTarget ? `Add to ${quickTarget.name}` : "Add to playlist";
+  // For the window key handler, which is registered once.
+  const quickAddRef = useRef(quickAdd);
+  useEffect(() => {
+    quickAddRef.current = quickAdd;
+  }, [quickAdd]);
 
   const mutateEntries = useCallback(
     async (playlist: Playlist, entries: NewEntry[]) => {
@@ -1895,8 +1974,14 @@ export function CrateApp({
    */
   const openDiscogsSearch = useCallback((seed = "") => {
     setSearchSeed(seed);
-    setRail("search");
-    if (window.matchMedia("(max-width: 1023px)").matches) setSheet("search");
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      setSheet("search");
+      return;
+    }
+    setSearchMounted(true);
+    setSearchOpen(true);
+    // Search takes the middle column; Dig gives it up.
+    setDigTarget(null);
   }, []);
 
   /**
@@ -2087,10 +2172,41 @@ export function CrateApp({
   useEffect(() => {
     recordCardOpen.current = recordCard !== null;
   }, [recordCard]);
+  const digOpenRef = useRef(false);
+  useEffect(() => {
+    digOpenRef.current = digTarget !== null;
+  }, [digTarget]);
+
+  /*
+   * What was open when the key went down — read in the capture phase, before
+   * anything handles the key. A dialog's own handler acts during the event:
+   * the picker closes itself on Esc, the record card closes itself on A as it
+   * adds. React commits that before the press reaches the window listener
+   * below, so by then the dialog is gone, and the one press did a second
+   * thing behind it: closed Dig or search too, or added the playing track as
+   * well as the card's.
+   *
+   * A ref, set by a listener added once, and not a variable inside the effect
+   * below: that effect can re-run during the very event (the dialog closing
+   * changes its dependencies), and the new listener it adds still gets this
+   * press — with a fresh variable that never saw it.
+   */
+  const openAtKey = useRef({ card: false, dialog: false });
+  useEffect(() => {
+    const capture = () => {
+      openAtKey.current = {
+        card: recordCardOpen.current,
+        dialog: document.querySelector('[aria-modal="true"]') !== null,
+      };
+    };
+    window.addEventListener("keydown", capture, true);
+    return () => window.removeEventListener("keydown", capture, true);
+  }, []);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (recordCardOpen.current) return;
+      // The card has its own keys (T, A, Esc), and they're the only ones.
+      if (openAtKey.current.card) return;
       const target = event.target as HTMLElement | null;
       if (
         target &&
@@ -2141,6 +2257,15 @@ export function CrateApp({
           setDigTarget((open) => (open ? null : currentRef.current));
           break;
         case "a":
+          // Not with a dialog up: with the picker open for one record, A
+          // would add a different one — the playing track — somewhere else.
+          if (openAtKey.current.dialog) break;
+          event.preventDefault();
+          quickAddRef.current(currentRef.current);
+          break;
+        case "A":
+          // Shift+A: choose the set, the picker as it always was.
+          if (openAtKey.current.dialog) break;
           event.preventDefault();
           queueForPlaylist(currentRef.current);
           break;
@@ -2170,7 +2295,11 @@ export function CrateApp({
           setShowKeys(false);
           // Esc also steps out of Dig — but only when nothing is open on top
           // of it, so closing the chat or a sheet doesn't close Dig as well.
-          if (!document.querySelector('[aria-modal="true"]')) setDigTarget(null);
+          // Then out of search: each press closes the one on top.
+          if (!openAtKey.current.dialog) {
+            if (digOpenRef.current) setDigTarget(null);
+            else setSearchOpen(false);
+          }
           break;
         default:
           break;
@@ -2343,6 +2472,20 @@ export function CrateApp({
           <Compass className="h-3.5 w-3.5" />
           Dig
         </button>
+        <button
+          type="button"
+          onClick={() => (searchOpen && !digTarget ? setSearchOpen(false) : openDiscogsSearch(""))}
+          aria-pressed={searchOpen && !digTarget}
+          title="Search Discogs — find a record, hear it, add it to a set"
+          className={`hidden items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs lg:flex ${
+            searchOpen && !digTarget
+              ? "border-accent/60 bg-accent/15 text-accent"
+              : "border-ink-700 text-neutral-300 hover:border-ink-600 hover:text-white"
+          }`}
+        >
+          <Search className="h-3.5 w-3.5" />
+          Search
+        </button>
 
         {/*
           Measure the tempo of everything on screen.
@@ -2455,7 +2598,7 @@ export function CrateApp({
         */}
         <nav className="hidden shrink-0 flex-col border-b border-ink-800 bg-ink-900 lg:flex lg:w-[300px] lg:border-b-0 lg:border-r">
           <div className="flex shrink-0 border-b border-ink-800">
-            {(["filters", "playlists", "insights", "search"] as const).map((value) => (
+            {(["filters", "playlists", "insights"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -2525,23 +2668,6 @@ export function CrateApp({
                   if (item) void addToPlaylist(playlistId, item);
                 }}
               />
-            )}
-
-            {rail === "search" && (
-              <div className="h-full overflow-y-auto">
-                <DiscogsSearch
-                  key={searchSeed}
-                  sets={sourceIds}
-                  initialQuery={searchSeed}
-                  onAddToCollection={addFromSearch}
-                  onAddToWantlist={wantFromSearch}
-                  localDetail={(id) => detailById.get(id) ?? null}
-                  onPlay={playFromSearch}
-                  playingKey={current?.key ?? null}
-                  onRecordOnly={setRecordCard}
-                  onAddToPlaylist={queueForPlaylist}
-                />
-              </div>
             )}
 
             {rail === "insights" && (
@@ -2731,7 +2857,7 @@ export function CrateApp({
 
           <div
             className={`hidden shrink-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-ink-800 px-4 py-2 lg:flex ${
-              digTarget ? "lg:hidden" : ""
+              digTarget || searchOpen ? "lg:hidden" : ""
             }`}
           >
             {/* On a narrow window the buttons wrap to a second line rather than
@@ -2854,7 +2980,7 @@ export function CrateApp({
             )}
           </div>
 
-          {activePlaylist && sequenceReport && !digTarget && (
+          {activePlaylist && sequenceReport && !digTarget && !searchOpen && (
             <SetPrepBar
               report={sequenceReport}
               pitchPercent={pitchPercent}
@@ -2879,7 +3005,7 @@ export function CrateApp({
             />
           )}
 
-          {activePlaylist && !digTarget && activePlaylist.entries.length > 1 && (
+          {activePlaylist && !digTarget && !searchOpen && activePlaylist.entries.length > 1 && (
             // On a phone the view chips fold away with set prep; they stay
             // out while a view other than your order is on, so a sorted list
             // never looks like the real running order.
@@ -2896,6 +3022,54 @@ export function CrateApp({
           )}
 
           <div className="min-h-0 flex-1">
+            {/*
+              Desktop search, in the middle column. Kept mounted once opened
+              and hidden when closed, so its results are there to come back
+              to; Dig, when open, sits over it.
+            */}
+            {searchMounted && (
+              <section
+                aria-labelledby="search-column-title"
+                className={`h-full flex-col ${searchOpen && !digTarget ? "hidden lg:flex" : "hidden"}`}
+                aria-hidden={!(searchOpen && !digTarget)}
+              >
+                <div className="flex shrink-0 items-center gap-2 border-b border-ink-800 px-4 py-2">
+                  <Search className="h-3.5 w-3.5 text-accent" />
+                  <h2 id="search-column-title" className="text-xs font-medium text-neutral-300">
+                    Search Discogs
+                  </h2>
+                  {quickTarget && (
+                    <span className="min-w-0 truncate text-[11px] text-neutral-600">
+                      · + adds to <span className="text-neutral-400">{quickTarget.name}</span>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSearchOpen(false)}
+                    aria-label="Close search"
+                    title="Close search (Esc)"
+                    className="ml-auto shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-[11px] text-neutral-400 hover:text-neutral-100"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <DiscogsSearch
+                    key={searchSeed}
+                    sets={sourceIds}
+                    initialQuery={searchSeed}
+                    onAddToCollection={addFromSearch}
+                    onAddToWantlist={wantFromSearch}
+                    localDetail={(id) => detailById.get(id) ?? null}
+                    onPlay={playFromSearch}
+                    playingKey={current?.key ?? null}
+                    onRecordOnly={setRecordCard}
+                    onAddToPlaylist={(item, choose) => quickAdd(item, { choose })}
+                    addLabel={addLabel}
+                  />
+                </div>
+              </section>
+            )}
             {digTarget ? (
               <DigDrawer
                 key={digTarget.key}
@@ -2910,14 +3084,15 @@ export function CrateApp({
                 onClose={() => setDigTarget(null)}
                 onPlayLocal={playFrom}
                 onPlayRecord={playRecord}
-                onAddToPlaylist={queueForPlaylist}
+                onAddToPlaylist={(item, choose) => quickAdd(item, { choose })}
+                addLabel={addLabel}
                 onRecordOnly={setRecordCard}
                 onPivot={pivotFilter}
                 onPreviewExternal={previewExternal}
                 onWantlistChange={applyWantlistChange}
                 say={say}
               />
-            ) : loading ? (
+            ) : searchOpen && isDesktop ? null : loading ? (
               <div className="flex h-full items-center justify-center text-sm text-neutral-600">
                 Opening your crate…
               </div>
@@ -2926,7 +3101,8 @@ export function CrateApp({
                 items={visible}
                 currentKey={current?.key ?? null}
                 onPlay={(index) => playFrom(visible, index)}
-                onAdd={activePlaylist ? undefined : (item) => queueForPlaylist(item)}
+                onAdd={activePlaylist ? undefined : (item, choose) => quickAdd(item, { choose })}
+                addLabel={addLabel}
                 onRemove={
                   activePlaylist
                     ? (_item, index) => {
@@ -3044,7 +3220,9 @@ export function CrateApp({
           onToggleRepeat={() => setRepeatOn((v) => !v)}
           onPrev={() => (api.currentTime > 4 ? api.seek(0) : advance(-1))}
           onNext={() => advance(1)}
-          onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
+          onAddToPlaylist={() => quickAdd(currentRef.current)}
+          onChoosePlaylist={() => queueForPlaylist(currentRef.current)}
+          addTo={quickTarget?.name ?? null}
           onDig={() => setDigTarget(current)}
           // Picked up from the player: open the playlists so there's
           // somewhere to drop it, wherever the left rail was.
@@ -3095,18 +3273,28 @@ export function CrateApp({
           key={recordCard.key}
           item={recordCard}
           bpm={bpmByClip.get(recordCard.key) ?? recordCard.bpm}
-          onSaveBpm={(bpm, confidence) =>
+          bpmFrom={trackMeta.get(recordCard.key)?.bpmSource ?? null}
+          onSaveBpm={(bpm, confidence, how) =>
             void saveMeta({
               clipKey: recordCard.key,
               bpm,
-              bpmSource: "tap",
+              // "auto" for a reading the mic heard: a tap still overrules it,
+              // here and on every shared set (repo.shareBpmWithSets).
+              bpmSource: how,
               bpmConfidence: confidence,
               musicalKey: null,
               rating: null,
               cueNote: null,
             })
           }
+          fold={foldWindow(tempoRange, pocketFor(recordCard.styles, recordCard.genres))}
+          addTo={quickTarget?.name ?? null}
           onAdd={() => {
+            const item = recordCard;
+            setRecordCard(null);
+            quickAdd(item);
+          }}
+          onChoose={() => {
             const item = recordCard;
             setRecordCard(null);
             queueForPlaylist(item);
@@ -3181,7 +3369,8 @@ export function CrateApp({
         currentTime={api.currentTime}
         duration={api.duration}
         onSeek={api.seek}
-        onAddToPlaylist={() => queueForPlaylist(currentRef.current)}
+        onAddToPlaylist={() => quickAdd(currentRef.current)}
+        addLabel={addLabel}
         want={currentWant}
         onTap={handleTap}
         detour={detour ? { label: detour.label } : null}
@@ -3223,7 +3412,8 @@ export function CrateApp({
             onPlay={playFromSearch}
             playingKey={current?.key ?? null}
             onRecordOnly={setRecordCard}
-            onAddToPlaylist={queueForPlaylist}
+            onAddToPlaylist={(item, choose) => quickAdd(item, { choose })}
+            addLabel={addLabel}
           />
         </div>
       </Sheet>
@@ -3349,16 +3539,32 @@ export function CrateApp({
               </p>
 
               <div className="mt-4 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    queueForPlaylist(currentRef.current);
-                    setSheet("none");
-                  }}
-                  className="rounded-lg border border-ink-700 px-3 py-2.5 text-xs font-medium text-neutral-200"
-                >
-                  Add to playlist
-                </button>
+                {/* One tap to your current set, and Other… for any other one. */}
+                <div className="flex min-w-0 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      quickAdd(currentRef.current);
+                      if (!quickTarget) setSheet("none");
+                    }}
+                    className="min-w-0 flex-1 truncate rounded-lg border border-ink-700 px-3 py-2.5 text-xs font-medium text-neutral-200"
+                  >
+                    {addLabel}
+                  </button>
+                  {quickTarget && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        queueForPlaylist(currentRef.current);
+                        setSheet("none");
+                      }}
+                      aria-label="Add to another playlist"
+                      className="shrink-0 rounded-lg border border-ink-700 px-2.5 py-2.5 text-xs text-neutral-400"
+                    >
+                      Other…
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={() => {
@@ -3405,7 +3611,8 @@ export function CrateApp({
                       playRecord([item], 0, current.releaseTitle || "this record")
                     }
                     onRecordOnly={setRecordCard}
-                    onAdd={queueForPlaylist}
+                    onAdd={(item, choose) => quickAdd(item, { choose })}
+                    addLabel={addLabel}
                   />
                 </div>
               )}
