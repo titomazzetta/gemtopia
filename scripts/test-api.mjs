@@ -1677,7 +1677,7 @@ console.log("\ncollaborative playlists");
   });
 
   await check("messages are normalised before they are stored", async () => {
-    const res = await friend.call(chat, { method: "POST", body: { body: "  pay ‮gnp.exe ​ " } });
+    const res = await friend.call(chat, { method: "POST", body: { body: "  pay \u202Egnp.exe \u200B " } });
     assert.equal(res.status, 201);
     assert.equal(res.body.message.body, "pay gnp.exe");
     await friend.call(`${chat}/${res.body.message.id}`, { method: "DELETE" });

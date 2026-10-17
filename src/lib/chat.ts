@@ -59,7 +59,7 @@ const CONTROL = /[\u0000-\u0009\u000B-\u001F\u007F-\u009F]/g;
  * (U+2060–2064), soft hyphen, BOM, and interlinear annotation marks.
  * Zero-width *joiner* (U+200D) is kept — emoji sequences need it.
  */
-const INVISIBLE = /[­​‎‏‪-‮⁠-⁤⁦-⁩﻿￹-￻]/g;
+const INVISIBLE = /[\u00AD\u200B\u200E\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\uFFF9-\uFFFB]/g;
 
 // More than four combining marks on one character is "Zalgo" text, drawn over
 // the lines above and below. Real scripts and emoji keycaps need far fewer.

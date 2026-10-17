@@ -55,7 +55,7 @@ check("ordinary text is kept exactly", () => {
     "Move the Theo Parrish up <3",
     "it's \"fine\" & 100% ok; DROP TABLE users; --",
     "<script>alert(1)</script>",
-    "¡Qué bueno! 日本語 🔥🎛️ 👩🏽‍🎤",
+    "¡Qué bueno! 日本語 🔥🎛️ 👩🏽\u200D🎤",
   ]) {
     assert.equal(body(text), text, text);
   }
@@ -69,7 +69,7 @@ check("markup and SQL are data, not something to strip", () => {
 });
 
 check("empty and whitespace-only messages are refused", () => {
-  for (const v of ["", "   ", "\n\n\t", "​‮", "\u0000\u0007"]) {
+  for (const v of ["", "   ", "\n\n\t", "\u200B\u202E", "\u0000\u0007"]) {
     assert.equal(body(v), "empty", JSON.stringify(v));
   }
 });
@@ -96,15 +96,15 @@ check("too long is refused, never silently cut", () => {
 });
 
 check("bidi overrides and invisible characters are removed (Trojan Source)", () => {
-  assert.equal(body("pay ‮gnp.exe"), "pay gnp.exe");
-  assert.equal(body("a⁦b⁩c"), "abc");
-  assert.equal(body("zero​width"), "zerowidth");
-  assert.equal(body("﻿bom"), "bom");
-  assert.equal(body("soft­hyphen"), "softhyphen");
+  assert.equal(body("pay \u202Egnp.exe"), "pay gnp.exe");
+  assert.equal(body("a\u2066b\u2069c"), "abc");
+  assert.equal(body("zero\u200Bwidth"), "zerowidth");
+  assert.equal(body("\uFEFFbom"), "bom");
+  assert.equal(body("soft\u00ADhyphen"), "softhyphen");
 });
 
 check("emoji joiners survive", () => {
-  const family = "👨‍👩‍👧";
+  const family = "👨\u200D👩\u200D👧";
   assert.equal(body(family), family);
   assert.equal(body("1️⃣"), "1️⃣");
 });
@@ -143,7 +143,7 @@ check("a wall of lines is folded to the line limit", () => {
 });
 
 check("normalising is stable", () => {
-  for (const text of ["a‮b\r\n\n\nc  ", "e" + "́".repeat(9), "plain"]) {
+  for (const text of ["a\u202Eb\r\n\n\nc  ", "e" + "́".repeat(9), "plain"]) {
     const once = body(text);
     assert.equal(body(once), once);
   }
