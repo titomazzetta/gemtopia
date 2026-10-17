@@ -143,6 +143,7 @@ export function TrackList({
   currentKey,
   onPlay,
   onAdd,
+  addLabel = "Add to playlist",
   onRemove,
   canRemove,
   addedBy,
@@ -158,7 +159,10 @@ export function TrackList({
   items: Playable[];
   currentKey: string | null;
   onPlay: (index: number) => void;
-  onAdd?: (item: Playable) => void;
+  /** Your current set in one tap; `choose` (Shift-click) opens the picker. */
+  onAdd?: (item: Playable, choose?: boolean) => void;
+  /** "Add to B2B at the Lot", for the + buttons' labels. */
+  addLabel?: string;
   onRemove?: (item: Playable, index: number) => void;
   /**
    * Whether this row may be removed. Omitted means all of them. On a shared
@@ -562,8 +566,9 @@ export function TrackList({
                 {onAdd && (!silent || item.silence === "record-only") && (
                   <button
                     type="button"
-                    onClick={() => onAdd(item)}
-                    title="Add to playlist"
+                    onClick={(event) => onAdd(item, event.shiftKey)}
+                    title={`${addLabel} — Shift-click to choose`}
+                    aria-label={`${addLabel}: ${item.title}`}
                     className="shrink-0 rounded-sm p-1.5 text-neutral-600 transition-opacity hover:bg-ink-800 hover:text-accent focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
                     <Plus className="h-3.5 w-3.5" />

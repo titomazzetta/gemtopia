@@ -86,10 +86,12 @@ function LocalRow({
   item,
   onPlay,
   onAdd,
+  addLabel,
 }: {
   item: Playable;
   onPlay: () => void;
-  onAdd: () => void;
+  onAdd: (choose: boolean) => void;
+  addLabel: string;
 }) {
   const finePointer = useFinePointer();
   const recordOnly = item.silence === "record-only";
@@ -135,8 +137,9 @@ function LocalRow({
         {item.duration && <span className="ml-auto font-mono">{formatTime(item.duration)}</span>}
         <button
           type="button"
-          onClick={onAdd}
-          title="Add to playlist"
+          onClick={(event) => onAdd(event.shiftKey)}
+          title={`${addLabel} — Shift-click to choose`}
+          aria-label={`${addLabel}: ${item.title}`}
           className="ml-auto rounded-sm p-0.5 text-neutral-600 hover:bg-ink-800 hover:text-accent"
         >
           <Plus className="h-3 w-3" />
@@ -224,6 +227,12 @@ function BeyondCard({
               ? "Discogs has no audio for this release"
               : "Play it without owning it"
           }
+          // Each card's three buttons were "preview", a heart and a magnifier
+          // to a screen reader: a row of cards was the same three words over
+          // and over. The record's name tells them apart.
+          aria-label={
+            previewState === "none" ? `No audio for ${result.title}` : `Preview ${result.title}`
+          }
         >
           <Play className="h-2.5 w-2.5" />
           {previewState === "loading" ? "…" : previewState === "none" ? "no audio" : "preview"}
@@ -234,6 +243,11 @@ function BeyondCard({
           onClick={onWant}
           disabled={busy}
           title={wanted ? "Remove from your Discogs wantlist" : "Add to your Discogs wantlist"}
+          aria-label={
+            wanted
+              ? `Remove ${result.title} from your Discogs wantlist`
+              : `Add ${result.title} to your Discogs wantlist`
+          }
           className={`rounded border px-1.5 py-1 transition-colors disabled:opacity-40 ${
             wanted
               ? "border-accent/60 bg-accent/15 text-accent"
@@ -247,6 +261,7 @@ function BeyondCard({
           type="button"
           onClick={onDigFrom}
           title="Dig from this record instead"
+          aria-label={`Dig from ${result.title} instead`}
           className="rounded-sm border border-ink-700 px-1.5 py-1 text-neutral-400 hover:border-ink-600 hover:text-neutral-100"
         >
           <Search className="h-3 w-3" />
@@ -343,6 +358,7 @@ export function RecordSection({
   onPlayExtra,
   onRecordOnly,
   onAdd,
+  addLabel = "Add to playlist",
 }: {
   order: RunningOrder;
   releaseTitle: string;
@@ -352,8 +368,13 @@ export function RecordSection({
   onPlayExtra: (item: Playable) => void;
   /** Open a track with no clip: its record card, with a tap pad and Add. */
   onRecordOnly?: (item: Playable) => void;
-  /** Put a track in a playlist (the usual picker). */
-  onAdd?: (item: Playable) => void;
+  /**
+   * Put a track in a playlist: your current set in one tap, or — `choose`,
+   * from a Shift-click — the picker.
+   */
+  onAdd?: (item: Playable, choose?: boolean) => void;
+  /** What the + does, for its label: "Add to B2B at the Lot". */
+  addLabel?: string;
 }) {
   const playable = order.rows.filter((row) => row.playable !== null);
   if (order.rows.length === 0 && order.extras.length === 0) return null;
@@ -479,9 +500,9 @@ export function RecordSection({
                   (addable ? (
                     <button
                       type="button"
-                      onClick={() => onAdd(addable)}
-                      aria-label={`Add ${row.title} to a playlist`}
-                      title="Add to playlist"
+                      onClick={(event) => onAdd(addable, event.shiftKey)}
+                      aria-label={`${addLabel}: ${row.title}`}
+                      title={`${addLabel} — Shift-click to choose`}
                       className="flex w-9 shrink-0 items-center justify-center text-neutral-600 hover:bg-ink-800 hover:text-accent focus-visible:text-accent"
                     >
                       <Plus className="h-3.5 w-3.5" />
@@ -531,6 +552,7 @@ export function DigDrawer({
   onPlayLocal,
   onPlayRecord,
   onAddToPlaylist,
+  addLabel = "Add to playlist",
   onRecordOnly,
   onPivot,
   onPreviewExternal,
@@ -556,7 +578,10 @@ export function DigDrawer({
   onPlayLocal: (items: Playable[], index: number) => void;
   /** Play the record in running order as a detour from the shuffle. */
   onPlayRecord: (items: Playable[], index: number, label: string) => void;
-  onAddToPlaylist: (item: Playable) => void;
+  /** Your current set in one tap; `choose` (Shift-click) opens the picker. */
+  onAddToPlaylist: (item: Playable, choose?: boolean) => void;
+  /** "Add to B2B at the Lot", for the + buttons' labels. */
+  addLabel?: string;
   /** A track on the record with no clip: open its record card. */
   onRecordOnly: (item: Playable) => void;
   /** Apply a facet to the main crate filter and close the drawer. */
@@ -929,6 +954,7 @@ export function DigDrawer({
           onPlayExtra={(item) => onPlayRecord([item], 0, seed.releaseTitle || "this record")}
           onRecordOnly={onRecordOnly}
           onAdd={onAddToPlaylist}
+          addLabel={addLabel}
         />
 
         {half === "crate" ? (
@@ -974,7 +1000,8 @@ export function DigDrawer({
                       key={item.key}
                       item={item}
                       onPlay={() => onPlayLocal(lane.results, index)}
-                      onAdd={() => onAddToPlaylist(item)}
+                      onAdd={(choose) => onAddToPlaylist(item, choose)}
+                      addLabel={addLabel}
                     />
                   ))}
                 </Lane>

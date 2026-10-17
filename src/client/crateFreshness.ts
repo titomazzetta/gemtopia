@@ -49,3 +49,27 @@ export function needsSync(
 
   return age > FRESH_FOR_MS;
 }
+
+/**
+ * Should the app quietly re-read a source's listing — which releases are on
+ * it, without their tracklists?
+ *
+ * For the wantlist, while you're in your collection: it's what lets a search
+ * put your wants second and the heart know a record is already wanted, on a
+ * device that has never opened wantlist mode. It costs one Discogs request
+ * per hundred wants, so it runs on the same fifteen-minute rhythm as the
+ * crate's own check, and not at all while a full sync of that source is
+ * fresh — that sync read the listing already.
+ */
+export function needsListing(
+  listedAt: number | null,
+  fullSync: SyncState | null,
+  now: number = Date.now(),
+): boolean {
+  if (fullSync && !needsSync(fullSync, now)) return false;
+  if (listedAt === null) return true;
+  const age = now - listedAt;
+  // A clock that moved backwards: look again rather than trust it.
+  if (age < 0) return true;
+  return age > FRESH_FOR_MS;
+}

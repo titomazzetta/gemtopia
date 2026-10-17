@@ -565,6 +565,14 @@ genuinely powerful permission, the constraints are worth stating:
   browser's own UI (`track.onended`).
 - Nothing is downloaded from YouTube. This analyses sound the user is already
   legitimately playing, in real time, and stores a number about it.
+- **The microphone, for the room.** The player's mic mode and a record-only
+  track's **Listen** button use `getUserMedia({ audio })` instead, with the
+  same rules: started only by a press, the browser's own prompt and
+  recording indicator, a tap rather than a monitor path, nothing stored or
+  sent but the BPM. Listen releases the microphone as soon as a reading
+  settles, and when its card closes (the detector's teardown on unmount).
+  What it hears is saved as `auto`, so it can never replace a reading you
+  tapped or typed — the catalogue's precedence rule, enforced in SQL.
 
 ---
 

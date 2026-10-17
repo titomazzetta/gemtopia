@@ -243,6 +243,49 @@ export async function setSyncState(
   });
 }
 
+/**
+ * When a source's listing (which releases are on it, no tracklists) was last
+ * read in full. Kept apart from the sync state: a listing says nothing about
+ * whether the records' tracklists are cached, and a full sync must still run
+ * when you open that source.
+ */
+export async function getListedAt(owner: string, source: Source): Promise<number | null> {
+  const row = await tx<{ key: string; value: number } | undefined>(
+    STORE_META,
+    "readonly",
+    ([store]) => store!.get(`listed:${owner}:${source}`),
+  );
+  return typeof row?.value === "number" ? row.value : null;
+}
+
+export async function setListedAt(owner: string, source: Source, at: number): Promise<void> {
+  await tx<void>(STORE_META, "readwrite", ([store]) => {
+    store!.put({ key: `listed:${owner}:${source}`, value: at });
+    return Promise.resolve();
+  });
+}
+
+/**
+ * Forget the releases a complete listing no longer has — a want taken off on
+ * discogs.com, say. Only ever called with the ids of a listing read to its
+ * last page; a partial one would wrongly forget everything past where it
+ * stopped.
+ */
+export async function pruneSummaries(
+  owner: string,
+  source: Source,
+  keep: ReadonlySet<number>,
+): Promise<number> {
+  const existing = await getSummaries(owner, source);
+  const gone = existing.filter((item) => !keep.has(item.id));
+  if (gone.length === 0) return 0;
+  await tx<void>(STORE_SUMMARY, "readwrite", ([store]) => {
+    for (const item of gone) store!.delete(item.pk);
+    return Promise.resolve();
+  });
+  return gone.length;
+}
+
 /** Wipe everything this browser holds. Called on logout. */
 export async function nuke(): Promise<void> {
   dbPromise = null;

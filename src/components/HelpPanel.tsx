@@ -58,7 +58,8 @@ export const HELP: ReadonlyArray<Section> = [
         {fine ? (
           <>
             <b>Drag</b> any row, or what&apos;s playing (by its title, artist or record), onto a playlist in the sidebar, or
-            press {k("A")} / the <b>+</b> to pick one.
+            press {k("A")} / the <b>+</b>. The first add asks which set; after that it&apos;s one tap
+            to that set, named on the button — <b>Other…</b> or Shift+{k("A")} picks another.
           </>
         ) : (
           <>

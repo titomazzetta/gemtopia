@@ -1,11 +1,13 @@
 "use client";
 
-import type { ReleaseDetail, Source, SyncState } from "@/lib/types";
+import type { ReleaseDetail, ReleaseSummary, Source, SyncState } from "@/lib/types";
 import {
   getDetailIds,
   getSummaries,
+  pruneSummaries,
   putDetails,
   putSummaries,
+  setListedAt,
   setSyncState,
 } from "./db";
 import { mergePriority, nextBatch } from "./syncQueue";
@@ -277,4 +279,64 @@ export function startSync(options: {
       priority = mergePriority(priority, releaseIds);
     },
   };
+}
+
+/**
+ * Just the listing of a source: which releases are on it, no tracklists.
+ *
+ * One request per hundred records, a second apart — the same pacing as the
+ * first phase of a full sync, and nothing of the second. Used to keep the
+ * wantlist's membership current in the background, so "on your wantlist"
+ * (search grouping, the heart) is right on a device that has never opened
+ * wantlist mode, without spending the detail budget on records nobody is
+ * playing.
+ *
+ * A listing read to its last page is complete, and only then is anything
+ * forgotten: releases it no longer has (a want removed on discogs.com) are
+ * pruned, and the time is recorded. A listing that stopped early — a rate
+ * limit, a dropped connection — keeps what it read and forgets nothing.
+ *
+ * Nor does one whose total moved while it paged. The listing is newest
+ * first, a hundred to a page: a want removed while page 3 is being read
+ * shifts the first record of page 4 up onto page 3, which has been read, and
+ * it is never seen — so it would be pruned though it is still wanted. When
+ * the count changes mid-read, keep everything and look again next time.
+ */
+export async function listSource(options: {
+  owner: string;
+  source: Source;
+  isCancelled?: () => boolean;
+}): Promise<{ listed: number; complete: boolean; pruned: number }> {
+  const seen = new Set<number>();
+  let page = 1;
+  let pages = 1;
+  let total: number | null = null;
+  let moved = false;
+  try {
+    do {
+      if (options.isCancelled?.()) return { listed: seen.size, complete: false, pruned: 0 };
+      const data = await apiGet<{
+        items: ReleaseSummary[];
+        page: number;
+        pages: number;
+        total: number;
+      }>(`/api/discogs/collection?source=${options.source}&page=${page}&perPage=100`);
+      await putSummaries(options.owner, options.source, data.items);
+      for (const item of data.items) seen.add(item.id);
+      if (total !== null && data.total !== total) moved = true;
+      total = data.total;
+      pages = data.pages;
+      page += 1;
+      if (page <= pages) await sleep(1_100);
+    } while (page <= pages);
+  } catch (error) {
+    // Background work: say nothing, keep what was read, try again next time.
+    console.warn("[listing]", options.source, error);
+    return { listed: seen.size, complete: false, pruned: 0 };
+  }
+  if (moved) return { listed: seen.size, complete: false, pruned: 0 };
+
+  const pruned = await pruneSummaries(options.owner, options.source, seen);
+  await setListedAt(options.owner, options.source, Date.now());
+  return { listed: seen.size, complete: true, pruned };
 }
