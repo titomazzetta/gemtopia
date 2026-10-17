@@ -653,3 +653,42 @@ BEGIN
       CHECK (sealed IS NOT NULL);
   END IF;
 END $$;
+
+-- ---------------------------------------------------------------------------
+-- Track tags — your own words for your tracks: "deep", "opening", "closing"
+--
+-- Private to the account that wrote them, like track_meta: never joined into
+-- a playlist, a share link, a chat note or an export, and no route takes
+-- anyone else's id. One row per tag per track, so each tag is a value the
+-- database can check on its own (an array's elements are out of a CHECK's
+-- reach), and the Tags filter's counts are one indexed GROUP BY.
+--
+-- lib/tags.ts decides a tag's one stored form (NFC, lower case, one space
+-- between words, no leading "#", 1–32 characters). These CHECKs are the
+-- database refusing anything else, whatever a future bug tries to write: the
+-- length, no control characters, none of the invisible characters that can
+-- make text read as something it isn't (bidi overrides, zero-width space and
+-- the rest of lib/chat.ts's list), no comma (the separator when you type
+-- several), no edge spaces, no "#" in front, no capital letters.
+--
+-- New table only: safe to run while the previous build is live, which never
+-- reads it. A second run is a no-op.
+-- ---------------------------------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS track_tags (
+  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  clip_key    TEXT NOT NULL
+              CHECK (clip_key ~ '^[0-9]+:([A-Za-z0-9_-]{11}|t\.[A-Za-z0-9-]{1,16})$'),
+  tag         TEXT NOT NULL CHECK (
+                char_length(tag) BETWEEN 1 AND 32
+                AND tag = btrim(tag)
+                AND tag !~ '^#'
+                AND tag !~ '[A-Z,]'
+                AND tag !~ '[\u0001-\u001f\u007f-\u009f\u00ad\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff\ufff9-\ufffb]'
+              ),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, clip_key, tag)
+);
+
+-- Your tags and how often you've used each: the Tags filter, the suggestions.
+CREATE INDEX IF NOT EXISTS track_tags_user_tag_idx ON track_tags (user_id, tag);

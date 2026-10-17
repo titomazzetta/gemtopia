@@ -206,6 +206,12 @@ export interface Playable {
    * threaded in from the summary index rather than read off the detail.
    */
   addedAt: string | null;
+  /**
+   * Your own tags on this track ("deep", "opening"), merged in client-side
+   * like `bpm` (lib/tags.ts). Absent when it has none. Private: nothing that
+   * leaves the browser — a playlist entry, an export — is built from it.
+   */
+  tags?: readonly string[];
 }
 
 /**

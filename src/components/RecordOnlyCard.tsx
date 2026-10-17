@@ -7,6 +7,7 @@ import { useTempoDetector } from "@/client/useTempoDetector";
 import { formatBpm } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { Disc, Mic, Plus } from "./Icons";
+import { TagEditor } from "./TagEditor";
 
 /**
  * A track YouTube has no clip for — "record only".
@@ -32,6 +33,7 @@ export function RecordOnlyCard({
   onAdd,
   onChoose,
   fold,
+  tags,
   onClose,
 }: {
   item: Playable;
@@ -49,6 +51,12 @@ export function RecordOnlyCard({
   onChoose?: () => void;
   /** The BPM window to read the mic in: the record's genre pocket, or your range. */
   fold?: FoldWindow;
+  /** Your tags on this track, and the rest of yours to suggest. */
+  tags?: {
+    value: readonly string[];
+    ranked: ReadonlyArray<readonly [string, number]>;
+    onChange: (tags: string[]) => void;
+  };
   onClose: () => void;
 }) {
   const tapper = useRef(new TapTempo());
@@ -110,6 +118,13 @@ export function RecordOnlyCard({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      // Typing a tag: T and A are letters, not taps and adds. Esc still
+      // closes the card (the tag field takes the first one, to clear itself).
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target !== null &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (typing && event.key !== "Escape") return;
       if (event.key === "Escape") {
         latest.current.onClose();
       } else if (event.key === "t" || event.key === "T") {
@@ -289,6 +304,21 @@ export function RecordOnlyCard({
           >
             {listener.error ?? listenLine}
           </p>
+        )}
+
+        {tags && (
+          <div className="mt-4">
+            <p className="mb-1.5 flex items-baseline justify-between text-[10px] uppercase tracking-wider text-neutral-500">
+              <span className="font-semibold">Your tags</span>
+              <span className="normal-case tracking-normal text-neutral-600">only you see them</span>
+            </p>
+            <TagEditor
+              tags={tags.value}
+              ranked={tags.ranked}
+              onChange={tags.onChange}
+              label={`Your tags for ${item.title}`}
+            />
+          </div>
         )}
 
         {onAdd && (

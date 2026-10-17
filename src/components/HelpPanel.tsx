@@ -82,8 +82,10 @@ export const HELP: ReadonlyArray<Section> = [
     body: (fine) => (
       <>
         Tap along with {fine ? <>{k("T")} or </> : null}<b>TAP</b>, or press <b>Detect</b> (Chrome reads
-        the tab&apos;s audio). <b>Measure</b> plays through everything without a BPM and logs it. Your
-        tempos are yours — nobody else sees them.
+        the tab&apos;s audio). <b>Measure</b> plays through everything without a BPM and logs it. Under
+        it, <b>Your tags</b>: your own words for a track — deep, opening, closing — that the search box
+        (<b>#deep</b>) and the Tags filter find again, in your collection and your wantlist. Your tempos
+        and tags are yours — nobody else sees them, not even on a shared set.
       </>
     ),
   },

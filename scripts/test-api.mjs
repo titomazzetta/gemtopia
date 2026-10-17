@@ -876,6 +876,159 @@ await check("the revoked user's data survived", async () => {
   );
 });
 
+console.log("\nyour tags");
+
+{
+  // Fresh accounts: nothing earlier in the run can make these pass by accident.
+  const tagger = actor(`tagger_${randomBytes(4).toString("hex")}`);
+  const partner = actor(`partner_${randomBytes(4).toString("hex")}`);
+  for (const a of [tagger, partner]) await a.call("/api/playlists");
+
+  const KEY = "2002:t.B1";
+  const CLIP = "2003:ggggggggggg";
+  const putTags = (who, clipKey, tags, extra = {}) =>
+    who.call("/api/track-tags", { method: "PUT", body: { clipKey, tags }, ...extra });
+  const tagsOf = async (who, clipKey) => {
+    const res = await who.call("/api/track-tags");
+    assert.equal(res.status, 200);
+    return res.body.entries.find((e) => e.clipKey === clipKey)?.tags ?? [];
+  };
+
+  await check("tags need a session, and the CSRF token to change", async () => {
+    assert.equal((await tagger.call("/api/track-tags", { cookie: "" })).status, 401);
+    assert.equal((await putTags(tagger, KEY, ["deep"], { cookie: "" })).status, 401);
+    assert.equal((await putTags(tagger, KEY, ["deep"], { csrfToken: null })).status, 403);
+    assert.equal((await putTags(tagger, KEY, ["deep"], { csrfToken: "wrong" })).status, 403);
+    assert.deepEqual(await tagsOf(tagger, KEY), [], "a refused write wrote nothing");
+  });
+
+  await check("a track's tags are stored in one form, whatever was typed", async () => {
+    const res = await putTags(tagger, KEY, ["  #Deep ", "OPENING", "deep", "dee\u200Bp", "\u202Eclosing"]);
+    assert.equal(res.status, 200, res.raw);
+    assert.deepEqual(res.body, { clipKey: KEY, tags: ["closing", "deep", "opening"] });
+    assert.deepEqual(await tagsOf(tagger, KEY), ["closing", "deep", "opening"]);
+  });
+
+  await check("a save is the whole set: it replaces, and an empty one clears", async () => {
+    assert.deepEqual((await putTags(tagger, KEY, ["deep", "peak time"])).body.tags, ["deep", "peak time"]);
+    assert.deepEqual(await tagsOf(tagger, KEY), ["deep", "peak time"]);
+    assert.deepEqual((await putTags(tagger, KEY, [])).body.tags, []);
+    const res = await tagger.call("/api/track-tags");
+    assert.ok(!res.body.entries.some((e) => e.clipKey === KEY), "a cleared track is gone from the list");
+  });
+
+  await check("bad tags are refused whole, and nothing changes", async () => {
+    assert.equal((await putTags(tagger, KEY, ["keep"])).status, 200);
+    const refusals = [
+      ["x".repeat(33)],
+      ["fine", "   "],
+      ["#"],
+      Array.from({ length: 13 }, (_, i) => `t${i}`),
+      [42],
+      "deep",
+    ];
+    for (const tags of refusals) {
+      const res = await putTags(tagger, KEY, tags);
+      assert.equal(res.status, 400, `${JSON.stringify(tags).slice(0, 40)} → ${res.status}`);
+    }
+    for (const body of [
+      { clipKey: "not-a-key", tags: [] },
+      { clipKey: KEY, tags: [], userId: "someone-else" },
+      { clipKey: KEY },
+    ]) {
+      const res = await tagger.call("/api/track-tags", { method: "PUT", body });
+      assert.equal(res.status, 400, JSON.stringify(body));
+    }
+    assert.deepEqual(await tagsOf(tagger, KEY), ["keep"]);
+  });
+
+  await check("someone else's tags are invisible, and theirs never touch yours", async () => {
+    const secret = `secret-${randomBytes(3).toString("hex")}`;
+    assert.equal((await putTags(tagger, KEY, [secret])).status, 200);
+    const theirs = await partner.call("/api/track-tags");
+    assert.equal(theirs.status, 200);
+    assert.ok(!theirs.raw.includes(secret), "tags leaked between accounts");
+    // The same track, tagged by them, and then cleared by them: yours stay.
+    assert.equal((await putTags(partner, KEY, ["theirs"])).status, 200);
+    assert.deepEqual(await tagsOf(tagger, KEY), [secret]);
+    assert.equal((await putTags(partner, KEY, [])).status, 200);
+    assert.deepEqual(await tagsOf(tagger, KEY), [secret]);
+  });
+
+  await check("tags never travel with a playlist, a collaborator's view or a share link", async () => {
+    const secret = `private-${randomBytes(3).toString("hex")}`;
+    assert.equal((await putTags(tagger, CLIP, [secret])).status, 200);
+
+    const created = await tagger.call("/api/playlists", {
+      method: "POST",
+      body: { name: "Tagged set", entries: [clip(2003, "ggggggggggg")] },
+    });
+    assert.equal(created.status, 201);
+    const id = created.body.playlist.id;
+    assert.ok(!created.raw.includes(secret));
+    assert.ok(!(await tagger.call(`/api/playlists/${id}`)).raw.includes(secret));
+    assert.ok(!(await tagger.call("/api/playlists")).raw.includes(secret));
+
+    // A collaborator on the same set.
+    const link = await tagger.call(`/api/playlists/${id}/collab`, { method: "POST", body: { on: true } });
+    const token = new URL(link.body.url).pathname.split("/")[2];
+    assert.equal((await partner.call(`/api/join/${token}`, { method: "POST" })).status, 200);
+    const seen = await partner.call(`/api/playlists/${id}`);
+    assert.equal(seen.status, 200);
+    assert.ok(!seen.raw.includes(secret), "a collaborator saw your tags");
+    assert.ok(!(await partner.call("/api/track-tags")).raw.includes(secret));
+
+    // And the public share link.
+    const share = await tagger.call(`/api/playlists/${id}/share`, { method: "POST", body: { shared: true } });
+    const shareToken = share.body.shareUrl.split("/s/").pop();
+    const shared = await fetch(`${BASE}/api/shared/${shareToken}`);
+    assert.equal(shared.status, 200);
+    assert.ok(!(await shared.text()).includes(secret), "a share link carried your tags");
+  });
+
+  await check("the playlist API won't take tags in an entry, even if a client sends them", async () => {
+    const res = await tagger.call("/api/playlists", {
+      method: "POST",
+      body: { name: "Smuggled", entries: [{ ...clip(2004, "hhhhhhhhhhh"), tags: ["deep"] }] },
+    });
+    assert.equal(res.status, 400);
+  });
+
+  const sql = await db();
+  if (!sql) {
+    console.log("  skip the per-account tag ceiling (no local DATABASE_URL)");
+  } else {
+    await check("an account can hold 20,000 tags, and not one more", async () => {
+      const user = await sql.query(`SELECT id FROM users WHERE username_key = $1`, [
+        tagger.username.toLowerCase(),
+      ]);
+      const userId = user.rows[0].id;
+      const before = Number(
+        (await sql.query(`SELECT count(*) AS n FROM track_tags WHERE user_id = $1`, [userId])).rows[0].n,
+      );
+      // Fill to one short of the ceiling, straight into the table.
+      await sql.query(
+        `INSERT INTO track_tags (user_id, clip_key, tag)
+         SELECT $1, (9000000 + g)::text || ':t.A1', 'bulk'
+           FROM generate_series(1, $2::int) AS g`,
+        [userId, 20_000 - before - 1],
+      );
+      try {
+        const two = await putTags(tagger, "8000001:t.A1", ["a", "b"]);
+        assert.equal(two.status, 409, two.raw);
+        assert.equal(two.body.error.code, "tag_limit");
+        assert.deepEqual(await tagsOf(tagger, "8000001:t.A1"), [], "a refused save wrote nothing");
+        assert.equal((await putTags(tagger, "8000001:t.A1", ["a"])).status, 200, "the last one fits");
+        assert.equal((await putTags(tagger, "8000002:t.A1", ["c"])).status, 409);
+        // Replacing a track's tags with as many isn't growth.
+        assert.equal((await putTags(tagger, "8000001:t.A1", ["z"])).status, 200);
+      } finally {
+        await sql.query(`DELETE FROM track_tags WHERE user_id = $1 AND tag = 'bulk'`, [userId]);
+      }
+    });
+  }
+}
+
 console.log("\ncleanup");
 
 await check("delete removes the playlist", async () => {
