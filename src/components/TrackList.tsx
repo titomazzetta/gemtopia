@@ -100,13 +100,29 @@ export function TransitionStrip({ check }: { check: MixCheck }) {
 }
 
 /**
- * Windowed list.
- *
- * A 1,500-record crate produces a few thousand clips. Rendering that many DOM
- * rows makes filtering feel sticky on a laptop, so we render only the visible
- * slice — ~30 rows — and translate the viewport. Fixed row height keeps this
- * to about forty lines instead of pulling in a virtualisation library.
+ * Your tags on a row: the first one, and how many more. "#deep +2" on
+ * screen, "tagged deep and 2 more" read aloud; every tag in the tooltip.
  */
+function TagMark({ tags, className = "" }: { tags: readonly string[]; className?: string }) {
+  const more = tags.length - 1;
+  return (
+    <span
+      className={`min-w-0 shrink-0 truncate text-accent/80 ${className}`}
+      title={tags.map((tag) => `#${tag}`).join("  ")}
+    >
+      <span className="sr-only">, tagged </span>
+      <span aria-hidden="true">#</span>
+      {tags[0]}
+      {more > 0 && (
+        <>
+          <span aria-hidden="true" className="text-accent/50"> +{more}</span>
+          <span className="sr-only"> and {more} more</span>
+        </>
+      )}
+    </span>
+  );
+}
+
 /**
  * A clickable column heading.
  *
@@ -158,6 +174,14 @@ function SortHeader({
   );
 }
 
+/**
+ * Windowed list.
+ *
+ * A 1,500-record crate produces a few thousand clips. Rendering that many DOM
+ * rows makes filtering feel sticky on a laptop, so we render only the visible
+ * slice — ~30 rows — and translate the viewport. Fixed row height keeps this
+ * to about forty lines instead of pulling in a virtualisation library.
+ */
 export function TrackList({
   items,
   currentKey,
@@ -662,6 +686,9 @@ export function TrackList({
                         }`}
                       >
                         <span className="min-w-0 truncate">{item.artist}</span>
+                        {item.tags && item.tags.length > 0 && (
+                          <TagMark tags={item.tags} className="max-w-24 text-[10px]" />
+                        )}
                         <span className="shrink-0 font-mono text-[10px] tabular-nums text-neutral-600">
                           {[
                             item.bpm !== null && item.bpm !== undefined ? `${formatBpm(item.bpm)} BPM` : null,
@@ -695,6 +722,12 @@ export function TrackList({
 
                   {/* In a tight list the numbers move into the second line (above). */}
                   <span className={`hidden shrink-0 items-center gap-2 ${tight && phoneMeta ? "" : "sm:flex"}`}>
+                    {item.tags && item.tags.length > 0 && (
+                      <TagMark
+                        tags={item.tags}
+                        className="max-w-28 rounded-sm border border-accent/30 px-1.5 py-0.5 text-[10px]"
+                      />
+                    )}
                     {item.styles[0] && !tight && (
                       <span className="rounded-sm bg-ink-800 px-1.5 py-0.5 text-[10px] text-neutral-500">
                         {item.styles[0]}

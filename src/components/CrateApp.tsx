@@ -138,6 +138,9 @@ import {
 } from "@/client/adopt";
 import { DiscogsSearch } from "./DiscogsSearch";
 import { RecordOnlyCard } from "./RecordOnlyCard";
+import { TagEditor } from "./TagEditor";
+import { useTrackTags } from "@/client/useTrackTags";
+import { withTags } from "@/lib/tags";
 import { isTrackOnlyKey } from "@/lib/clipKey";
 import type { SearchHit } from "@/lib/discogs";
 import {
@@ -154,6 +157,9 @@ import {
 } from "./Icons";
 
 type Rail = "filters" | "playlists" | "insights";
+
+/** One empty list for every track without tags, so props don't change identity. */
+const NO_TAGS: readonly string[] = [];
 
 type NewEntry = Omit<PlaylistItemRow, "position">;
 
@@ -424,6 +430,11 @@ export function CrateApp({
     setToast(message);
     window.setTimeout(() => setToast((t) => (t === message ? null : t)), 2800);
   }, []);
+
+  /* ================= your tags ================= */
+
+  // Private words for your tracks ("deep", "opening"): lib/tags.ts.
+  const trackTags = useTrackTags(say);
 
   /* ================= BPM catalogue ================= */
 
@@ -898,10 +909,12 @@ export function CrateApp({
    */
   const allPlayables = useMemo(() => {
     const built = buildPlayables([...details, ...externalDetails], bpmByClip, addedAt);
-    if (pending.length === 0) return built;
     const detailed = new Set(details.map((d) => d.id));
-    return [...built, ...pendingPlayables(pending, detailed)];
-  }, [details, externalDetails, bpmByClip, addedAt, pending]);
+    const all = pending.length === 0 ? built : [...built, ...pendingPlayables(pending, detailed)];
+    // Your tags ride along like BPMs do, so search, the Tags filter and the
+    // rows all read them off the track.
+    return withTags(all, trackTags.byKey);
+  }, [details, externalDetails, bpmByClip, addedAt, pending, trackTags.byKey]);
 
   const byKey = useMemo(() => {
     const map = new Map<string, Playable>();
@@ -993,9 +1006,10 @@ export function CrateApp({
         position: entry.videoId === null ? (entry.clipKey.split(":t.")[1] ?? null) : null,
         bpm: entry.bpm ?? bpmByClip.get(entry.clipKey) ?? null,
         matchKind: entry.videoId === null ? "track" : "release",
+        ...(trackTags.byKey.has(entry.clipKey) ? { tags: trackTags.byKey.get(entry.clipKey) } : {}),
       };
     });
-  }, [activePlaylist, byKey, bpmByClip]);
+  }, [activePlaylist, byKey, bpmByClip, trackTags.byKey]);
 
   const playlistView: PlaylistViewState =
     activePlaylist && viewChoice?.playlistId === activePlaylist.id
@@ -1026,6 +1040,7 @@ export function CrateApp({
   const activeFilterCount = useMemo(() => {
     let count = 0;
     for (const key of [
+      "tags",
       "artists",
       "genres",
       "styles",
@@ -1967,7 +1982,9 @@ export function CrateApp({
       setActivePlaylistId(null);
       setRail("filters");
       setDigTarget(null);
-      say(`Crate filtered to ${value}`);
+      // The answer is the crate list, which search covers on a desktop.
+      setSearchOpen(false);
+      say(facet === "tags" ? `Everything you tagged #${value}` : `Crate filtered to ${value}`);
     },
     [say],
   );
@@ -2914,7 +2931,8 @@ export function CrateApp({
             <span className="min-w-0 shrink truncate text-[11px] text-neutral-600">
               {/* "tracks", like the playlist list and set prep: record-only
                   tracks are tracks too, they just play from the vinyl. */}
-              {(silence.playable + silence.recordOnly).toLocaleString()} tracks
+              {(silence.playable + silence.recordOnly).toLocaleString()}{" "}
+              {silence.playable + silence.recordOnly === 1 ? "track" : "tracks"}
               {silence.recordOnly > 0 && (
                 <span title="Tracks with no YouTube clip, listed from the Discogs tracklist — play them from the record">
                   {" · "}
@@ -3277,6 +3295,16 @@ export function CrateApp({
           // somewhere to drop it, wherever the left rail was.
           onTrackDragStart={() => setRail("playlists")}
           want={currentWant}
+          tags={
+            current && trackTags.ready
+              ? {
+                  value: trackTags.byKey.get(current.key) ?? NO_TAGS,
+                  ranked: trackTags.ranked,
+                  onChange: (next) => trackTags.set(current.key, next),
+                  onPick: (tag) => pivotFilter("tags", tag),
+                }
+              : null
+          }
           detour={detour ? { label: detour.label } : null}
           onBackToShuffle={endDetour}
           digging={Boolean(digTarget)}
@@ -3337,6 +3365,15 @@ export function CrateApp({
             })
           }
           fold={foldWindow(tempoRange, pocketFor(recordCard.styles, recordCard.genres))}
+          tags={
+            trackTags.ready
+              ? {
+                  value: trackTags.byKey.get(recordCard.key) ?? NO_TAGS,
+                  ranked: trackTags.ranked,
+                  onChange: (next) => trackTags.set(recordCard.key, next),
+                }
+              : undefined
+          }
           addTo={quickTarget?.name ?? null}
           onAdd={() => {
             const item = recordCard;
@@ -3706,6 +3743,26 @@ export function CrateApp({
                   ✕
                 </button>
               </div>
+
+              {trackTags.ready && (
+                <div className="mt-4">
+                  <p className="mb-1.5 flex items-baseline justify-between text-[10px] uppercase tracking-wider text-neutral-500">
+                    <span className="font-semibold">Your tags</span>
+                    <span className="normal-case tracking-normal text-neutral-600">only you see them</span>
+                  </p>
+                  <TagEditor
+                    key={current.key}
+                    tags={trackTags.byKey.get(current.key) ?? NO_TAGS}
+                    ranked={trackTags.ranked}
+                    onChange={(next) => trackTags.set(current.key, next)}
+                    onPick={(tag) => {
+                      setSheet("none");
+                      pivotFilter("tags", tag);
+                    }}
+                    label={`Your tags for ${current.title}`}
+                  />
+                </div>
+              )}
 
               {/*
                 Auto detection is offered here too, and says plainly that it is

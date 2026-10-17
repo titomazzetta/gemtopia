@@ -24,6 +24,7 @@ import {
 } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import { WantButton, type WantHeart } from "./WantButton";
+import { TagEditor } from "./TagEditor";
 import { writeClipDrag } from "@/client/clipDrag";
 import { useFinePointer } from "@/client/useFinePointer";
 import { useLocalFlag } from "@/client/useLocalPreference";
@@ -395,6 +396,7 @@ export function NowPlaying({
   detour,
   onBackToShuffle,
   idle,
+  tags = null,
 }: {
   containerRef: RefObject<HTMLDivElement | null>;
   api: PlayerApi;
@@ -435,6 +437,13 @@ export function NowPlaying({
     recent: ReadonlyArray<{ id: string; name: string; tracks: number; shared: boolean }>;
     onOpenPlaylist: (id: string) => void;
   };
+  /** Your tags on what's playing; a chip shows every track with that tag. */
+  tags?: {
+    value: readonly string[];
+    ranked: ReadonlyArray<readonly [string, number]>;
+    onChange: (tags: string[]) => void;
+    onPick: (tag: string) => void;
+  } | null;
 }) {
   const progress = api.duration > 0 ? (api.currentTime / api.duration) * 100 : 0;
   // The track that's playing can be picked up and dropped on a playlist, the
@@ -741,6 +750,33 @@ export function NowPlaying({
         </div>
 
         <TempoPanel {...tempo} disabled={!current} />
+
+        {/*
+          Your words for this track, next to its tempo: the two things here
+          that are yours rather than Discogs'. Keyed by track, so a half-typed
+          tag doesn't follow you to the next one.
+        */}
+        {current && tags && (
+          <section aria-labelledby="player-tags-title">
+            <div className="mb-1.5 flex items-baseline justify-between">
+              <h3
+                id="player-tags-title"
+                className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500"
+              >
+                Your tags
+              </h3>
+              <span className="text-[10px] text-neutral-600">only you see them</span>
+            </div>
+            <TagEditor
+              key={current.key}
+              tags={tags.value}
+              ranked={tags.ranked}
+              onChange={tags.onChange}
+              onPick={tags.onPick}
+              label={`Your tags for ${current.title}`}
+            />
+          </section>
+        )}
 
         {/* Volume + queue position */}
         <div className="flex items-center gap-2">

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CLIP_KEY_PATTERN, isTrackOnlyKey } from "./clipKey";
+import { TAGS_PER_TRACK } from "./tags";
 
 /**
  * Shared request schemas.
@@ -95,6 +96,20 @@ export const trackMetaSchema = z
 
 export const trackMetaBatchSchema = z
   .object({ entries: z.array(trackMetaSchema).min(1).max(200) })
+  .strict();
+
+/**
+ * One track's whole set of tags. The shape only: each tag's form (and the
+ * per-track count, after repeats are dropped) is lib/tags.normaliseTags's
+ * call, made in the route. The bounds here just keep the work it's handed
+ * small — 24 strings of 128 UTF-16 units at most, room for any stored tag
+ * (32 code points) plus what cleaning takes off.
+ */
+export const trackTagsSchema = z
+  .object({
+    clipKey: CLIP_KEY,
+    tags: z.array(z.string().max(128)).max(TAGS_PER_TRACK * 2),
+  })
   .strict();
 
 export const analyseSchema = z

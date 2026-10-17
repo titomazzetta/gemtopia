@@ -11,6 +11,7 @@ import {
   comfortableWindow,
   STRAIN_META,
 } from "@/lib/mixing";
+import { tagHaystack } from "@/lib/tags";
 import { Search } from "./Icons";
 
 /**
@@ -25,6 +26,8 @@ import { Search } from "./Icons";
 
 export interface FilterState {
   query: string;
+  /** Your own tags (lib/tags.ts). */
+  tags: string[];
   artists: string[];
   genres: string[];
   styles: string[];
@@ -57,9 +60,10 @@ export interface FilterState {
 }
 
 /** Facets where a release can carry more than one value at once. */
-export type MultiFacetKey = "genres" | "styles" | "labels" | "formats";
+export type MultiFacetKey = "tags" | "genres" | "styles" | "labels" | "formats";
 
 export const MULTI_FACETS: readonly MultiFacetKey[] = [
+  "tags",
   "genres",
   "styles",
   "labels",
@@ -68,6 +72,7 @@ export const MULTI_FACETS: readonly MultiFacetKey[] = [
 
 export const emptyFilters: FilterState = {
   query: "",
+  tags: [],
   artists: [],
   genres: [],
   styles: [],
@@ -85,6 +90,7 @@ export const emptyFilters: FilterState = {
 };
 
 export type FacetKey =
+  | "tags"
   | "artists"
   | "genres"
   | "styles"
@@ -114,6 +120,8 @@ export interface StyleTempo {
 }
 
 export interface Facets {
+  /** Your tags in this crate, most-used first. */
+  tags: Array<[string, number]>;
   artists: Array<[string, number]>;
   genres: Array<[string, number]>;
   styles: Array<[string, number]>;
@@ -139,6 +147,7 @@ export interface Facets {
 /** Count every facet value across the pool so the UI can rank by frequency. */
 export function computeFacets(pool: Playable[]): Facets {
   const counters: Record<FacetKey, Map<string, number>> = {
+    tags: new Map(),
     artists: new Map(),
     genres: new Map(),
     styles: new Map(),
@@ -164,6 +173,7 @@ export function computeFacets(pool: Playable[]): Facets {
   };
 
   for (const item of pool) {
+    for (const t of item.tags ?? []) bump("tags", t);
     bump("artists", item.artist);
     for (const g of item.genres) bump("genres", g);
     for (const s of item.styles) bump("styles", s);
@@ -228,6 +238,7 @@ export function computeFacets(pool: Playable[]): Facets {
   );
 
   return {
+    tags: rank(counters.tags),
     artists: rank(counters.artists),
     genres: rank(counters.genres),
     styles: rank(counters.styles),
@@ -267,6 +278,7 @@ export function applyFilters(
   const needle = filters.query.trim().toLowerCase();
 
   const sets: Record<FacetKey, Set<string>> = {
+    tags: new Set(filters.tags),
     artists: new Set(filters.artists),
     genres: new Set(filters.genres),
     styles: new Set(filters.styles),
@@ -289,6 +301,7 @@ export function applyFilters(
       if (filters.bpmTo !== null && item.bpm > filters.bpmTo) return false;
     }
 
+    if (!facetMatches(item.tags ?? [], sets.tags, filters.matchAll?.tags)) return false;
     if (sets.artists.size > 0 && !sets.artists.has(item.artist)) return false;
     /*
      * "any" is satisfied when the record carries at least one of the selected
@@ -314,8 +327,10 @@ export function applyFilters(
     }
 
     if (needle) {
+      // Your tags as "#deep": typing deep finds them along with titles, and
+      // typing #deep finds only them.
       const haystack =
-        `${item.title} ${item.artist} ${item.releaseTitle} ${item.labels.join(" ")}`.toLowerCase();
+        `${item.title} ${item.artist} ${item.releaseTitle} ${item.labels.join(" ")} ${tagHaystack(item.tags)}`.toLowerCase();
       if (!haystack.includes(needle)) return false;
     }
 
@@ -333,6 +348,7 @@ function ChipGroup({
   collapsedCount = 10,
   matchAll,
   onMatchAllChange,
+  hash = false,
 }: {
   label: string;
   options: Array<[string, number]>;
@@ -342,6 +358,8 @@ function ChipGroup({
   /** Undefined for facets where a record can only hold one value. */
   matchAll?: boolean;
   onMatchAllChange?: (all: boolean) => void;
+  /** Your own tags: each chip reads "#deep", the way they're searched for. */
+  hash?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
@@ -383,9 +401,13 @@ function ChipGroup({
                   onClick={() => onMatchAllChange(all)}
                   aria-pressed={Boolean(matchAll) === all}
                   title={
-                    all
-                      ? `Records tagged with every selected ${label.toLowerCase()}`
-                      : `Records tagged with any selected ${label.toLowerCase()}`
+                    hash
+                      ? all
+                        ? "Tracks with every selected tag"
+                        : "Tracks with any selected tag"
+                      : all
+                        ? `Records tagged with every selected ${label.toLowerCase()}`
+                        : `Records tagged with any selected ${label.toLowerCase()}`
                   }
                   className={`px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide transition-colors ${
                     Boolean(matchAll) === all
@@ -433,6 +455,11 @@ function ChipGroup({
                   : "border-ink-700 bg-ink-850 text-neutral-400 hover:border-ink-600 hover:text-neutral-200"
               }`}
             >
+              {hash && (
+                <span aria-hidden="true" className="text-neutral-600">
+                  #
+                </span>
+              )}
               {name}
               <span className="ml-1 text-neutral-600">{count}</span>
             </button>
@@ -586,7 +613,7 @@ export function Filters({
             type="search"
             value={filters.query}
             onChange={(e) => onChange({ ...filters, query: e.target.value })}
-            placeholder="Search artist, track, label…"
+            placeholder="Artist, track, label or #tag…"
             className="w-full rounded-md border border-ink-700 bg-ink-850 py-1.5 pl-8 pr-2 text-sm placeholder:text-neutral-600"
             aria-label="Search the crate"
           />
@@ -825,6 +852,22 @@ export function Filters({
           Only tracks with a known BPM
         </label>
       </section>
+
+      {/*
+        Your own tags, above everything Discogs says about a record: they're
+        the words you chose to find things by. Only there once you've tagged
+        something in this crate.
+      */}
+      <ChipGroup
+        label="Your tags"
+        options={facets.tags}
+        selected={filters.tags}
+        onToggle={toggle("tags")}
+        matchAll={filters.matchAll?.tags ?? false}
+        onMatchAllChange={setMatchAll("tags")}
+        collapsedCount={12}
+        hash
+      />
 
       {/* Year */}
       <section className="border-t border-ink-800 px-4 py-3">

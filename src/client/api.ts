@@ -215,6 +215,24 @@ export const trackMetaApi = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Your tags (lib/tags.ts)                                             */
+/* ------------------------------------------------------------------ */
+
+export const trackTagsApi = {
+  list: () =>
+    request<{ entries: Array<{ clipKey: string; tags: string[] }> }>("/api/track-tags").then(
+      (r) => r.entries,
+    ),
+
+  /** A track's whole set of tags; an empty list clears them. Answers with what's stored. */
+  set: (clipKey: string, tags: readonly string[]) =>
+    request<{ clipKey: string; tags: string[] }>("/api/track-tags", {
+      method: "PUT",
+      body: JSON.stringify({ clipKey, tags }),
+    }),
+};
+
+/* ------------------------------------------------------------------ */
 /* Joining a collaborative playlist                                    */
 /* ------------------------------------------------------------------ */
 

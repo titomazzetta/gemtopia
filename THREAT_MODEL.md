@@ -56,6 +56,7 @@ secret, or the Anthropic key exists in client JavaScript.
 | `DATABASE_URL` | **High** — all stored user data | Vercel env var, server memory only |
 | User's Discogs access token | **Critical** — unscoped read *and write* on their account (see §12.1) | AES-256-GCM sealed cookie, browser only |
 | Playlists, BPM catalogue, analyses | Moderate — reveals taste and listening | Postgres, scoped by `user_id` |
+| Your tags (your own words on tracks) | Moderate — personal notes, can say what a set is for | Postgres `track_tags`, scoped by `user_id`; never in a playlist, share link, chat or export (§5) |
 | Collection index (1,500 releases) | Low | The user's own IndexedDB, never uploaded |
 | Captured tab audio | **High** while in memory | Never leaves the browser; see §6 |
 
@@ -402,6 +403,40 @@ copies after, compared with who added each copy, under the playlist row lock
 removed. Swapping someone's record for another counts as a removal. A refused
 edit is a 403 (`not_your_record`) and writes nothing; the UI only offers the
 remove button where it would be allowed.
+
+### Your tags
+
+A tag is one person's note on one track — "deep", "opening", "for the
+wedding" — and nobody else ever sees it, collaborators included. That's held
+by structure, and pinned by tests, not by remembering:
+
+- **One table, two functions, one route.** `track_tags` is read by
+  `repo.listTrackTags` and written by `repo.setTrackTags`, both keyed on the
+  session's user id, reached only from `/api/track-tags`. `test-tags.mjs`
+  reads the source and fails if a third function — or any other file — ever
+  mentions the table, or if anything but that route calls the two.
+- **Nothing shared is built from a tag.** Playlist entries (`toEntry`) and
+  export files (`fileEntry`) are built field by field, so a track's tags have
+  no way in; and the playlist API's strict schema refuses an entry that brings
+  any. The API suite tags a track, puts it in a set with a collaborator and a
+  share link, and checks that the tag appears in none of those responses, nor
+  in another account's tag list.
+- **One stored form.** `lib/tags.ts` cleans every tag on both sides — NFC,
+  lower case, one space, no control characters, none of the invisible
+  characters that make text read as something else (bidi overrides, zero-width
+  space: the same list as chat), Zalgo cut back — and refuses rather than cuts
+  anything empty or over 32 characters. The database's own CHECKs refuse
+  anything outside that form whatever the app sends; a fuzz test runs
+  thousands of hostile strings through the cleaner and holds every result to a
+  copy of those CHECKs, so a save can't fail on a tag the app produced.
+- **Bounded.** 12 tags a track and 20,000 an account, checked before anything
+  is written under a transaction-scoped advisory lock (not the users row, which
+  every request updates), so two tabs can't race past the ceiling together;
+  120 writes a minute; session, Origin and CSRF checks like every other write.
+- **Not encrypted at rest.** Like the BPM catalogue's cue notes, tags are
+  access-controlled rows. The chat's envelope encryption (above) is the model
+  if they ever need it: the client loads them all and filters locally, so
+  nothing on the server needs to read one.
 
 **Digging leaks nothing between users either.** `/api/dig` takes the seed's
 metadata and the exclusion lists from the caller, and those only shape what that

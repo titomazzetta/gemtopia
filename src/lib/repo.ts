@@ -12,6 +12,7 @@ import {
 } from "./envelope";
 import { chatKeyRing, requireChatKeyRing } from "./chatKeys";
 import { copyName } from "./playlistCopy";
+import { TAG_ROWS_PER_USER } from "./tags";
 import {
   MAX_COLLABORATORS,
   carryAddedBy,
@@ -1910,6 +1911,88 @@ async function shareBpmWithSets(userId: string, clipKeys: string[]): Promise<voi
         AND (i.bpm IS DISTINCT FROM tm.bpm OR i.bpm_by IS DISTINCT FROM $1)`,
     [userId, clipKeys],
   );
+}
+
+/* ------------------------------------------------------------------ */
+/* Track tags (lib/tags.ts)                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Every tag this user has put on a track, by track. Only ever their own: the
+ * one query that reads tags, and it's keyed on the session's user id. Nothing
+ * that serves a playlist, a share link, chat or an export joins this table.
+ */
+export async function listTrackTags(
+  userId: string,
+): Promise<Array<{ clipKey: string; tags: string[] }>> {
+  const rows = await query<{ clip_key: string; tags: string[] }>(
+    `SELECT clip_key, array_agg(tag ORDER BY tag COLLATE "C") AS tags
+       FROM track_tags
+      WHERE user_id = $1
+      GROUP BY clip_key`,
+    [userId],
+  );
+  return rows.map((row) => ({ clipKey: row.clip_key, tags: row.tags }));
+}
+
+export type SetTrackTagsResult =
+  | { ok: true; tags: string[] }
+  | { ok: false; reason: "limit" };
+
+/**
+ * Make one track's tags exactly `tags` — already in stored form
+ * (lib/tags.normaliseTags) — and say what's stored.
+ *
+ * A replace, not an add: the request says the whole set, so two edits can't
+ * interleave into a set nobody chose (the browser sends one at a time per
+ * track, newest last). Tags already there keep their row and its date.
+ *
+ * The per-account ceiling (TAG_ROWS_PER_USER) is checked before anything is
+ * written, under a lock held for the transaction, so two tabs saving at once
+ * can't both squeeze under it. An advisory lock rather than the users row:
+ * every request updates that row's last_seen_at, and tagging shouldn't hold
+ * up the player's BPM writes.
+ */
+export async function setTrackTags(
+  userId: string,
+  clipKey: string,
+  tags: readonly string[],
+): Promise<SetTrackTagsResult> {
+  return tx(async (client) => {
+    await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('track_tags:' || $1, 0))`, [
+      userId,
+    ]);
+
+    const others = await client.query<{ n: string }>(
+      `SELECT count(*) AS n FROM track_tags WHERE user_id = $1 AND clip_key <> $2`,
+      [userId, clipKey],
+    );
+    if (Number(others.rows[0]?.n ?? 0) + tags.length > TAG_ROWS_PER_USER) {
+      return { ok: false, reason: "limit" } as const;
+    }
+
+    await client.query(
+      `DELETE FROM track_tags
+        WHERE user_id = $1 AND clip_key = $2 AND tag <> ALL ($3::text[])`,
+      [userId, clipKey, tags],
+    );
+    if (tags.length > 0) {
+      await client.query(
+        `INSERT INTO track_tags (user_id, clip_key, tag)
+         SELECT $1, $2, t FROM unnest($3::text[]) AS t
+         ON CONFLICT DO NOTHING`,
+        [userId, clipKey, tags],
+      );
+    }
+
+    const stored = await client.query<{ tag: string }>(
+      `SELECT tag FROM track_tags
+        WHERE user_id = $1 AND clip_key = $2
+        ORDER BY tag COLLATE "C"`,
+      [userId, clipKey],
+    );
+    return { ok: true, tags: stored.rows.map((row) => row.tag) } as const;
+  });
 }
 
 /* ------------------------------------------------------------------ */
