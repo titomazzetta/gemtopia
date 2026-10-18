@@ -34,6 +34,8 @@ export function SetPrepBar({
   open: openProp,
   onOpenChange,
   viewLabel = null,
+  withoutBpm = 0,
+  onMeasure,
 }: {
   report: SequenceReport;
   pitchPercent: number;
@@ -43,6 +45,10 @@ export function SetPrepBar({
   length: SetLength;
   transitionSeconds: number;
   onTransitionChange: (seconds: number) => void;
+  /** Tracks in the set with no BPM yet — said once here, not on every row. */
+  withoutBpm?: number;
+  /** Measure: play through the ones without a BPM and log them. */
+  onMeasure?: () => void;
   /** Phone fold, when the parent wants to fold other things with it. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -94,6 +100,9 @@ export function SetPrepBar({
     { key: "unknown", count: report.unknown, text: "text-neutral-600", bar: "bg-ink-600" },
   ] as const;
   const shown = tiers.filter((tier) => tier.count > 0);
+  // With the tracks counted beside it, "6 no bpm" (transitions) would be the
+  // same news twice; the grey segment in the bar still shows the share.
+  const named = withoutBpm > 0 ? shown.filter((tier) => tier.key !== "unknown") : shown;
   const allComfortable = report.easy === total;
 
   return (
@@ -200,7 +209,7 @@ export function SetPrepBar({
               {STRAIN_META.easy.label.toLowerCase()}
             </span>
           ) : (
-            shown.map((tier, i) => (
+            named.map((tier, i) => (
               <span key={tier.key}>
                 {i > 0 && <span className="text-neutral-600"> · </span>}
                 <span className={`font-semibold ${tier.text}`}>{tier.count}</span>
@@ -215,6 +224,30 @@ export function SetPrepBar({
             <span className="text-neutral-600"> · {report.timeShifted} at ×2 / ÷2</span>
           )}
         </span>
+
+        {/*
+          The one place the missing tempos are counted. The strips between
+          rows stay quiet about it (TrackList.TransitionStrip): a set with
+          none catalogued used to say "No BPM" between every pair.
+        */}
+        {withoutBpm > 0 && (
+          <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-neutral-500">
+            <span>
+              <span className="font-semibold text-neutral-400">{withoutBpm}</span>
+              {" "}of {length.trackCount} without a BPM
+            </span>
+            {onMeasure && (
+              <button
+                type="button"
+                onClick={onMeasure}
+                title="Play through the ones without a BPM and log each tempo"
+                className="rounded-sm border border-ink-700 px-1.5 py-0.5 text-[10px] text-neutral-300 hover:border-ink-600 hover:text-white"
+              >
+                Measure
+              </button>
+            )}
+          </span>
+        )}
 
         {/* Deck pitch range — the number everything above depends on. */}
         <label className="flex shrink-0 items-center gap-1.5 text-[11px] text-neutral-500">

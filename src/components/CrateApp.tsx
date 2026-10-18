@@ -714,6 +714,8 @@ export function CrateApp({
   const fold = useMemo(() => foldWindow(tempoRange, tempoPocket), [tempoRange, tempoPocket]);
 
   const detector = useTempoDetector({ onCommit: onDetectorCommit, fold });
+  // The hook's `start` is stable; the object around it is not.
+  const startDetector = detector.start;
 
   const scaleBpm = useCallback(
     (factor: ScaleFactor) => {
@@ -1082,7 +1084,15 @@ export function CrateApp({
     playableByKeyRef.current = playableByKey;
   }, [playableByKey]);
 
-  /** Start a sweep over what is on screen, or stop the one that is running. */
+  /**
+   * Start a sweep over what is on screen, or stop the one that is running.
+   *
+   * Pressed cold, Measure turns Detect on itself — the same tab-audio picker
+   * Detect shows — and sweeps once the audio is flowing. It used to answer
+   * "Turn on Detect first", a button whose only effect was to send you to
+   * another button. The press is still the user gesture getDisplayMedia
+   * needs, because the picker opens inside the same click.
+   */
   const startSweep = useCallback(() => {
     if (sweepRef.current) {
       stopSweep(sweepRef.current, "Stopped");
@@ -1090,7 +1100,13 @@ export function CrateApp({
     }
 
     if (detector.status !== "listening") {
-      say("Turn on Detect first — the sweep needs to hear the audio.");
+      if (!finePointer) {
+        say("Measure needs desktop Chrome, which can read the tab's audio.");
+        return;
+      }
+      say("Pick this tab and tick “Share tab audio” — Measure starts once it can hear.");
+      sweepAfterDetect.current = true;
+      void startDetector("tab");
       return;
     }
 
@@ -1117,7 +1133,23 @@ export function CrateApp({
     // shuffle mid-sweep.
     setDetour(null);
     advanceSweepTo(plan);
-  }, [advanceSweepTo, detector.status, say, stopSweep, visible]);
+  }, [advanceSweepTo, detector.status, startDetector, finePointer, say, stopSweep, visible]);
+
+  // The press that turned Detect on wanted a sweep: start it once it hears.
+  const sweepAfterDetect = useRef(false);
+  const startSweepRef = useRef(startSweep);
+  useEffect(() => {
+    startSweepRef.current = startSweep;
+  }, [startSweep]);
+  useEffect(() => {
+    if (!sweepAfterDetect.current) return;
+    if (detector.status === "listening") {
+      sweepAfterDetect.current = false;
+      startSweepRef.current();
+    } else if (detector.status === "denied" || detector.status === "error") {
+      sweepAfterDetect.current = false;
+    }
+  }, [detector.status]);
 
   /**
    * Set-prep analysis for the open playlist. Recomputed on every reorder,
@@ -2713,17 +2745,19 @@ export function CrateApp({
                 </button>
 
                 {!activePlaylist && (
-                <span className="shrink-0 font-mono text-[11px] text-neutral-600">
-                  {silence.playable.toLocaleString()}
-                  {silence.noAudio + silence.notLoaded + silence.loading + silence.recordOnly > 0 && (
-                    <span
-                      className="text-neutral-700"
-                      title={`${(silence.noAudio + silence.notLoaded + silence.loading + silence.recordOnly).toLocaleString()} shown without a clip — record only, or still loading`}
-                    >
-                      +{(silence.noAudio + silence.notLoaded + silence.loading + silence.recordOnly).toLocaleString()}
-                    </span>
-                  )}
-                </span>
+                  // The same count as the desktop header, in words: "8+17"
+                  // meant playable plus record-only, and nobody could tell.
+                  <span
+                    className="shrink-0 font-mono text-[11px] text-neutral-600"
+                    title={
+                      silence.recordOnly > 0
+                        ? `${silence.recordOnly.toLocaleString()} record only — no clip, play them from the vinyl`
+                        : undefined
+                    }
+                  >
+                    {(silence.playable + silence.recordOnly).toLocaleString()}
+                    <span className="text-neutral-700"> tracks</span>
+                  </span>
                 )}
 
                 <button
@@ -3002,6 +3036,8 @@ export function CrateApp({
                       playlistView.view
                     ] ?? null
               }
+              withoutBpm={visible.filter((item) => item.bpm === null).length}
+              onMeasure={startSweep}
             />
           )}
 
@@ -3147,6 +3183,7 @@ export function CrateApp({
                 // they only mean something between records played in sequence.
                 reorderable={Boolean(activePlaylist) && inYourOrder}
                 onReorder={reorderPlaylist}
+                markRecordOnly={Boolean(activePlaylist)}
                 transitions={activePlaylist && inYourOrder ? transitions : undefined}
                 sort={activePlaylist ? null : sort}
                 onSort={

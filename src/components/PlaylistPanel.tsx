@@ -230,6 +230,12 @@ export function PlaylistPanel({
                       >
                         <Play className="h-3 w-3" />
                       </button>
+                      {/*
+                        On a touch screen the row keeps Play and ⋯; shuffle,
+                        collaborate and the share link move into ⋯. Five
+                        icons a row, on five rows, was a wall on a phone.
+                      */}
+                      <span className="hidden pointer-fine:contents">
                       <button
                         type="button"
                         onClick={() => onPlay(playlist.id, true)}
@@ -285,6 +291,7 @@ export function PlaylistPanel({
                         <Link className="h-3 w-3" />
                       </button>
                       </>)}
+                      </span>
                       <button
                         type="button"
                         onClick={() => setMoreFor((open) => (open === playlist.id ? null : playlist.id))}
@@ -316,6 +323,53 @@ export function PlaylistPanel({
                       }}
                       className="flex flex-wrap gap-1.5 px-3 pb-2.5"
                     >
+                      {/* The row's hidden buttons, as chips, on a touch screen. */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMoreFor(null);
+                          onPlay(playlist.id, true);
+                        }}
+                        className={`${CHIP} pointer-fine:hidden`}
+                      >
+                        <Shuffle className="h-3 w-3" />
+                        Shuffle
+                      </button>
+                      {onCollaborate && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMoreFor(null);
+                            onCollaborate(playlist.id);
+                          }}
+                          className={`${CHIP} pointer-fine:hidden ${collab ? "text-accent-alt" : ""}`}
+                        >
+                          <Users className="h-3 w-3" />
+                          {collab ? "Collaborators" : "Collaborate"}
+                        </button>
+                      )}
+                      {owner && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const isShared = sharedIds.has(playlist.id);
+                            if (
+                              isShared &&
+                              !window.confirm(
+                                `Revoke the link to "${playlist.name}"? Anyone holding it loses access, permanently — a new link will not be the same one.`,
+                              )
+                            ) {
+                              return;
+                            }
+                            setMoreFor(null);
+                            onShare(playlist.id, !isShared);
+                          }}
+                          className={`${CHIP} pointer-fine:hidden ${sharedIds.has(playlist.id) ? "text-accent" : ""}`}
+                        >
+                          <Link className="h-3 w-3" />
+                          {sharedIds.has(playlist.id) ? "Shared — revoke link" : "Share link"}
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {

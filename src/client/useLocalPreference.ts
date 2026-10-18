@@ -73,3 +73,32 @@ export function useLocalNumber(
 
   return [value, set];
 }
+
+/**
+ * A yes/no remembered in this browser — "has this person seen X here" —
+ * read the same SSR-safe way as the numbers above.
+ */
+export function useLocalFlag(key: string): [boolean, (value: boolean) => void] {
+  const getSnapshot = useCallback(() => {
+    try {
+      return window.localStorage.getItem(key) === "1";
+    } catch {
+      return false;
+    }
+  }, [key]);
+  const getServerSnapshot = useCallback(() => false, []);
+  const value = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const set = useCallback(
+    (next: boolean) => {
+      try {
+        if (next) window.localStorage.setItem(key, "1");
+        else window.localStorage.removeItem(key);
+      } catch {
+        // Not remembered next time; still applies now.
+      }
+      window.dispatchEvent(new Event(CHANGE_EVENT));
+    },
+    [key],
+  );
+  return [value, set];
+}

@@ -67,7 +67,7 @@ export const HELP: ReadonlyArray<Section> = [
           </>
         )}{" "}
         In a playlist, <b>Whole list</b> shows the set at once — {fine ? "drag" : "press and hold"} a
-        record to move it. <b>Set prep</b> checks every transition against your decks&apos; pitch range.
+        record to move it. <b>Set prep</b> checks every transition against your decks&apos; pitch range.{" "}
         <b>Duplicate</b> gives you a private copy of any playlist you&apos;re on, shared ones included,
         to rework without touching the original; a playlist&apos;s <b>⋯</b> also exports it as a file
         that <b>Import</b> brings back.
