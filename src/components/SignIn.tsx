@@ -6,7 +6,7 @@ const FEATURES = [
   ["Playlists on the fly", "Tap + (or A) while something plays. Reorder by drag, view by artist, genre, BPM or year, play in order or shuffled. Private to you — or build one together with collaborators you invite."],
   ["Know it'll beatmatch", "Tap the BPM in as you listen, or let it detect. Every transition in a playlist checked against your decks' pitch range."],
   ["Dig from anything", "Dig from any record (D on a keyboard): the whole EP, everything you own that connects to it, and the versions, remixers and labels you don't own yet."],
-  ["Both lists, both ways", "Shuffle the wantlist like a crate. Search Discogs for a record that just arrived and put it in your collection. Adding is the only thing this app writes."],
+  ["Both lists, both ways", "Shuffle the wantlist like a crate. Search Discogs for a record that just arrived and put it in your collection. Nothing here can take a record back out of it."],
 ];
 
 /** Who to ask for a code. The app is one person's for now, and says so. */

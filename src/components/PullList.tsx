@@ -468,7 +468,12 @@ export function PullList({
                         // Compact: BPM, and the pitch the move *into* this
                         // record needs, coloured by how comfortable it is.
                         <span className="flex shrink-0 items-center gap-2 font-mono text-[11px] tabular-nums">
-                          {check && <PitchChip check={check} />}
+                          {/* No chip when the blend can't be judged: "no BPM"
+                              next to a row's own "124" read as a contradiction
+                              — the chip is about the move *into* the row, the
+                              number is the row's. The dash in the BPM column
+                              already says which record is missing one. */}
+                          {check && check.strain !== "unknown" && <PitchChip check={check} />}
                           <span className="w-8 text-right text-neutral-200">
                             {row.bpm !== null ? formatBpm(row.bpm) : "–"}
                           </span>

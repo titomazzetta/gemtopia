@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Playable } from "@/lib/types";
 import { STRAIN_META, transitionWords, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
@@ -54,6 +54,24 @@ const TONE_CLASS: Record<string, string> = {
  * that tells you whether to swap the record or swap the deck.
  */
 export function TransitionStrip({ check }: { check: MixCheck }) {
+  /*
+   * Nothing to judge yet: one of the two has no BPM. A dashed hairline, not
+   * "No BPM · BPM not catalogued" on every pair — six identical grey lines
+   * on a seven-track set said nothing the row's own dash didn't, and buried
+   * the one strip that could speak. The set-prep bar says how many are
+   * missing, once.
+   */
+  if (check.strain === "unknown") {
+    return (
+      <div
+        className="flex h-[22px] items-center px-3"
+        title="No BPM on one of these yet, so the blend can't be judged — play it through, or tap T"
+      >
+        <span aria-hidden="true" className="w-full border-t border-dashed border-ink-800" />
+        <span className="sr-only">No BPM on one of these yet</span>
+      </div>
+    );
+  }
   // Colour answers "is this comfortable", which is what you scan for; the
   // verdict says how the records meet. A double-time blend that needs ±1% is
   // green, and a straight 1:1 at ±7% each is amber.
@@ -146,6 +164,7 @@ export function TrackList({
   addLabel = "Add to playlist",
   onRemove,
   canRemove,
+  markRecordOnly = true,
   addedBy,
   phoneMeta = false,
   emptyMessage,
@@ -164,6 +183,12 @@ export function TrackList({
   /** "Add to B2B at the Lot", for the + buttons' labels. */
   addLabel?: string;
   onRemove?: (item: Playable, index: number) => void;
+  /**
+   * The "record only" tag beside a track's title. On in a playlist, where
+   * "will it play?" is the question; off in the crate, where a vinyl
+   * collection is mostly record-only and the disc on the artwork says it.
+   */
+  markRecordOnly?: boolean;
   /**
    * Whether this row may be removed. Omitted means all of them. On a shared
    * playlist a collaborator can only take out records they added.
@@ -196,7 +221,17 @@ export function TrackList({
   /** Omitted where sorting makes no sense — a playlist has a real order. */
   onSort?: (key: SortKey) => void;
 }) {
-  const showTransitions = Boolean(transitions && transitions.size > 0);
+  /*
+   * Strips appear once there is something to say. A set with no BPMs at all
+   * is tight rows and a count in the set-prep bar; the first tapped tempo
+   * opens the strips up (hairlines for the pairs still unjudged).
+   */
+  const judged = useMemo(() => {
+    let n = 0;
+    for (const check of transitions?.values() ?? []) if (check.strain !== "unknown") n += 1;
+    return n;
+  }, [transitions]);
+  const showTransitions = judged > 0;
   const ROW_HEIGHT = showTransitions
     ? BASE_ROW_HEIGHT + TRANSITION_HEIGHT
     : BASE_ROW_HEIGHT;
@@ -441,7 +476,7 @@ export function TrackList({
                           {item.position}
                         </span>
                       ) : null}
-                      {recordOnly && (
+                      {recordOnly && markRecordOnly && (
                         // On a phone the disc on the artwork says it; the
                         // title needs the width more than the tag does.
                         <span className="mr-1.5 hidden -translate-y-px rounded-sm border border-neutral-700 px-1 align-middle text-[9px] font-medium uppercase leading-[14px] tracking-wide text-neutral-400 sm:inline-block">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type KeyboardEvent, type RefObject } from "react";
+import { useCallback, useEffect, useState, type KeyboardEvent, type RefObject } from "react";
 import type { ScaleFactor } from "@/client/bpmScaling";
 import type { BpmSource, Playable } from "@/lib/types";
 import type { PlayerApi } from "@/client/useYouTubePlayer";
@@ -26,6 +26,7 @@ import { ShareButton } from "./ShareButton";
 import { WantButton, type WantHeart } from "./WantButton";
 import { writeClipDrag } from "@/client/clipDrag";
 import { useFinePointer } from "@/client/useFinePointer";
+import { useLocalFlag } from "@/client/useLocalPreference";
 
 export function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -141,6 +142,12 @@ function TempoPanel({
 }: TempoPanelProps & { disabled: boolean }) {
   const listening = detectorStatus === "listening";
   const [editingRange, setEditingRange] = useState(false);
+  // Remembered per device: Detect has run here once, so the explainer folds.
+  const [explained, setExplained] = useLocalFlag("gt_detect_explained_v1");
+  const [showHow, setShowHow] = useState(false);
+  useEffect(() => {
+    if (listening && !explained) setExplained(true);
+  }, [listening, explained, setExplained]);
 
   const sourceLabel: Record<BpmSource, string> = {
     tap: "tapped",
@@ -314,7 +321,21 @@ function TempoPanel({
         not find: this used to be a 10px button labelled "auto", so nobody armed
         it and the BPM catalogue stayed empty.
       */}
-      {!listening && (
+      {/*
+        The explainer is for the first time. Once Detect has worked on this
+        device it folds to one line — four lines of onboarding copy had
+        become permanent furniture in the most-looked-at panel — and a tap
+        on "How Detect works" brings it back.
+      */}
+      {!listening && (explained && !showHow ? (
+        <button
+          type="button"
+          onClick={() => setShowHow(true)}
+          className="mt-1.5 text-[10px] text-neutral-600 hover:text-neutral-300"
+        >
+          How Detect works · or use the microphone
+        </button>
+      ) : (
         <div className="mt-1.5 rounded-sm border border-ink-800 bg-ink-900/60 px-2 py-1.5">
           <p className="text-[10px] leading-relaxed text-neutral-500">
             <span className="text-neutral-300">Detect</span> reads the tempo
@@ -330,8 +351,17 @@ function TempoPanel({
             <Mic className="h-3 w-3" />
             Use the microphone instead — works in Safari and Firefox
           </button>
+          {explained && (
+            <button
+              type="button"
+              onClick={() => setShowHow(false)}
+              className="mt-1 text-[10px] text-neutral-600 hover:text-neutral-300"
+            >
+              Got it
+            </button>
+          )}
         </div>
-      )}
+      ))}
 
       {detectorError && (
         <p className="mt-1.5 text-[10px] leading-snug text-amber-300/80">
