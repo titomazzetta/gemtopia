@@ -174,6 +174,93 @@ check("distinct tracks stay distinct", () => {
   );
 });
 
+/* -- mixes of one title ---------------------------------------------------- */
+
+check("Ritmo De Vida — The Spirit Is Justified: seven mixes each find their own clip", () => {
+  // The reported case. Seven mixes of one title, eleven uploads named for
+  // them, and Discogs lists no durations. The bracketed mix name used to be
+  // stripped as noise, so every clip scored the same against every track and
+  // the first track took them all: six mixes sat as record only, no length,
+  // unplayable, with their clips right there on Discogs.
+  const items = buildPlayables([
+    release({
+      id: 12216,
+      title: "The Spirit Is Justified",
+      artist: "Ritmo De Vida",
+      tracks: [
+        track("A", "The Spirit Is Justified (Tranceformation Mix)", null),
+        track("B1", "The Spirit Is Justified (Aquatic Mix)", null),
+        track("B2", "The Spirit Is Justified (Phoenix's Deep Space Mix)", null),
+        track("C1", "The Spirit Is Justified (Outdares Full Throttle Mix)", null),
+        track("C2", "The Spirit Is Justified (Outdares Intro Epilogue)", null),
+        track("D1", "The Spirit Is Justified (Tantra Dub)", null),
+        track("D2", "The Spirit Is Justified (Lee Frederick's Restrained Dub)", null),
+      ],
+      videos: [
+        video("Ritmo De Vida The Spirit Is Justified (Outdares Full Throttle Mix)", 461),
+        video("The Spirit Is Justified (Lee Frederick's Restrained Dub) - Ritmo De Vida", 316),
+        video("Ritmo De Vida - The Spirit Is Justified (Tranceformation Mix)", 447),
+        video("The Spirit Is Justified (Phoenix Deep Space Mix) - Ritmo De Vida", 454),
+        video("The Spirit Is Justified (Transformation Mix) [1996]", 803),
+        video("The Spirit Is Justified (Aquatic Mix) - Ritmo De Vida", 511),
+        video("The Spirit Is Justified (Tantra Dub) - Ritmo De Vida", 313),
+        video("The Spirit Is Justified (Outdares Intro Epilogue) [HQ]", 485),
+      ],
+    }),
+  ]);
+  const byPos = new Map(items.map((i) => [i.position, i]));
+  for (const pos of ["A", "B1", "B2", "C1", "C2", "D1", "D2"]) {
+    const row = byPos.get(pos);
+    assert.ok(row, `no row for ${pos}`);
+    assert.equal(row.silence, null, `${pos} should have its clip, got ${row.silence}`);
+  }
+  assert.equal(byPos.get("D1").duration, 313, "Tantra Dub carries its own clip's runtime");
+  assert.equal(byPos.get("B1").duration, 511, "Aquatic Mix carries its own clip's runtime");
+  assert.equal(byPos.get("C2").duration, 485);
+  assert.equal(items.filter((i) => i.silence === "record-only").length, 0);
+});
+
+check("a bracketed year, quality tag or catalogue number is still ignored", () => {
+  const items = buildPlayables([
+    release({
+      tracks: [track("A1", "Clowns", null), track("A2", "Talking It Out", null)],
+      videos: [
+        video("Glob Deejay - Clowns [NAFF031]", 375),
+        video("Glob Deejay - Talking It Out (Official Video) (2026) [HD]", 368),
+      ],
+    }),
+  ]);
+  assert.deepEqual(
+    items.map((i) => [i.position, i.silence, i.duration]).sort(),
+    [["A1", null, 375], ["A2", null, 368]],
+  );
+});
+
+check("a clip named for the plain title goes to the plain track, not to a mix of it", () => {
+  const items = buildPlayables([
+    release({
+      tracks: [track("A", "Need Ur Love", null), track("B", "Need Ur Love (Stalagmite Mix)", null)],
+      videos: [video("Artist - Need Ur Love (Stalagmite Mix)", 400), video("Artist - Need Ur Love", 300)],
+    }),
+  ]);
+  const byPos = new Map(items.map((i) => [i.position, i]));
+  assert.equal(byPos.get("A").duration, 300);
+  assert.equal(byPos.get("B").duration, 400);
+});
+
+check("the artist is stripped from the end of a clip's title too", () => {
+  const items = buildPlayables([
+    release({
+      artist: "Ritmo De Vida",
+      tracks: [track("A", "Sunrise", null), track("B", "Sunset", null)],
+      videos: [video("Sunset - Ritmo De Vida", 310)],
+    }),
+  ]);
+  const b = items.find((i) => i.position === "B");
+  assert.equal(b.silence, null);
+  assert.equal(b.duration, 310);
+});
+
 check("unmatched clips with the same title collapse", () => {
   const items = buildPlayables([
     release({
