@@ -7,7 +7,7 @@
  * record, and ticks that never outlive the rows they belong to.
  */
 import assert from "node:assert/strict";
-import { prunePulled, pullRows, slotAt, slotToIndex, recordCount, togglePulled } from "../src/client/pullList.ts";
+import { prunePulled, pullRows, slotAt, slotInRows, slotToIndex, recordCount, togglePulled } from "../src/client/pullList.ts";
 
 let ran = 0, failed = 0;
 const check = (name, fn) => {
@@ -75,6 +75,24 @@ check("the slot under the pointer comes from row middles", () => {
   assert.equal(slotAt(30, middles), 1);
   assert.equal(slotAt(49, middles), 2);
   assert.equal(slotAt(999, middles), 3);
+});
+
+check("…and for rows all one height, from the offset into the list", () => {
+  // Three rows of 20px: middles at 10, 30, 50 — the same answers as above.
+  const middles = [10, 30, 50];
+  assert.equal(slotInRows(0, 20, 3), 0);
+  assert.equal(slotInRows(11, 20, 3), 1);
+  assert.equal(slotInRows(29, 20, 3), 1);
+  assert.equal(slotInRows(49, 20, 3), 2);
+  assert.equal(slotInRows(999, 20, 3), 3); // past the end: the last gap, never further
+  assert.equal(slotInRows(-50, 20, 3), 0); // above the top: the first
+  // The row a drop lands in, through slotToIndex, agrees with the measured list.
+  for (let y = 0; y < 70; y += 1) {
+    assert.equal(slotInRows(y, 20, 3), slotAt(y, middles), `offset ${y}`);
+  }
+  assert.equal(slotInRows(30, 0, 3), 0); // no height yet: nothing to point at
+  assert.equal(slotInRows(30, 20, 0), 0); // an empty list has one gap
+  assert.equal(slotInRows(Number.NaN, 20, 3), 0);
 });
 
 console.log(`${ran - failed}/${ran} pull list tests passed`);

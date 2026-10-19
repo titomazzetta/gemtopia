@@ -46,3 +46,36 @@ export function readClipDrag(transfer: Pick<DataTransfer, "getData"> | null): st
   const value = transfer.getData(CLIP_MIME);
   return isClipKey(value) ? value : null;
 }
+
+/**
+ * Moving a row within an open playlist.
+ *
+ * The same drag also carries the row's index under a second type of our own,
+ * so the list it came from can tell a reorder from a record dragged in from
+ * the player, and knows which row to move when the drop lands. The index
+ * travels with the drag rather than living in component state because the
+ * list is windowed: the row that started the drag can be recycled out of the
+ * DOM before the drop, and with it any event that would have cleared that
+ * state. The list checks the index against the row it names before moving
+ * anything.
+ */
+export const ROW_MIME = "application/x-gemtopia-row";
+
+/** Mark a drag as a row move. Returns false (and sets nothing) for a bad index. */
+export function writeRowDrag(transfer: Pick<DataTransfer, "setData">, index: number): boolean {
+  if (!Number.isInteger(index) || index < 0 || index > 999_999) return false;
+  transfer.setData(ROW_MIME, String(index));
+  return true;
+}
+
+/** Whether a drag in progress is a row being moved. */
+export function isRowDrag(transfer: Pick<DataTransfer, "types"> | null): boolean {
+  return Boolean(transfer && Array.from(transfer.types).includes(ROW_MIME));
+}
+
+/** The dragged row's index, or null for anything that is not a whole number. */
+export function readRowDrag(transfer: Pick<DataTransfer, "getData"> | null): number | null {
+  if (!transfer) return null;
+  const value = transfer.getData(ROW_MIME);
+  return /^\d{1,6}$/.test(value) ? Number(value) : null;
+}

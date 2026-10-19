@@ -8,7 +8,17 @@
  * key that could be passed along somewhere.
  */
 import assert from "node:assert/strict";
-import { CLIP_MIME, isClipDrag, isClipKey, readClipDrag, writeClipDrag } from "../src/client/clipDrag.ts";
+import {
+  CLIP_MIME,
+  ROW_MIME,
+  isClipDrag,
+  isClipKey,
+  isRowDrag,
+  readClipDrag,
+  readRowDrag,
+  writeClipDrag,
+  writeRowDrag,
+} from "../src/client/clipDrag.ts";
 
 let ran = 0, failed = 0;
 const check = (name, fn) => {
@@ -63,6 +73,38 @@ check("key shape", () => {
   assert.ok(isClipKey("1:abcdefghijk"));
   assert.ok(!isClipKey("1:abcdefghij"));
   assert.ok(!isClipKey(42));
+});
+
+check("a row moved within a playlist carries its index as well as its clip", () => {
+  const t = fake();
+  assert.equal(writeRowDrag(t, 7), true);
+  assert.equal(writeClipDrag(t, "4567:dQw4w9WgXcQ"), true);
+  assert.equal(isRowDrag(t), true);
+  assert.equal(isClipDrag(t), true, "the same drag still drops onto a playlist in the sidebar");
+  assert.equal(readRowDrag(t), 7);
+  assert.equal(readClipDrag(t), "4567:dQw4w9WgXcQ");
+});
+
+check("a record dragged from the player or the crate is not a row move", () => {
+  const t = fake();
+  writeClipDrag(t, "4567:dQw4w9WgXcQ");
+  assert.equal(isRowDrag(t), false);
+  assert.equal(readRowDrag(t), null);
+  assert.equal(isRowDrag(null), false);
+  assert.equal(readRowDrag(null), null);
+});
+
+check("a row index that is not a whole number never starts or lands a move", () => {
+  for (const index of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 1_000_000]) {
+    const t = fake();
+    assert.equal(writeRowDrag(t, index), false, String(index));
+    assert.equal(t.data.size, 0);
+  }
+  for (const value of ["", "-1", "1.5", "7; DROP TABLE", "0x10", " 7", "1234567"]) {
+    const t = fake();
+    t.setData(ROW_MIME, value);
+    assert.equal(readRowDrag(t), null, JSON.stringify(value));
+  }
 });
 
 console.log(`${ran - failed}/${ran} clip drag tests passed`);
