@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReleaseDetail, ReleaseSummary, Source, SyncState } from "@/lib/types";
 import {
   getAllDetails,
@@ -75,6 +75,13 @@ export interface CrateCache {
   adopt: (detail: ReleaseDetail, addedAtIso: string) => Promise<void>;
   /** The optimistic half: the POST landed, the detail fetch has not. */
   markCollected: (releaseId: number) => void;
+  /**
+   * A clip's runtime, learned from the player. Discogs lists no duration for
+   * some videos and no durations on many tracklists, so a track can have a
+   * clip and still show no length; the first time it plays, YouTube says how
+   * long it is. Kept with the cached release, so it's there next time.
+   */
+  learnDuration: (releaseId: number, videoId: string, seconds: number) => void;
   /** The heart, both directions. */
   markWanted: (releaseId: number, wanted: boolean) => void;
 }
@@ -204,6 +211,26 @@ export function useCrateCache(username: string): CrateCache {
     });
   }, []);
 
+  // The current details, for a write that shouldn't re-create its callback
+  // on every sync batch.
+  const detailsRef = useRef(details);
+  useEffect(() => {
+    detailsRef.current = details;
+  }, [details]);
+
+  const learnDuration = useCallback((releaseId: number, videoId: string, seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    const detail = detailsRef.current.find((d) => d.id === releaseId);
+    const video = detail?.videos.find((v) => v.id === videoId);
+    if (!detail || !video || video.duration !== null) return;
+    const next: ReleaseDetail = {
+      ...detail,
+      videos: detail.videos.map((v) => (v.id === videoId ? { ...v, duration: Math.round(seconds) } : v)),
+    };
+    void putDetails([next]).catch(() => {});
+    setDetails((previous) => mergeDetail(previous, next));
+  }, []);
+
   const adopt = useCallback(
     async (detail: ReleaseDetail, addedAtIso: string) => {
       await Promise.all([
@@ -235,5 +262,6 @@ export function useCrateCache(username: string): CrateCache {
     adopt,
     markCollected,
     markWanted,
+    learnDuration,
   };
 }

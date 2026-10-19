@@ -36,22 +36,48 @@ const NOISE = [
 /** Markers that a clip is a whole side, album, or mix rather than one track. */
 const LONGFORM = /\b(full\s*(album|ep|lp|length)|side\s*[ab]\b|mixtape|dj\s*mix|continuous\s*mix|megamix|complete)\b/i;
 
-function normalize(input: string): string {
+/*
+ * Bracketed text that says nothing about *which* track a clip is: upload
+ * quality, a year, a catalogue number, "free download". Everything else in
+ * brackets is kept, because on a 12" it is usually the only thing that tells
+ * the tracks apart.
+ *
+ * This used to drop every bracket. "The Spirit Is Justified" has seven mixes
+ * of one title — (Tantra Dub), (Aquatic Mix), (Outdares Full Throttle Mix)…
+ * — and eleven uploads named for them. Stripped to "the spirit is justified"
+ * they all scored the same, the first track won every clip, and six mixes
+ * with clips on Discogs sat in the crate as record only, with no length and
+ * no way to play them. Half a house collection looks like that record.
+ */
+const BRACKET_NOISE =
+  /^(?:official(?: (?:music )?video| audio)?|hq|hd|4k|1080p?|720p|audio|video|lyrics?|remaster(?:ed)?|full|free download|out now|preview|snippet|clip|promo|\d{4}|[a-z]{1,6}[ -]?\d{2,6}[a-z]?|[a-z]{1,6}[ -]?\d{2,6}[ -]?\d{1,3})$/;
+
+export function normalize(input: string): string {
   let out = input.toLowerCase();
   for (const pattern of NOISE) out = out.replace(pattern, " ");
-  return out
-    // Drop bracketed qualifiers: [HQ], (Original Mix), {2019}
-    .replace(/[[({][^\])}]*[\])}]/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    out
+      .replace(/[[({]([^\])}]*)[\])}]/g, (_whole, inner: string) => {
+        const words = inner.replace(/[^a-z0-9]+/g, " ").trim();
+        return words === "" || BRACKET_NOISE.test(words) ? " " : ` ${words} `;
+      })
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 /** Cheap token-overlap score in [0, 1]. Good enough, no fuzzy-match dep. */
 function similarity(a: string, b: string): number {
   if (!a || !b) return 0;
   if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.9;
+  // One contains the other. The more of the longer one the shorter explains,
+  // the better: "need ur love stalagmite mix" is a better home for a clip
+  // called "artist need ur love stalagmite mix" than "need ur love" is,
+  // though the clip contains both.
+  if (a.includes(b) || b.includes(a)) {
+    return 0.8 + 0.19 * (Math.min(a.length, b.length) / Math.max(a.length, b.length));
+  }
 
   const tokensA = new Set(a.split(" ").filter((t) => t.length > 2));
   const tokensB = new Set(b.split(" ").filter((t) => t.length > 2));
@@ -79,11 +105,14 @@ function matchTrack(
   if (tracks.length === 0) return { track: null, score: 0, longform };
   if (longform) return { track: null, score: 0, longform };
 
-  // Strip a leading "Artist - " so it does not dominate the token overlap.
+  // Strip the artist from either end — "Artist - Title" and "Title - Artist"
+  // are both common — so it does not dominate the token overlap.
   const normalizedArtist = normalize(artist);
   let candidate = normalize(videoTitle);
-  if (normalizedArtist && candidate.startsWith(normalizedArtist)) {
+  if (normalizedArtist && candidate.startsWith(`${normalizedArtist} `)) {
     candidate = candidate.slice(normalizedArtist.length).trim();
+  } else if (normalizedArtist && candidate.endsWith(` ${normalizedArtist}`)) {
+    candidate = candidate.slice(0, -normalizedArtist.length).trim();
   }
   if (!candidate) return { track: null, score: 0, longform };
 

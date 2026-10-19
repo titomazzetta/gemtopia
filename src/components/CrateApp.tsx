@@ -225,6 +225,7 @@ export function CrateApp({
     adopt,
     markCollected,
     markWanted,
+    learnDuration,
     setSync,
   } = crate;
 
@@ -1243,6 +1244,17 @@ export function CrateApp({
     tapper.current.reset();
     setTapCount(0);
   }, [api, current, detector]);
+
+  /*
+   * A clip Discogs gave no runtime for: the first time it plays, YouTube
+   * reports one, and it's kept with the record (useCrateCache.learnDuration)
+   * so the length column and the set's total have it from then on.
+   */
+  useEffect(() => {
+    if (!current || current.videoId === null || current.duration !== null) return;
+    if (!(api.duration > 0) || lastLoaded.current !== current.key) return;
+    learnDuration(current.releaseId, current.videoId, api.duration);
+  }, [api.duration, current, learnDuration]);
 
   /**
    * The only door into the queue. Silent records are filtered out here rather
