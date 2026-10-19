@@ -67,16 +67,8 @@ export const HELP: ReadonlyArray<Section> = [
           </>
         )}{" "}
         In a playlist,{" "}
-        {fine ? (
-          <>
-            drag a row to move it — the green line is where it lands. <b>Whole list</b> shows the
-            set at once and moves records the same way.
-          </>
-        ) : (
-          <>
-            <b>Whole list</b> shows the set at once — press and hold a record to move it.
-          </>
-        )}{" "}
+        {fine ? "drag" : "press and hold"} a row to move it — the green line is where it lands.{" "}
+        <b>Whole list</b> shows the set at once and moves records the same way.{" "}
         <b>Set prep</b> checks every transition against your decks&apos; pitch range.{" "}
         <b>Duplicate</b> gives you a private copy of any playlist you&apos;re on, shared ones included,
         to rework without touching the original; a playlist&apos;s <b>⋯</b> also exports it as a file

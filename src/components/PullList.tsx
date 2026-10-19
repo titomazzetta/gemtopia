@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useHoldDrag } from "@/client/useHoldDrag";
 import type { Playable } from "@/lib/types";
 import { STRAIN_META, VERDICT_META, formatBpm, type MixCheck } from "@/lib/mixing";
 import { TransitionStrip } from "./TrackList";
@@ -169,113 +170,35 @@ export function PullList({
 
   /*
    * Press and hold anywhere on a record to pick it up — the same drag as the
-   * grip, for people who reach for the record rather than the handle.
-   *
-   * Touch events rather than pointer events, on purpose: once iOS decides a
-   * touch is a scroll it cancels pointer events, and the only way to keep a
-   * finger that is *holding a record* from scrolling the list is a
-   * non-passive touchmove that calls preventDefault. So: a touch that moves
-   * before 350ms is a scroll and is left alone; one that holds still for
-   * 350ms becomes a drag, and from then on its moves are ours.
+   * grip, for people who reach for the record rather than the handle. The
+   * hold, the scroll-or-drag call and the edge scrolling live in
+   * client/useHoldDrag.ts, shared with the main track list.
    */
-  const suppressClick = useRef(false);
-  const handlers = useRef({ slotFor, endDrag, cancelDrag });
-  useEffect(() => {
-    handlers.current = { slotFor, endDrag, cancelDrag };
-  });
-
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list || !onReorder) return;
-    let timer: number | null = null;
-    let start: { x: number; y: number; index: number } | null = null;
-    let active = false;
-
-    const clear = () => {
-      if (timer !== null) window.clearTimeout(timer);
-      timer = null;
-    };
-
-    const onStart = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      const target = event.target as HTMLElement | null;
-      if (!touch || event.touches.length > 1 || !target) return;
-      if (target.closest("[data-grip]")) return; // the grip handles itself
+  useHoldDrag(listRef, {
+    enabled: Boolean(onReorder) && rows.length > 0,
+    rowAt: (target) => {
+      if (target.closest("[data-grip]")) return null; // the grip handles itself
       const row = target.closest<HTMLElement>("[data-index]");
-      if (!row) return;
-      start = { x: touch.clientX, y: touch.clientY, index: Number(row.dataset.index) };
-      clear();
-      timer = window.setTimeout(() => {
-        if (!start) return;
-        active = true;
-        const next = { from: start.index, slot: start.index };
-        dragRef.current = next;
-        setDrag(next);
-        navigator.vibrate?.(12);
-      }, 350);
-    };
-
-    const onMove = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      if (!touch || !start) return;
-      if (!active) {
-        if (Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 10) {
-          clear(); // it's a scroll
-          start = null;
-        }
-        return;
-      }
-      event.preventDefault();
-      const box = list.getBoundingClientRect();
-      if (touch.clientY < box.top + 48) list.scrollTop -= 12;
-      else if (touch.clientY > box.bottom - 48) list.scrollTop += 12;
+      return row ? Number(row.dataset.index) : null;
+    },
+    onPick: (index) => {
+      const next = { from: index, slot: index };
+      dragRef.current = next;
+      setDrag(next);
+    },
+    onMove: (clientY) => {
       const current = dragRef.current;
       if (!current) return;
-      const slot = handlers.current.slotFor(touch.clientY);
+      const slot = slotFor(clientY);
       if (slot !== current.slot) {
         const next = { ...current, slot };
         dragRef.current = next;
         setDrag(next);
       }
-    };
-
-    const onEnd = () => {
-      clear();
-      start = null;
-      if (active) {
-        active = false;
-        // The finger lifting off also "clicks" the row; that click is not a play.
-        suppressClick.current = true;
-        // …and if no click follows (finger lifted off the row), forget it,
-        // so the next real tap still plays.
-        window.setTimeout(() => {
-          suppressClick.current = false;
-        }, 400);
-        handlers.current.endDrag();
-      }
-    };
-
-    const onCancel = () => {
-      clear();
-      start = null;
-      if (active) {
-        active = false;
-        handlers.current.cancelDrag();
-      }
-    };
-
-    list.addEventListener("touchstart", onStart, { passive: true });
-    list.addEventListener("touchmove", onMove, { passive: false });
-    list.addEventListener("touchend", onEnd);
-    list.addEventListener("touchcancel", onCancel);
-    return () => {
-      clear();
-      list.removeEventListener("touchstart", onStart);
-      list.removeEventListener("touchmove", onMove);
-      list.removeEventListener("touchend", onEnd);
-      list.removeEventListener("touchcancel", onCancel);
-    };
-  }, [onReorder]);
+    },
+    onDrop: endDrag,
+    onCancel: cancelDrag,
+  });
 
   const closeRef = useRef<HTMLButtonElement | null>(null);
   /*
@@ -420,13 +343,7 @@ export function PullList({
                     {/* The row plays from here — and the list stays open. */}
                     <button
                       type="button"
-                      onClick={() => {
-                        if (suppressClick.current) {
-                          suppressClick.current = false;
-                          return;
-                        }
-                        onPlay(index);
-                      }}
+                      onClick={() => onPlay(index)}
                       aria-label={`Play from ${row.number}. ${row.title}. Press and hold to move it.`}
                       className={`flex min-w-0 flex-1 items-start gap-3 pl-2 pr-1 text-left ${
                         dense ? "py-1.5" : "py-3"

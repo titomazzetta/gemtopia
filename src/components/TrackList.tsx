@@ -11,6 +11,7 @@ import type { SortKey, SortState } from "@/client/sorting";
 import { isRowDrag, readClipDrag, readRowDrag, writeClipDrag, writeRowDrag } from "@/client/clipDrag";
 import { slotInRows, slotToIndex } from "@/client/pullList";
 import { useFinePointer } from "@/client/useFinePointer";
+import { useHoldDrag } from "@/client/useHoldDrag";
 
 const BASE_ROW_HEIGHT = 56;
 
@@ -345,6 +346,42 @@ export function TrackList({
     return () => window.removeEventListener("mousemove", done);
   }, [drag]);
 
+  /*
+   * On a phone there is no mouse to drag with: press and hold a row to pick it
+   * up, as in the whole-list panel, with the same line showing where it will
+   * land. The rows are not `draggable` there, so iOS's own long-press drag
+   * never competes with the hold.
+   */
+  const touchReorder = reorderable && !finePointer;
+  useHoldDrag(viewportRef, {
+    enabled: touchReorder && hasItems,
+    rowAt: (target) => {
+      const row = target.closest<HTMLElement>("[data-index]");
+      return row ? Number(row.dataset.index) : null;
+    },
+    onPick: (index, clientY) => {
+      const viewport = viewportRef.current;
+      dragIndex.current = index;
+      setDrag({ from: index, slot: viewport ? slotUnder(viewport, clientY) : null });
+    },
+    onMove: (clientY) => {
+      const viewport = viewportRef.current;
+      const from = dragIndex.current;
+      if (!viewport || from === null) return;
+      const slot = slotUnder(viewport, clientY);
+      setDrag((current) => (current && current.slot === slot ? current : { from, slot }));
+    },
+    onDrop: (clientY) => {
+      const viewport = viewportRef.current;
+      const from = dragIndex.current;
+      clearDrag();
+      if (!viewport || from === null || !onReorder) return;
+      const to = slotToIndex(from, slotUnder(viewport, clientY));
+      if (to !== from) onReorder(from, to);
+    },
+    onCancel: clearDrag,
+  });
+
   // The gap the line is drawn on. Either gap beside the row itself is no move
   // at all, so nothing is drawn there — the phone's list does the same.
   const dropSlot =
@@ -509,13 +546,16 @@ export function TrackList({
             return (
               <li
                 key={`${item.key}:${index}`}
+                data-index={index}
+                data-dragging={drag?.from === index ? "" : undefined}
                 style={{ height: ROW_HEIGHT }}
-                // Draggable for two reasons: reordering an open playlist, and
-                // dropping any playable row onto a playlist in the sidebar
-                // (desktop). A silent row has nothing to add, so it stays put.
+                // Draggable, with a mouse, for two reasons: reordering an open
+                // playlist, and dropping any playable row onto a playlist in
+                // the sidebar. A silent row has nothing to add, so it stays
+                // put. Touch reorders by press-and-hold instead (above).
                 draggable={
-                  reorderable ||
-                  (finePointer && (item.videoId !== null || item.silence === "record-only"))
+                  finePointer &&
+                  (reorderable || item.videoId !== null || item.silence === "record-only")
                 }
                 onDragStart={(event) => {
                   // The picture (dimming this row) waits for the first
@@ -528,8 +568,10 @@ export function TrackList({
                 className={`group border-b border-ink-850 ${
                   active ? "bg-accent/10" : "hover:bg-ink-850"
                 } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""} ${
-                  drag?.from === index ? "opacity-40" : ""
-                } ${
+                  // No text selection or iOS callout on a long press — that
+                  // press is picking the record up.
+                  touchReorder ? "select-none [-webkit-touch-callout:none]" : ""
+                } ${drag?.from === index ? "bg-accent/15 opacity-60" : ""} ${
                   silent
                     ? recordOnly
                       ? ""
