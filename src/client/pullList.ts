@@ -96,3 +96,16 @@ export function slotAt(pointerY: number, rowMiddles: readonly number[]): number 
   }
   return slot;
 }
+
+/**
+ * The same, for a list whose rows are all one height (the windowed track
+ * list, where most rows have no element to measure): the slot a pointer is
+ * over, from its offset into the list's full scroll height. Clamped to
+ * 0..count, so a pointer past either end lands the row at that end.
+ */
+export function slotInRows(offsetY: number, rowHeight: number, count: number): number {
+  if (!(rowHeight > 0) || !(count > 0) || !Number.isFinite(offsetY)) return 0;
+  // A pointer exactly on a row's middle is above it, as slotAt has it.
+  const slot = Math.ceil(offsetY / rowHeight - 0.5);
+  return Math.max(0, Math.min(count, slot));
+}

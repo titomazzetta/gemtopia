@@ -8,7 +8,8 @@ import { formatBpm } from "@/lib/mixing";
 import { Disc, NoPreview, Play, Plus, Trash } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import type { SortKey, SortState } from "@/client/sorting";
-import { writeClipDrag } from "@/client/clipDrag";
+import { isRowDrag, readClipDrag, readRowDrag, writeClipDrag, writeRowDrag } from "@/client/clipDrag";
+import { slotInRows, slotToIndex } from "@/client/pullList";
 import { useFinePointer } from "@/client/useFinePointer";
 
 const BASE_ROW_HEIGHT = 56;
@@ -248,8 +249,108 @@ export function TrackList({
   const [width, setWidth] = useState(1000);
   const tight = width < 720;
   const hasItems = items.length > 0;
-  const dragIndex = useRef<number | null>(null);
   const finePointer = useFinePointer();
+
+  /*
+   * Dragging a row to a new place in the set, with a mouse.
+   *
+   * The whole-list panel shows a green line where a held record will land;
+   * this is the same line for the main list. The pointer sits in a gap
+   * between rows — a slot, 0..n, see pullList.slotToIndex — the line is drawn
+   * on that gap, and the drop moves the row there. Dropping *on* a row used
+   * to mean "take its place", which lands above the row going up and below
+   * it coming down, and nothing on screen said which.
+   *
+   * `dragIndex` says a row of this list is being dragged, and which; the same
+   * index travels with the drag (clipDrag.writeRowDrag) because the list is
+   * windowed, and a row scrolled out of the window mid-drag is recycled — with
+   * its dragend, so the ref alone could be stale by the drop. `drag` is the
+   * picture: the row to dim and the slot to mark (null while the pointer is
+   * off the list).
+   */
+  const dragIndex = useRef<number | null>(null);
+  const [drag, setDrag] = useState<{ from: number; slot: number | null } | null>(null);
+  const clearDrag = useCallback(() => {
+    dragIndex.current = null;
+    setDrag(null);
+  }, []);
+
+  const slotUnder = (viewport: HTMLDivElement, clientY: number) =>
+    slotInRows(
+      clientY - viewport.getBoundingClientRect().top + viewport.scrollTop,
+      ROW_HEIGHT,
+      items.length,
+    );
+
+  const onViewportDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (!reorderable || dragIndex.current === null || !isRowDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const viewport = event.currentTarget;
+    // Near the top or bottom edge, scroll the list so a record can travel
+    // further than one screen. Chrome does this on its own; Safari does not.
+    const box = viewport.getBoundingClientRect();
+    if (event.clientY < box.top + 48) viewport.scrollTop -= 12;
+    else if (event.clientY > box.bottom - 48) viewport.scrollTop += 12;
+    const from = dragIndex.current;
+    const slot = slotUnder(viewport, event.clientY);
+    setDrag((current) =>
+      current && current.from === from && current.slot === slot ? current : { from, slot },
+    );
+  };
+
+  const onViewportDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    // Leaving for a child element is not leaving the list. Safari gives no
+    // relatedTarget on drag events, so the pointer's position decides there.
+    const viewport = event.currentTarget;
+    if (viewport.contains(event.relatedTarget as Node | null)) return;
+    if (event.relatedTarget === null) {
+      const box = viewport.getBoundingClientRect();
+      const inside =
+        event.clientX >= box.left && event.clientX < box.right &&
+        event.clientY >= box.top && event.clientY < box.bottom;
+      if (inside) return;
+    }
+    setDrag((current) => (current && current.slot !== null ? { ...current, slot: null } : current));
+  };
+
+  const onViewportDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    const started = dragIndex.current;
+    clearDrag();
+    if (!reorderable || started === null || !onReorder) return;
+    let from = readRowDrag(event.dataTransfer);
+    if (from === null) return;
+    event.preventDefault();
+    const key = readClipDrag(event.dataTransfer);
+    if (key !== null && items[from]?.key !== key) {
+      // The set changed under the drag — a collaborator's edit landing
+      // mid-move — so find the row by what it is, not where it was.
+      from = items.findIndex((item) => item.key === key);
+    }
+    if (from < 0 || from >= items.length) return;
+    const to = slotToIndex(from, slotUnder(event.currentTarget, event.clientY));
+    if (to !== from) onReorder(from, to);
+  };
+
+  /*
+   * No mouse events fire while a drag is in progress, so the first one after
+   * is the drag being over — including the drag whose dragend never arrived
+   * because its row had been recycled out of the window. The ref stays: it
+   * is the drop's guard, and the next dragstart resets it either way.
+   */
+  useEffect(() => {
+    if (drag === null) return;
+    const done = () => setDrag(null);
+    window.addEventListener("mousemove", done, { once: true });
+    return () => window.removeEventListener("mousemove", done);
+  }, [drag]);
+
+  // The gap the line is drawn on. Either gap beside the row itself is no move
+  // at all, so nothing is drawn there — the phone's list does the same.
+  const dropSlot =
+    drag !== null && drag.slot !== null && drag.slot !== drag.from && drag.slot !== drag.from + 1
+      ? drag.slot
+      : null;
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -346,8 +447,34 @@ export function TrackList({
         </div>
       )}
 
-      <div ref={viewportRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={viewportRef}
+        onScroll={onScroll}
+        // The drop target is the whole list, not the row under the pointer,
+        // so a record can be dropped below the last row or over the gap
+        // between two, and the slot comes from where the pointer is. Enter
+        // is handled like over: a target has to accept both, and a fast
+        // pointer crossing a row fires only the first.
+        onDragEnter={onViewportDragOver}
+        onDragOver={onViewportDragOver}
+        onDragLeave={onViewportDragLeave}
+        onDrop={onViewportDrop}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
       <div style={{ height: items.length * ROW_HEIGHT, position: "relative" }}>
+        {dropSlot !== null && (
+          // Where the dragged row will land: a line on the gap between rows,
+          // in the list's full height so it is right whichever rows are
+          // rendered. Kept a pixel inside either end so it is never clipped.
+          <span
+            aria-hidden="true"
+            data-drop-line={dropSlot}
+            className="pointer-events-none absolute inset-x-0 z-10 h-0.5 bg-accent"
+            style={{
+              top: Math.min(Math.max(0, dropSlot * ROW_HEIGHT - 1), items.length * ROW_HEIGHT - 2),
+            }}
+          />
+        )}
         <ul
           style={{ transform: `translateY(${start * ROW_HEIGHT}px)` }}
           className="absolute inset-x-0 top-0"
@@ -391,19 +518,18 @@ export function TrackList({
                   (finePointer && (item.videoId !== null || item.silence === "record-only"))
                 }
                 onDragStart={(event) => {
-                  if (reorderable) dragIndex.current = index;
+                  // The picture (dimming this row) waits for the first
+                  // dragenter: a row restyled during dragstart is what the
+                  // browser snapshots for the drag image.
+                  if (reorderable && writeRowDrag(event.dataTransfer, index)) dragIndex.current = index;
                   writeClipDrag(event.dataTransfer, item.key);
                 }}
-                onDragEnd={() => (dragIndex.current = null)}
-                onDragOver={(e) => reorderable && e.preventDefault()}
-                onDrop={() => {
-                  if (!reorderable || dragIndex.current === null) return;
-                  onReorder?.(dragIndex.current, index);
-                  dragIndex.current = null;
-                }}
+                onDragEnd={clearDrag}
                 className={`group border-b border-ink-850 ${
                   active ? "bg-accent/10" : "hover:bg-ink-850"
                 } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""} ${
+                  drag?.from === index ? "opacity-40" : ""
+                } ${
                   silent
                     ? recordOnly
                       ? ""
