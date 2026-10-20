@@ -140,8 +140,8 @@ import { DiscogsSearch } from "./DiscogsSearch";
 import { RecordOnlyCard } from "./RecordOnlyCard";
 import { TagEditor } from "./TagEditor";
 import { useTrackTags } from "@/client/useTrackTags";
-import { withTags } from "@/lib/tags";
-import { isTrackOnlyKey } from "@/lib/clipKey";
+import { suggestTags, TAGS_PER_TRACK, withTags } from "@/lib/tags";
+import { isClipKey, isTrackOnlyKey } from "@/lib/clipKey";
 import type { SearchHit } from "@/lib/discogs";
 import {
   ChatIcon,
@@ -151,10 +151,28 @@ import {
   Metronome,
   Refresh,
   Search,
+  SelectIcon,
   Shuffle,
   UnreadBadge,
   Users,
 } from "./Icons";
+import { SelectionBar } from "./SelectionBar";
+import {
+  addedMessage,
+  inOrder,
+  moveBlock,
+  NO_SELECTION,
+  planAdd,
+  planRemove,
+  presentOnly,
+  removedMessage,
+  selectAll,
+  selectRange,
+  taggedMessage,
+  toggleKey,
+  type Selection,
+} from "@/client/selection";
+import { PLAYLIST_MAX_TRACKS } from "@/lib/limits";
 
 type Rail = "filters" | "playlists" | "insights";
 
@@ -309,7 +327,8 @@ export function CrateApp({
     label: string;
   } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [picker, setPicker] = useState<Playable | null>(null);
+  /** The add-to-playlist picker, open for one track or a whole selection. */
+  const [picker, setPicker] = useState<readonly Playable[] | null>(null);
 
   /*
    * Which bottom sheet is open on a phone. One at a time, by construction —
@@ -1082,6 +1101,111 @@ export function CrateApp({
    */
   const silence = useMemo(() => countSilence(visible), [visible]);
 
+  /* ================= picking several ================= */
+
+  /*
+   * Ticked tracks (client/selection.ts), for what's on screen — the crate of
+   * one source, or one playlist. Switching to another starts clean, and
+   * coming back doesn't bring old ticks back with it: the state is reset
+   * during the render that sees the switch (React's pattern for state that
+   * follows a value), not in an effect a frame later.
+   */
+  const selectionContext = activePlaylist ? `playlist:${activePlaylist.id}` : `crate:${source}`;
+  const [selectionState, setSelectionState] = useState<{
+    context: string;
+    keys: Selection;
+    /** Select mode: a tap ticks instead of playing (the phone's way in). */
+    selecting: boolean;
+    /** The last row ticked, where a Shift-click run starts. */
+    anchor: string | null;
+  }>({ context: "", keys: NO_SELECTION, selecting: false, anchor: null });
+  const [selectionSeenIn, setSelectionSeenIn] = useState(selectionContext);
+  if (selectionSeenIn !== selectionContext) {
+    setSelectionSeenIn(selectionContext);
+    setSelectionState({ context: "", keys: NO_SELECTION, selecting: false, anchor: null });
+  }
+  const selectionHere = selectionState.context === selectionContext;
+  const selecting = selectionHere && selectionState.selecting;
+  /** What there is to pick from: the open playlist's tracks, or this source's crate. */
+  const selectionPool = activePlaylist ? playlistItems : pool;
+  /** Ticks for tracks still here; one a collaborator took out drops away by itself. */
+  const selectedKeys = useMemo(
+    () =>
+      selectionHere
+        ? presentOnly(selectionState.keys, selectionPool.map((item) => item.key))
+        : NO_SELECTION,
+    [selectionHere, selectionState.keys, selectionPool],
+  );
+  /** The ticked tracks, in the order on screen, then any a filter is hiding. */
+  const selectedItems = useMemo(
+    () => inOrder(selectedKeys, visible, selectionPool),
+    [selectedKeys, visible, selectionPool],
+  );
+  const visibleKeys = useMemo(() => visible.map((item) => item.key), [visible]);
+  const shownTicked = useMemo(
+    () => visibleKeys.reduce((n, key) => (selectedKeys.has(key) ? n + 1 : n), 0),
+    [visibleKeys, selectedKeys],
+  );
+
+  const updateSelection = useCallback(
+    (
+      change: (state: { keys: Selection; anchor: string | null }) => Partial<{
+        keys: Selection;
+        selecting: boolean;
+        anchor: string | null;
+      }>,
+    ) => {
+      setSelectionState((previous) => {
+        const base =
+          previous.context === selectionContext
+            ? previous
+            : { context: selectionContext, keys: NO_SELECTION, selecting: false, anchor: null };
+        return { ...base, ...change(base) };
+      });
+    },
+    [selectionContext],
+  );
+
+  const selectRow = useCallback(
+    (index: number, how: "toggle" | "range") => {
+      const key = visibleKeys[index];
+      if (key === undefined) return;
+      updateSelection((state) => ({
+        keys:
+          how === "range"
+            ? selectRange(state.keys, visibleKeys, state.anchor, key)
+            : toggleKey(state.keys, key),
+        anchor: key,
+      }));
+    },
+    [visibleKeys, updateSelection],
+  );
+
+  /** The header's box and the bar's "All": tick everything shown, or untick it. */
+  const tickAllShown = useCallback(
+    (all: boolean) => {
+      updateSelection((state) => {
+        if (all) return { keys: selectAll(state.keys, visibleKeys) };
+        const next = new Set(state.keys);
+        for (const key of visibleKeys) next.delete(key);
+        return { keys: next };
+      });
+    },
+    [visibleKeys, updateSelection],
+  );
+
+  const clearSelection = useCallback(() => {
+    setSelectionState({ context: "", keys: NO_SELECTION, selecting: false, anchor: null });
+  }, []);
+
+  /** The Select buttons: into select mode, or out of it (which unticks everything). */
+  const toggleSelecting = useCallback(() => {
+    if (selecting) clearSelection();
+    else updateSelection(() => ({ selecting: true }));
+  }, [selecting, clearSelection, updateSelection]);
+
+  const selectionActive = selecting || selectedKeys.size > 0;
+
   /*
    * Key -> playable for whatever is on screen, so the sweep can find the next
    * track by key without scanning the list each time. Built from `visible`
@@ -1572,24 +1696,66 @@ export function CrateApp({
   }, [collabOpen]);
 
   const createPlaylist = useCallback(
-    async (name: string, seed?: Playable) => {
-      if (seed && toEntry(seed) === null) {
-        say(`${seed.title} hasn't loaded from Discogs yet, so it can't go in a playlist.`);
+    async (name: string, seeds: readonly Playable[] = []) => {
+      const plan = planAdd([], seeds, toEntry, PLAYLIST_MAX_TRACKS);
+      if (seeds.length > 0 && plan.entries.length === 0) {
+        say(
+          seeds.length === 1
+            ? `${seeds[0]?.title} hasn't loaded from Discogs yet, so it can't go in a playlist.`
+            : "Those haven't synced from Discogs yet, so they can't go in a playlist.",
+        );
         return;
       }
       try {
-        const seedEntry = seed ? toEntry(seed) : null;
-        const playlist = await playlistsApi.create(
-          name,
-          seedEntry ? [seedEntry] : [],
-        );
+        const playlist = await playlistsApi.create(name, plan.entries);
         setPlaylists((previous) => [playlist, ...previous]);
-        say(seed ? `Started "${name}" with ${seed.title}` : `Created "${name}"`);
+        if (seeds.length === 0) say(`Created "${name}"`);
+        else if (seeds.length === 1) say(`Started "${name}" with ${seeds[0]?.title}`);
+        else {
+          const skipped = plan.already + plan.notReady + plan.overflow;
+          say(
+            `Started "${name}" with ${plan.entries.length} tracks` +
+              (skipped > 0 ? ` · ${skipped} couldn't go in` : ""),
+          );
+        }
       } catch (error) {
         say(error instanceof ApiError ? error.message : "Could not create that.");
       }
     },
     [say],
+  );
+
+  /*
+   * Several tracks into one playlist, in one save: the ones it already holds
+   * are skipped, so are the ones that can't be entries yet, and it stops at
+   * the playlist's size limit. One request, so a shared set's chat gets one
+   * line for the lot (chat.activityNotes) and a collaborator's edit landing
+   * at the same moment is refused (409) rather than overwritten.
+   */
+  const addManyToPlaylist = useCallback(
+    async (playlistId: string, items: readonly Playable[]) => {
+      const playlist = playlists.find((p) => p.id === playlistId);
+      if (!playlist) return;
+      const plan = planAdd(playlist.items, items, toEntry, PLAYLIST_MAX_TRACKS);
+      if (plan.entries.length === 0) {
+        say(addedMessage(playlist.name, plan, PLAYLIST_MAX_TRACKS));
+        return;
+      }
+      try {
+        const updated = await playlistsApi.update(playlistId, {
+          entries: [...playlist.entries.map(reEntry), ...plan.entries],
+          version: playlist.version,
+        });
+        setPlaylists((previous) => previous.map((p) => (p.id === updated.id ? updated : p)));
+        say(addedMessage(playlist.name, plan, PLAYLIST_MAX_TRACKS));
+      } catch (error) {
+        say(error instanceof ApiError ? error.message : "Could not add those.");
+        if (error instanceof ApiError && (error.status === 409 || error.status === 404)) {
+          playlistsApi.list().then(setPlaylists).catch(() => {});
+        }
+      }
+    },
+    [playlists, say],
   );
 
   const addToPlaylist = useCallback(
@@ -1639,7 +1805,7 @@ export function CrateApp({
        * last is at the top, so the common case is tap-tap and gone.
        */
       setJustAdded(new Set());
-      setPicker(item);
+      setPicker([item]);
     },
     [],
   );
@@ -1683,7 +1849,7 @@ export function CrateApp({
   }, [quickAdd]);
 
   const mutateEntries = useCallback(
-    async (playlist: Playlist, entries: NewEntry[]) => {
+    async (playlist: Playlist, entries: NewEntry[]): Promise<boolean> => {
       try {
         const updated = await playlistsApi.update(playlist.id, {
           entries,
@@ -1692,9 +1858,11 @@ export function CrateApp({
         setPlaylists((previous) =>
           previous.map((p) => (p.id === updated.id ? updated : p)),
         );
+        return true;
       } catch (error) {
         say(error instanceof ApiError ? error.message : "Could not save that.");
         void refreshPlaylists();
+        return false;
       }
     },
     [say, refreshPlaylists],
@@ -1724,6 +1892,104 @@ export function CrateApp({
       );
     },
     [activePlaylist, mutateEntries],
+  );
+
+  /** A record this device already holds, by key: the crate, the open set, or the queue. */
+  const findPlayable = useCallback(
+    (key: string): Playable | undefined =>
+      byKey.get(key) ??
+      playlistItems.find((p) => p.key === key) ??
+      queue.find((p) => p.key === key),
+    [byKey, playlistItems, queue],
+  );
+
+  /* ================= acting on a selection ================= */
+
+  /*
+   * Where the selection bar's one tap adds: the same set as every + button,
+   * unless that's the very playlist the ticks are in — then it asks.
+   */
+  const bulkTarget = quickTarget && quickTarget.id !== activePlaylist?.id ? quickTarget : null;
+
+  const addSelection = useCallback(
+    (choose: boolean) => {
+      if (selectedItems.length === 0) return;
+      if (choose || !bulkTarget) {
+        setJustAdded(new Set());
+        setPicker(selectedItems);
+        return;
+      }
+      setRecentPlaylists((r) => promote(r, bulkTarget.id));
+      // The ticks stay: the same tracks often go in a second set too, or get a tag.
+      void addManyToPlaylist(bulkTarget.id, selectedItems);
+    },
+    [selectedItems, bulkTarget, addManyToPlaylist],
+  );
+
+  /** In a playlist: how many ticked rows are yours to take out, and the plan to. */
+  const removal = useMemo(() => {
+    if (!activePlaylist || selectedKeys.size === 0) return null;
+    return planRemove(activePlaylist.entries, selectedKeys, (entry) =>
+      canRemoveEntry(activePlaylist.role, entry.addedBy, username),
+    );
+  }, [activePlaylist, selectedKeys, username]);
+
+  const removeSelection = useCallback(() => {
+    if (!activePlaylist || !removal) return;
+    if (removal.removed === 0) {
+      say(removedMessage(activePlaylist.name, removal));
+      return;
+    }
+    if (
+      removal.removed > 1 &&
+      !window.confirm(`Take ${removal.removed} tracks out of “${activePlaylist.name}”?`)
+    ) {
+      return;
+    }
+    const name = activePlaylist.name;
+    const from = selectionContext;
+    setLastOrder(null);
+    void mutateEntries(activePlaylist, removal.keep.map(reEntry)).then((saved) => {
+      if (!saved) return;
+      say(removedMessage(name, removal));
+      // Only the ticks this was about: if you've moved on and started
+      // ticking elsewhere while it saved, those stay.
+      setSelectionState((state) =>
+        state.context === from ? { context: "", keys: NO_SELECTION, selecting: false, anchor: null } : state,
+      );
+    });
+  }, [activePlaylist, removal, mutateEntries, say, selectionContext]);
+
+  /** Ticked rows dragged together: they land as a block, in their order. */
+  const moveSelectionTo = useCallback(
+    (indices: number[], slot: number) => {
+      if (!activePlaylist || !inYourOrder) return;
+      setLastOrder(null);
+      void mutateEntries(activePlaylist, moveBlock(activePlaylist.entries.map(reEntry), indices, slot));
+    },
+    [activePlaylist, inYourOrder, mutateEntries],
+  );
+
+  const tagSelection = useCallback(
+    (tag: string) => {
+      // A row still loading from Discogs has no track key yet to hang a tag on.
+      const keys = selectedItems.map((item) => item.key);
+      const taggable = keys.filter(isClipKey);
+      const result = trackTags.addToMany(taggable, tag);
+      if (!result) {
+        say("Your tags are still loading — try again in a moment.");
+        return;
+      }
+      say(taggedMessage(result, keys.length - taggable.length, TAGS_PER_TRACK));
+    },
+    [selectedItems, trackTags, say],
+  );
+
+  /** Every key a drag of this row carries: its whole selection, when it's ticked. */
+  const dragKeys = useCallback(
+    (key: string): readonly string[] =>
+      selectedKeys.has(key) && selectedKeys.size > 1 ? selectedItems.map((item) => item.key) : [key],
+    [selectedKeys, selectedItems],
   );
 
   /** Hand the browser a file to save. Revoked a moment later: Safari needs the beat. */
@@ -2252,12 +2518,22 @@ export function CrateApp({
    * changes its dependencies), and the new listener it adds still gets this
    * press — with a fresh variable that never saw it.
    */
-  const openAtKey = useRef({ card: false, dialog: false });
+  /** What Esc can close, read by the window handler (registered once). */
+  const escapeRef = useRef({ searchOpen: false, selection: false, clear: () => {} });
+  useEffect(() => {
+    escapeRef.current = { searchOpen, selection: selectionActive, clear: clearSelection };
+  });
+
+  const openAtKey = useRef({ card: false, dialog: false, menu: false });
   useEffect(() => {
     const capture = () => {
       openAtKey.current = {
         card: recordCardOpen.current,
         dialog: document.querySelector('[aria-modal="true"]') !== null,
+        // The account menu, or a playlist's ⋯: Esc folds those, and only those.
+        menu:
+          accountMenuRef.current?.open === true ||
+          document.querySelector('[role="group"][id^="more-"]') !== null,
       };
     };
     window.addEventListener("keydown", capture, true);
@@ -2356,10 +2632,12 @@ export function CrateApp({
           setShowKeys(false);
           // Esc also steps out of Dig — but only when nothing is open on top
           // of it, so closing the chat or a sheet doesn't close Dig as well.
-          // Then out of search: each press closes the one on top.
-          if (!openAtKey.current.dialog) {
+          // Then out of search, then the selection: each press closes the
+          // one on top.
+          if (!openAtKey.current.dialog && !openAtKey.current.menu) {
             if (digOpenRef.current) setDigTarget(null);
-            else setSearchOpen(false);
+            else if (escapeRef.current.searchOpen) setSearchOpen(false);
+            else if (escapeRef.current.selection) escapeRef.current.clear();
           }
           break;
         default:
@@ -2385,6 +2663,7 @@ export function CrateApp({
         if (target && target.role === "editor") {
           // Not yours to delete — "delete" from a collaborator means leave.
           await playlistsApi.removeCollaborator(id, username);
+          say(`You left “${target.name}” — what you added stays in it`);
         } else {
           await playlistsApi.remove(id);
         }
@@ -2724,9 +3003,18 @@ export function CrateApp({
                   // The key only ever looks up a record already on this
                   // device; an unknown one is ignored, never sent anywhere.
                   // What's playing can come from outside the crate (a friend's
-                  // record on a shared set), so the queue is checked too.
-                  const item = byKey.get(key) ?? queue.find((p) => p.key === key);
+                  // record on a shared set), so the open playlist and the
+                  // queue are checked too.
+                  const item = findPlayable(key);
                   if (item) void addToPlaylist(playlistId, item);
+                }}
+                onDropClips={(playlistId, keys) => {
+                  // A ticked selection, dragged by any of its rows. The same
+                  // lookup, key by key; unknown keys are dropped.
+                  const items = keys
+                    .map(findPlayable)
+                    .filter((item): item is Playable => item !== undefined);
+                  if (items.length > 0) void addManyToPlaylist(playlistId, items);
                 }}
               />
             )}
@@ -2807,6 +3095,25 @@ export function CrateApp({
                     </span>
                   )}
                 </button>
+
+                {/*
+                  Pick several. An icon that lights up while picking, so the
+                  source's name keeps its room; the bar's × also finishes. In
+                  a playlist this sits on the set-prep line instead.
+                */}
+                {!activePlaylist && visible.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={toggleSelecting}
+                    aria-pressed={selecting}
+                    aria-label={selecting ? "Done picking" : "Pick several tracks"}
+                    className={`flex shrink-0 items-center rounded-md border px-2 py-1.5 text-xs ${
+                      selecting ? "border-accent/50 bg-accent/10 text-accent" : "border-ink-700 text-neutral-400"
+                    }`}
+                  >
+                    <SelectIcon className="h-3.5 w-3.5" />
+                  </button>
+                )}
 
                 {/*
                   With a playlist open, its two most-used actions live on this
@@ -2968,6 +3275,26 @@ export function CrateApp({
                 </>
               )}
             </span>
+            {visible.length > 0 && (
+              <button
+                type="button"
+                onClick={toggleSelecting}
+                aria-pressed={selecting}
+                title={
+                  selecting
+                    ? "Done picking"
+                    : "Pick several tracks — or Cmd/Ctrl-click and Shift-click rows — to add, tag, move or remove them together"
+                }
+                className={`flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] ${
+                  selecting
+                    ? "border-accent/60 bg-accent/10 text-accent"
+                    : "border-ink-700 text-neutral-400 hover:border-accent/50 hover:text-accent"
+                }`}
+              >
+                <SelectIcon className="h-3 w-3" />
+                {selecting ? "Done" : "Select"}
+              </button>
+            )}
             {activePlaylist && isCollabPlaylist(activePlaylist) && (
               <span className="min-w-0 truncate text-[11px] text-accent-alt/90">
                 {collabLine(activePlaylist, username)}
@@ -3068,6 +3395,20 @@ export function CrateApp({
               }
               withoutBpm={visible.filter((item) => item.bpm === null).length}
               onMeasure={startSweep}
+              trailing={
+                <button
+                  type="button"
+                  onClick={toggleSelecting}
+                  aria-pressed={selecting}
+                  aria-label={selecting ? "Done picking" : "Pick several tracks"}
+                  className={`flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] ${
+                    selecting ? "border-accent/50 bg-accent/10 text-accent" : "border-ink-700 text-neutral-400"
+                  }`}
+                >
+                  <SelectIcon className="h-3.5 w-3.5" />
+                  {selecting ? "Done" : "Select"}
+                </button>
+              }
             />
           )}
 
@@ -3213,6 +3554,27 @@ export function CrateApp({
                 // they only mean something between records played in sequence.
                 reorderable={Boolean(activePlaylist) && inYourOrder}
                 onReorder={reorderPlaylist}
+                selected={selectedKeys}
+                selecting={selecting}
+                onSelect={selectRow}
+                onSelectAll={activePlaylist ? undefined : tickAllShown}
+                dragKeys={dragKeys}
+                onMoveBlock={activePlaylist && inYourOrder ? moveSelectionTo : undefined}
+                onRemoveRefused={
+                  activePlaylist
+                    ? (_item, index) => {
+                        const entry = entryIndexAt(viewOrder, index);
+                        if (entry === null) return;
+                        const owner = activePlaylist.owner;
+                        const by = activePlaylist.entries[entry]?.addedBy ?? owner;
+                        say(
+                          by.toLowerCase() === owner.toLowerCase()
+                            ? `${owner} added this one, and owns the set — only they can take it out`
+                            : `${by} added this one — only they or ${owner}, who owns the set, can take it out`,
+                        );
+                      }
+                    : undefined
+                }
                 markRecordOnly={Boolean(activePlaylist)}
                 transitions={activePlaylist && inYourOrder ? transitions : undefined}
                 sort={activePlaylist ? null : sort}
@@ -3254,6 +3616,29 @@ export function CrateApp({
               />
             )}
           </div>
+
+          {selectionActive && !digTarget && !(searchOpen && isDesktop) && !loading && (
+            <SelectionBar
+              count={selectedKeys.size}
+              hidden={selectedKeys.size - shownTicked}
+              shownTotal={visible.length}
+              allShownTicked={shownTicked === visible.length}
+              target={bulkTarget}
+              onAdd={() => addSelection(false)}
+              onAddOther={() => addSelection(true)}
+              suggestions={suggestTags(trackTags.ranked, NO_TAGS, "", 6).map(([tag]) => tag)}
+              tagsReady={trackTags.ready}
+              onTag={tagSelection}
+              removal={
+                activePlaylist && removal
+                  ? { allowed: removal.removed, refused: removal.refused }
+                  : undefined
+              }
+              onRemove={activePlaylist ? removeSelection : undefined}
+              onSelectAll={() => tickAllShown(true)}
+              onClear={clearSelection}
+            />
+          )}
         </main>
 
         <NowPlaying
@@ -3819,7 +4204,9 @@ export function CrateApp({
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold text-neutral-100">Add to playlist</h3>
                 <p className="mt-0.5 truncate text-xs text-neutral-500">
-                  {picker.artist} — {picker.title}
+                  {picker.length === 1
+                    ? `${picker[0]?.artist} — ${picker[0]?.title}`
+                    : `${picker.length.toLocaleString()} ticked tracks`}
                 </p>
               </div>
               {/*
@@ -3848,12 +4235,16 @@ export function CrateApp({
               {orderByRecent(playlists, recentPlaylists).map((playlist, index) => {
                 const added = justAdded.has(playlist.id);
                 const isDefault = index === 0 && recentPlaylists.length > 0;
+                // Ticked in this very playlist: it holds them all already.
+                const isSource = picker.length > 1 && playlist.id === activePlaylist?.id;
                 return (
                   <li key={playlist.id}>
                     <button
                       type="button"
+                      disabled={isSource}
                       onClick={() => {
-                        void addToPlaylist(playlist.id, picker);
+                        if (picker.length === 1 && picker[0]) void addToPlaylist(playlist.id, picker[0]);
+                        else void addManyToPlaylist(playlist.id, picker);
                         setRecentPlaylists((r) => promote(r, playlist.id));
                         setJustAdded((a) => new Set(a).add(playlist.id));
                       }}
@@ -3870,7 +4261,7 @@ export function CrateApp({
                         arbitrary and dressing row one as a prediction would be
                         inventing confidence we do not have.
                       */
-                      className={`flex w-full items-center gap-2 rounded-md border px-2 text-left text-xs hover:bg-ink-800 ${
+                      className={`flex w-full items-center gap-2 rounded-md border px-2 text-left text-xs hover:bg-ink-800 disabled:pointer-events-none disabled:opacity-40 ${
                         isDefault ? "border-accent/40 bg-accent/5 py-2.5" : "border-transparent py-2"
                       } ${added ? "text-accent" : isDefault ? "text-accent" : "text-neutral-300"}`}
                     >
@@ -3878,6 +4269,7 @@ export function CrateApp({
                         {added ? "✓" : "+"}
                       </span>
                       <span className="min-w-0 flex-1 truncate">{playlist.name}</span>
+                      {isSource && <span className="shrink-0 text-[10px] text-neutral-500">they&apos;re from here</span>}
                       {/*
                         Only the first row is marked, and only when something
                         actually put it there. A badge on every row would be
@@ -3908,6 +4300,8 @@ export function CrateApp({
                 if (!name) return;
                 void createPlaylist(name, picker);
                 setPicker(null);
+                // A selection that went into a new set has done its job.
+                if (picker.length > 1) clearSelection();
               }}
               className="flex gap-1.5 border-t border-ink-800 pt-3"
             >
@@ -3945,7 +4339,8 @@ export function CrateApp({
           // Above the phone's player bar, not over its transport: a toast
           // there covered play/pause and the track name for its whole life.
           // No bar on a desktop, so this is the old bottom-4.
-          style={{ bottom: "calc(var(--mobile-bar-h, 0px) + 1rem)" }}
+          // And above the selection bar when there is one (SelectionBar).
+          style={{ bottom: "calc(var(--mobile-bar-h, 0px) + var(--selection-bar-h, 0px) + 1rem)" }}
           className="pointer-events-none fixed left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-full border border-ink-700 bg-ink-850/95 px-4 py-2 text-center text-xs text-neutral-200 shadow-xl backdrop-blur-sm"
         >
           {toast}

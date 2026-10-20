@@ -994,6 +994,62 @@ console.log("\nyour tags");
     assert.equal(res.status, 400);
   });
 
+  const putMany = (who, entries, extra = {}) =>
+    who.call("/api/track-tags", { method: "PUT", body: { entries }, ...extra });
+
+  await check("a selection's tags save in one request, each track's whole set", async () => {
+    const keys = ["2101:t.A1", "2102:t.A1", "2103:ggggggggggg"];
+    assert.equal((await putTags(tagger, keys[0], ["warm"])).status, 200);
+    const res = await putMany(tagger, [
+      { clipKey: keys[0], tags: ["warm", "#Opening"] },
+      { clipKey: keys[1], tags: ["OPENING"] },
+      { clipKey: keys[2], tags: ["opening", "dee\u200Bp"] },
+    ]);
+    assert.equal(res.status, 200, res.raw);
+    assert.deepEqual(res.body.entries, [
+      { clipKey: keys[0], tags: ["opening", "warm"] },
+      { clipKey: keys[1], tags: ["opening"] },
+      { clipKey: keys[2], tags: ["deep", "opening"] },
+    ]);
+    assert.deepEqual(await tagsOf(tagger, keys[2]), ["deep", "opening"]);
+    // An empty set in a batch clears that track, the same as on its own.
+    assert.deepEqual((await putMany(tagger, [{ clipKey: keys[1], tags: [] }, { clipKey: keys[0], tags: ["warm"] }])).body.entries, [
+      { clipKey: keys[1], tags: [] },
+      { clipKey: keys[0], tags: ["warm"] },
+    ]);
+  });
+
+  await check("a batch is all or nothing, bounded, and needs the same session and CSRF", async () => {
+    const before = await tagsOf(tagger, "2101:t.A1");
+    const refusals = [
+      [{ clipKey: "2101:t.A1", tags: ["fine"] }, { clipKey: "2102:t.A1", tags: ["x".repeat(33)] }],
+      [{ clipKey: "2101:t.A1", tags: ["a"] }, { clipKey: "2101:t.A1", tags: ["b"] }],
+      [{ clipKey: "2101:t.A1", tags: ["fine"] }, { clipKey: "../etc", tags: [] }],
+      [],
+      Array.from({ length: 201 }, (_, i) => ({ clipKey: `${3000 + i}:t.A1`, tags: ["many"] })),
+    ];
+    for (const entries of refusals) {
+      const res = await putMany(tagger, entries);
+      assert.equal(res.status, 400, `${JSON.stringify(entries).slice(0, 60)} → ${res.status}`);
+    }
+    assert.deepEqual(await tagsOf(tagger, "2101:t.A1"), before, "a refused batch changed nothing");
+    assert.equal((await putMany(tagger, [{ clipKey: "2101:t.A1", tags: ["x"] }, { clipKey: "2102:t.A1", tags: ["y"] }], { cookie: "" })).status, 401);
+    assert.equal((await putMany(tagger, [{ clipKey: "2101:t.A1", tags: ["x"] }, { clipKey: "2102:t.A1", tags: ["y"] }], { csrfToken: null })).status, 403);
+    assert.equal((await tagger.call("/api/track-tags", { method: "PUT", body: { entries: [{ clipKey: "2101:t.A1", tags: [] }], userId: "x" } })).status, 400);
+    const full = await putMany(tagger, Array.from({ length: 200 }, (_, i) => ({ clipKey: `${4000 + i}:t.A1`, tags: ["batch"] })));
+    assert.equal(full.status, 200, "200 tracks is one request's worth");
+    assert.equal(full.body.entries.length, 200);
+    assert.equal((await putMany(tagger, full.body.entries.map((e) => ({ clipKey: e.clipKey, tags: [] })))).status, 200);
+  });
+
+  await check("a batch touches only your own tags", async () => {
+    const secret = `mine-${randomBytes(3).toString("hex")}`;
+    assert.equal((await putTags(tagger, "2201:t.A1", [secret])).status, 200);
+    assert.equal((await putMany(partner, [{ clipKey: "2201:t.A1", tags: [] }, { clipKey: "2202:t.A1", tags: ["theirs"] }])).status, 200);
+    assert.deepEqual(await tagsOf(tagger, "2201:t.A1"), [secret], "their batch clear left yours alone");
+    assert.ok(!(await partner.call("/api/track-tags")).raw.includes(secret));
+  });
+
   const sql = await db();
   if (!sql) {
     console.log("  skip the per-account tag ceiling (no local DATABASE_URL)");
@@ -1022,6 +1078,18 @@ console.log("\nyour tags");
         assert.equal((await putTags(tagger, "8000002:t.A1", ["c"])).status, 409);
         // Replacing a track's tags with as many isn't growth.
         assert.equal((await putTags(tagger, "8000001:t.A1", ["z"])).status, 200);
+        // A batch is counted whole: one that would pass the ceiling writes nothing.
+        const over = await putMany(tagger, [
+          { clipKey: "8000001:t.A1", tags: ["z"] },
+          { clipKey: "8000003:t.A1", tags: ["d"] },
+        ]);
+        assert.equal(over.status, 409, over.raw);
+        assert.deepEqual(await tagsOf(tagger, "8000003:t.A1"), []);
+        // Swapping tags between tracks in one batch is no growth either.
+        assert.equal((await putMany(tagger, [
+          { clipKey: "8000001:t.A1", tags: [] },
+          { clipKey: "8000003:t.A1", tags: ["d"] },
+        ])).status, 200);
       } finally {
         await sql.query(`DELETE FROM track_tags WHERE user_id = $1 AND tag = 'bulk'`, [userId]);
       }

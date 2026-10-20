@@ -237,3 +237,28 @@ export const UnreadBadge = ({ count, className = "" }: { count: number; classNam
       {count >= 99 ? "99+" : count}
     </span>
   ) : null;
+
+/** A ticked box — picking several tracks at once. */
+export const SelectIcon = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+    <path d="m8 12.5 3 3 5.5-6" />
+  </svg>
+);
+
+/** A luggage tag — your own words on a track. */
+export const TagIcon = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9-9-9Z" />
+    <circle cx="7.5" cy="7.5" r="1.5" />
+  </svg>
+);
+
+/** An arrow out of a door — leave a shared playlist. */
+export const LeaveIcon = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M14 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4" />
+    <path d="M10 16l-4-4 4-4" />
+    <path d="M6 12h10" />
+  </svg>
+);

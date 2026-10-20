@@ -230,6 +230,13 @@ export const trackTagsApi = {
       method: "PUT",
       body: JSON.stringify({ clipKey, tags }),
     }),
+
+  /** Several tracks' whole sets in one request (at most 200). Answers with what's stored. */
+  setMany: (entries: ReadonlyArray<{ clipKey: string; tags: readonly string[] }>) =>
+    request<{ entries: Array<{ clipKey: string; tags: string[] }> }>("/api/track-tags", {
+      method: "PUT",
+      body: JSON.stringify({ entries }),
+    }).then((r) => r.entries),
 };
 
 /* ------------------------------------------------------------------ */

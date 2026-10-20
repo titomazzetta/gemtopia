@@ -2,11 +2,12 @@
 
 import { useRef, useState } from "react";
 import type { Playlist } from "@/lib/types";
-import { isClipDrag, readClipDrag } from "@/client/clipDrag";
+import { isClipDrag, readClipDrag, readClipsDrag } from "@/client/clipDrag";
 import { isCollabPlaylist, collabLine } from "@/client/collabView";
 import {
   CopyIcon,
   DownloadIcon,
+  LeaveIcon,
   Link,
   Lock,
   MoreIcon,
@@ -36,6 +37,7 @@ export function PlaylistPanel({
   onShare,
   sharedIds,
   onDropClip,
+  onDropClips,
   onCollaborate,
   me,
 }: {
@@ -62,6 +64,8 @@ export function PlaylistPanel({
    * Desktop only in practice; omitted, the rows are not drop targets.
    */
   onDropClip?: (playlistId: string, clipKey: string) => void;
+  /** Several ticked tracks dragged together and dropped on a playlist. */
+  onDropClips?: (playlistId: string, clipKeys: string[]) => void;
   /** Open the collaborate panel for a playlist. */
   onCollaborate?: (id: string) => void;
   /** The signed-in Discogs username, so "you" can be left out of names. */
@@ -134,6 +138,15 @@ export function PlaylistPanel({
                   }}
                   onDrop={(event) => {
                     setDropTarget(null);
+                    // A ticked selection, when one was dragged; the row that
+                    // was grabbed travels on its own type too, for a target
+                    // that only knows that one.
+                    const keys = readClipsDrag(event.dataTransfer);
+                    if (keys && onDropClips) {
+                      event.preventDefault();
+                      onDropClips(playlist.id, keys);
+                      return;
+                    }
                     const key = readClipDrag(event.dataTransfer);
                     if (!onDropClip || key === null) return;
                     event.preventDefault();
@@ -297,8 +310,8 @@ export function PlaylistPanel({
                         onClick={() => setMoreFor((open) => (open === playlist.id ? null : playlist.id))}
                         aria-expanded={moreFor === playlist.id}
                         aria-controls={`more-${playlist.id}`}
-                        aria-label={`More for ${playlist.name}: duplicate, export${owner ? ", rename, delete" : ""}`}
-                        title={owner ? "Duplicate, export, rename, delete" : "Duplicate, export"}
+                        aria-label={`More for ${playlist.name}: duplicate, export, ${owner ? "rename, delete" : "leave"}`}
+                        title={owner ? "Duplicate, export, rename, delete" : "Duplicate, export, leave"}
                         className={`rounded-sm p-1.5 hover:bg-ink-800 ${
                           moreFor === playlist.id ? "bg-ink-800 text-neutral-100" : "text-neutral-500 hover:text-neutral-200"
                         }`}
@@ -423,6 +436,31 @@ export function PlaylistPanel({
                         >
                           <Trash className="h-3 w-3" />
                           Delete
+                        </button>
+                      )}
+                      {/*
+                        Someone else's set: yours to leave, not to delete. It
+                        goes from your playlists; what you added stays in it.
+                        The same as Leave in its people panel, without having
+                        to find that first.
+                      */}
+                      {!owner && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Leave “${playlist.name}”? It disappears from your playlists. The records you added stay in it for the others.`,
+                              )
+                            ) {
+                              setMoreFor(null);
+                              onDelete(playlist.id);
+                            }
+                          }}
+                          className={`${CHIP} hover:border-red-400/50 hover:text-red-300`}
+                        >
+                          <LeaveIcon className="h-3 w-3" />
+                          Leave
                         </button>
                       )}
                     </div>

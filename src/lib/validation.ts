@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CLIP_KEY_PATTERN, isTrackOnlyKey } from "./clipKey";
+import { PLAYLIST_MAX_TRACKS } from "./limits";
 import { TAGS_PER_TRACK } from "./tags";
 
 /**
@@ -39,14 +40,14 @@ export const playlistItemSchema = z
 export const createPlaylistSchema = z
   .object({
     name: z.string().trim().min(1).max(80),
-    entries: z.array(playlistItemSchema).max(1000).default([]),
+    entries: z.array(playlistItemSchema).max(PLAYLIST_MAX_TRACKS).default([]),
   })
   .strict();
 
 export const updatePlaylistSchema = z
   .object({
     name: z.string().trim().min(1).max(80).optional(),
-    entries: z.array(playlistItemSchema).max(1000).optional(),
+    entries: z.array(playlistItemSchema).max(PLAYLIST_MAX_TRACKS).optional(),
     /**
      * The version the client was looking at when it made this edit. With
      * collaborators, an edit made against an older version is refused (409)
@@ -69,7 +70,7 @@ export const importPlaylistsSchema = z
         z
           .object({
             name: z.string().trim().min(1).max(80),
-            entries: z.array(playlistItemSchema).max(1000),
+            entries: z.array(playlistItemSchema).max(PLAYLIST_MAX_TRACKS),
           })
           .strict(),
       )
@@ -111,6 +112,19 @@ export const trackTagsSchema = z
     tags: z.array(z.string().max(128)).max(TAGS_PER_TRACK * 2),
   })
   .strict();
+
+/** Most tracks one request may tag: a selection goes up in batches this size. */
+export const TRACK_TAGS_BATCH_MAX = 200;
+
+/** Several tracks' tags in one request, each its whole set, each track once. */
+export const trackTagsBatchSchema = z
+  .object({
+    entries: z.array(trackTagsSchema).min(1).max(TRACK_TAGS_BATCH_MAX),
+  })
+  .strict()
+  .refine((v) => new Set(v.entries.map((e) => e.clipKey)).size === v.entries.length, {
+    message: "a track appears twice",
+  });
 
 export const analyseSchema = z
   .object({

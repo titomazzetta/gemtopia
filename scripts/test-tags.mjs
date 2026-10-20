@@ -31,9 +31,9 @@ import {
   TAG_MAX_CHARS,
   TAGS_PER_TRACK,
 } from "../src/lib/tags.ts";
-import { serialWrites } from "../src/client/serialWrites.ts";
+import { coalesce, serialWrites } from "../src/client/serialWrites.ts";
 import { fileEntry } from "../src/client/playlistFile.ts";
-import { playlistItemSchema, trackTagsSchema } from "../src/lib/validation.ts";
+import { playlistItemSchema, trackTagsBatchSchema, trackTagsSchema, TRACK_TAGS_BATCH_MAX } from "../src/lib/validation.ts";
 
 let ran = 0;
 let failed = 0;
@@ -301,6 +301,114 @@ check("different tracks don't wait for each other; a failure moves on", async ()
   assert.deepEqual(events.slice(1).sort(), [["failed", "b", true], ["saved", "a", true]]);
 });
 
+check("a selection's saves go out together, in requests of at most the batch size", async () => {
+  const one = [];
+  const many = [];
+  const send = coalesce(
+    async (key, value) => {
+      one.push(key);
+      return value;
+    },
+    async (batch) => {
+      many.push(batch.map(([key]) => key));
+      return new Map(batch.map(([key, value]) => [key, value]));
+    },
+    3,
+  );
+  const results = await Promise.all(["a", "b", "c", "d", "e", "f", "g"].map((k) => send(k, [k])));
+  assert.deepEqual(results.map((r) => r[0]), ["a", "b", "c", "d", "e", "f", "g"], "each hears its own answer");
+  assert.deepEqual(many, [["a", "b", "c"], ["d", "e", "f"]]);
+  assert.deepEqual(one, ["g"], "a lone leftover goes as one track, the old request");
+
+  one.length = 0;
+  many.length = 0;
+  assert.deepEqual(await send("solo", ["x"]), ["x"]);
+  assert.deepEqual(one, ["solo"], "the tag editor's one track is still one request");
+  assert.equal(many.length, 0);
+});
+
+check("a failed batch fails every track in it, and a missing answer is a failure", async () => {
+  const send = coalesce(
+    async () => [],
+    async (batch) => {
+      if (batch.some(([key]) => key === "boom")) throw new Error("409");
+      return new Map(batch.filter(([key]) => key !== "lost").map(([key, value]) => [key, value]));
+    },
+    10,
+  );
+  const outcome = (p) => p.then(() => "ok", (e) => e.message);
+  assert.deepEqual(await Promise.all(["a", "boom", "b"].map((k) => outcome(send(k, [])))), ["409", "409", "409"]);
+  assert.deepEqual(await Promise.all(["a", "lost"].map((k) => outcome(send(k, [])))), ["ok", "missing from the batch's answer"]);
+});
+
+check("batches go one at a time, and after a failure the rest of the burst isn't sent", async () => {
+  let inFlight = 0;
+  let most = 0;
+  const sent = [];
+  const send = coalesce(
+    async () => [],
+    async (batch) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      sent.push(batch.map(([key]) => key));
+      await tick();
+      inFlight -= 1;
+      if (batch.some(([key]) => key === "boom")) throw new Error("409");
+      return new Map(batch.map(([key, value]) => [key, value]));
+    },
+    2,
+  );
+  const outcome = (p) => p.then(() => "ok", (e) => e.message);
+  const results = await Promise.all(["a", "b", "c", "boom", "e", "f"].map((k) => outcome(send(k, []))));
+  assert.equal(most, 1, "never two requests at once");
+  assert.deepEqual(sent, [["a", "b"], ["c", "boom"]], "the batch after the failure wasn't sent");
+  assert.deepEqual(results, ["ok", "ok", "409", "409", "409", "409"]);
+  // The next burst starts afresh.
+  assert.deepEqual(await Promise.all(["x", "y"].map((k) => outcome(send(k, [])))), ["ok", "ok"]);
+});
+
+check("through serialWrites, a track saved alone and then with a selection never has two saves out", async () => {
+  const inFlight = new Set();
+  let overlap = false;
+  const gates = [];
+  const writer = serialWrites(
+    coalesce(
+      (key) => {
+        if (inFlight.has(key)) overlap = true;
+        inFlight.add(key);
+        return new Promise((resolve) => gates.push(() => { inFlight.delete(key); resolve([key]); }));
+      },
+      (batch) => {
+        for (const [key] of batch) {
+          if (inFlight.has(key)) overlap = true;
+          inFlight.add(key);
+        }
+        return new Promise((resolve) => gates.push(() => {
+          for (const [key] of batch) inFlight.delete(key);
+          resolve(new Map(batch.map(([key]) => [key, [key]])));
+        }));
+      },
+      200,
+    ),
+    { onSaved: () => {}, onFailed: () => {} },
+  );
+  writer.write("a", ["deep"]); // the tag editor
+  await tick();
+  for (const key of ["a", "b", "c"]) writer.write(key, ["opening"]); // then the selection
+  await tick();
+  assert.equal(gates.length, 1, "one request at a time: the selection waits behind the editor's save");
+  let requests = 0;
+  while (gates.length) {
+    requests += 1;
+    gates.shift()();
+    await tick();
+    await tick();
+  }
+  assert.equal(requests, 3, "a alone, then b and c together, then a's newer set");
+  assert.equal(overlap, false);
+  assert.equal(writer.busy("a"), false);
+});
+
 /* ---------------- where tags can't go ---------------- */
 
 function stripComments(text) {
@@ -375,6 +483,18 @@ check("the tags request is exactly a key and a list", () => {
   assert.equal(trackTagsSchema.safeParse({ clipKey: "1:t.A1", tags: ["deep"], userId: "x" }).success, false);
   assert.equal(trackTagsSchema.safeParse({ clipKey: "../etc", tags: [] }).success, false);
   assert.equal(trackTagsSchema.safeParse({ clipKey: "1:t.A1", tags: "deep" }).success, false);
+});
+
+check(`a batch is up to ${TRACK_TAGS_BATCH_MAX} of those, each track once, and nothing else`, () => {
+  const entry = (i) => ({ clipKey: `${i + 1}:t.A1`, tags: ["deep"] });
+  const ok = (v) => trackTagsBatchSchema.safeParse(v).success;
+  assert.equal(ok({ entries: [entry(0), entry(1)] }), true);
+  assert.equal(ok({ entries: Array.from({ length: TRACK_TAGS_BATCH_MAX }, (_, i) => entry(i)) }), true);
+  assert.equal(ok({ entries: Array.from({ length: TRACK_TAGS_BATCH_MAX + 1 }, (_, i) => entry(i)) }), false);
+  assert.equal(ok({ entries: [] }), false);
+  assert.equal(ok({ entries: [entry(0), entry(0)] }), false, "a track named twice");
+  assert.equal(ok({ entries: [entry(0)], userId: "x" }), false);
+  assert.equal(ok({ entries: [{ ...entry(0), userId: "x" }] }), false);
 });
 
 await Promise.all(pending);
