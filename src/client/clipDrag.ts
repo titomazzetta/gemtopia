@@ -19,6 +19,7 @@ export const CLIP_MIME = "application/x-gemtopia-clip";
  */
 export { isClipKey } from "@/lib/clipKey";
 import { isClipKey } from "@/lib/clipKey";
+import { PLAYLIST_MAX_TRACKS } from "@/lib/limits";
 
 /** Start a drag for this clip. Returns false (and sets nothing) for a non-clip key. */
 export function writeClipDrag(
@@ -78,4 +79,40 @@ export function readRowDrag(transfer: Pick<DataTransfer, "getData"> | null): num
   if (!transfer) return null;
   const value = transfer.getData(ROW_MIME);
   return /^\d{1,6}$/.test(value) ? Number(value) : null;
+}
+
+/**
+ * Several ticked tracks dragged at once (desktop): grab any ticked row and
+ * every ticked track comes along, onto a playlist in the sidebar.
+ *
+ * The keys travel newline-separated under a third type of ours, beside the
+ * one row's own key under CLIP_MIME — so a drop target that only knows the
+ * single type still gets the row that was grabbed. The same rules as one key:
+ * each is checked against the two shapes in lib/clipKey.ts, and a list with
+ * anything malformed in it is refused whole rather than partly used. The keys
+ * are only ever looked up among records the app already holds.
+ */
+export const CLIPS_MIME = "application/x-gemtopia-clips";
+/** A playlist holds at most this many tracks; a drag never carries more. */
+export const CLIPS_MAX = PLAYLIST_MAX_TRACKS;
+
+/** Put several keys on a drag. False (and nothing set) for fewer than two good ones. */
+export function writeClipsDrag(
+  transfer: Pick<DataTransfer, "setData">,
+  keys: readonly string[],
+): boolean {
+  const clean = [...new Set(keys.filter(isClipKey))].slice(0, CLIPS_MAX);
+  if (clean.length < 2) return false;
+  transfer.setData(CLIPS_MIME, clean.join("\n"));
+  return true;
+}
+
+/** The dragged keys, or null when there are none or any of them is malformed. */
+export function readClipsDrag(transfer: Pick<DataTransfer, "getData"> | null): string[] | null {
+  if (!transfer) return null;
+  const raw = transfer.getData(CLIPS_MIME);
+  if (!raw) return null;
+  const lines = raw.split("\n");
+  if (lines.length > CLIPS_MAX || !lines.every(isClipKey)) return null;
+  return [...new Set(lines)];
 }

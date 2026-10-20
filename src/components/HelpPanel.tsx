@@ -69,6 +69,16 @@ export const HELP: ReadonlyArray<Section> = [
         In a playlist,{" "}
         {fine ? "drag" : "press and hold"} a row to move it — the green line is where it lands.{" "}
         <b>Whole list</b> shows the set at once and moves records the same way.{" "}
+        <b>Select</b> picks several at once
+        {fine ? (
+          <>
+            {" "}
+            (or {k("⌘")}/Ctrl-click and Shift-click rows, or the box at the top for everything shown)
+          </>
+        ) : null}
+        : add them all to a set, tag them, remove them, or {fine ? "drag" : "hold"} one to move them
+        together. On a shared set you can take out what you added; a lock marks the rest, and{" "}
+        <b>Leave</b> under its <b>⋯</b> takes it off your list.{" "}
         <b>Set prep</b> checks every transition against your decks&apos; pitch range.{" "}
         <b>Duplicate</b> gives you a private copy of any playlist you&apos;re on, shared ones included,
         to rework without touching the original; a playlist&apos;s <b>⋯</b> also exports it as a file

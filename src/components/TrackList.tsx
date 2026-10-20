@@ -5,10 +5,18 @@ import type { Playable } from "@/lib/types";
 import { STRAIN_META, transitionWords, type MixCheck } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { formatBpm } from "@/lib/mixing";
-import { Disc, NoPreview, Play, Plus, Trash } from "./Icons";
+import { Disc, Lock, NoPreview, Play, Plus, Trash } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import type { SortKey, SortState } from "@/client/sorting";
-import { isRowDrag, readClipDrag, readRowDrag, writeClipDrag, writeRowDrag } from "@/client/clipDrag";
+import {
+  isRowDrag,
+  readClipDrag,
+  readRowDrag,
+  writeClipDrag,
+  writeClipsDrag,
+  writeRowDrag,
+} from "@/client/clipDrag";
+import { isNoopBlockMove, NO_SELECTION, type Selection } from "@/client/selection";
 import { slotInRows, slotToIndex } from "@/client/pullList";
 import { useFinePointer } from "@/client/useFinePointer";
 import { useHoldDrag } from "@/client/useHoldDrag";
@@ -175,6 +183,56 @@ function SortHeader({
 }
 
 /**
+ * The box at the left of a row (and of the header) for ticking tracks.
+ *
+ * A real button with role="checkbox", so it is reached by keyboard and read
+ * as ticked or not. 24px square around a 16px box: big enough to hit with a
+ * mouse without nudging the columns. `quiet` keeps it invisible until the row
+ * is hovered or the box focused, for the moments nothing is ticked yet.
+ */
+function CheckBox({
+  checked,
+  mixed = false,
+  label,
+  onClick,
+  quiet,
+}: {
+  checked: boolean;
+  mixed?: boolean;
+  label: string;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
+  quiet: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={mixed ? "mixed" : checked}
+      aria-label={label}
+      title={label}
+      onClick={onClick}
+      className={`grid h-6 w-6 shrink-0 place-items-center rounded-sm transition-opacity focus-visible:opacity-100 ${
+        quiet ? "opacity-0 group-hover:opacity-100 hover:opacity-100" : ""
+      }`}
+    >
+      <span
+        className={`grid h-4 w-4 place-items-center rounded-[3px] border ${
+          checked || mixed ? "border-accent bg-accent text-ink-950" : "border-neutral-600 bg-ink-950/40"
+        }`}
+      >
+        {checked ? (
+          <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="m3.5 8.5 3 3 6-7" />
+          </svg>
+        ) : mixed ? (
+          <span className="h-0.5 w-2 rounded-full bg-ink-950" aria-hidden="true" />
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
+/**
  * Windowed list.
  *
  * A 1,500-record crate produces a few thousand clips. Rendering that many DOM
@@ -200,6 +258,13 @@ export function TrackList({
   transitions,
   sort,
   onSort,
+  selected = NO_SELECTION,
+  selecting = false,
+  onSelect,
+  onSelectAll,
+  dragKeys,
+  onMoveBlock,
+  onRemoveRefused,
 }: {
   items: Playable[];
   currentKey: string | null;
@@ -246,6 +311,27 @@ export function TrackList({
   sort?: SortState | null;
   /** Omitted where sorting makes no sense — a playlist has a real order. */
   onSort?: (key: SortKey) => void;
+  /** Ticked tracks, by key (client/selection.ts). */
+  selected?: Selection;
+  /**
+   * Select mode: every row shows its box, and a plain click or tap ticks it
+   * instead of playing it. The phone's way in (its Select button); with a
+   * mouse the boxes show on hover and Cmd/Ctrl- and Shift-click tick.
+   */
+  selecting?: boolean;
+  /** Tick or untick one row, or tick the run from the last one ticked. Omitted: no boxes. */
+  onSelect?: (index: number, how: "toggle" | "range") => void;
+  /** The header's box: tick everything shown, or clear. Only where there's a header. */
+  onSelectAll?: (all: boolean) => void;
+  /**
+   * The keys a drag of this row should carry. More than one when the row is
+   * part of a selection: the whole selection then drops onto a playlist.
+   */
+  dragKeys?: (key: string) => readonly string[];
+  /** Move ticked rows together, as one block, to a gap (selection.moveBlock). */
+  onMoveBlock?: (indices: number[], slot: number) => void;
+  /** A row that isn't yours to take out was tapped where its trash would be. */
+  onRemoveRefused?: (item: Playable, index: number) => void;
 }) {
   /*
    * Strips appear once there is something to say. A set with no BPMs at all
@@ -277,6 +363,31 @@ export function TrackList({
   const finePointer = useFinePointer();
 
   /*
+   * Picking several. With a mouse every row keeps a box at its left, shown on
+   * hover (and for good once anything is ticked), so the columns never shift
+   * when the first one is. On a touch screen the boxes appear only in select
+   * mode, where the row's own buttons step aside for the selection bar's.
+   */
+  const showChecks = Boolean(onSelect) && (finePointer || selecting);
+  const checksOn = selecting || selected.size > 0;
+  const rowActions = !(selecting && !finePointer);
+  /** This list's ticked rows, by index: what moves when one of them is dragged. */
+  const selectedIndices = useMemo(() => {
+    const out: number[] = [];
+    if (selected.size === 0) return out;
+    items.forEach((item, index) => {
+      if (selected.has(item.key)) out.push(index);
+    });
+    return out;
+  }, [items, selected]);
+  const allShownTicked = selectedIndices.length === items.length && items.length > 0;
+  /** The rows a drag of row `from` moves: its whole selection, or null for just itself. */
+  const blockFor = (from: number): number[] | null =>
+    onMoveBlock && selectedIndices.length > 1 && selected.has(items[from]?.key ?? "")
+      ? selectedIndices
+      : null;
+
+  /*
    * Dragging a row to a new place in the set, with a mouse.
    *
    * The whole-list panel shows a green line where a held record will land;
@@ -294,9 +405,12 @@ export function TrackList({
    * off the list).
    */
   const dragIndex = useRef<number | null>(null);
+  /** The held row's track, for a phone drop: the set can change under a long hold. */
+  const dragKey = useRef<string | null>(null);
   const [drag, setDrag] = useState<{ from: number; slot: number | null } | null>(null);
   const clearDrag = useCallback(() => {
     dragIndex.current = null;
+    dragKey.current = null;
     setDrag(null);
   }, []);
 
@@ -353,7 +467,13 @@ export function TrackList({
       from = items.findIndex((item) => item.key === key);
     }
     if (from < 0 || from >= items.length) return;
-    const to = slotToIndex(from, slotUnder(event.currentTarget, event.clientY));
+    const slot = slotUnder(event.currentTarget, event.clientY);
+    const block = blockFor(from);
+    if (block) {
+      if (!isNoopBlockMove(items.length, block, slot)) onMoveBlock?.(block, slot);
+      return;
+    }
+    const to = slotToIndex(from, slot);
     if (to !== from) onReorder(from, to);
   };
 
@@ -386,6 +506,7 @@ export function TrackList({
     onPick: (index, clientY) => {
       const viewport = viewportRef.current;
       dragIndex.current = index;
+      dragKey.current = items[index]?.key ?? null;
       setDrag({ from: index, slot: viewport ? slotUnder(viewport, clientY) : null });
     },
     onMove: (clientY) => {
@@ -397,21 +518,40 @@ export function TrackList({
     },
     onDrop: (clientY) => {
       const viewport = viewportRef.current;
-      const from = dragIndex.current;
+      let from = dragIndex.current;
+      const key = dragKey.current;
       clearDrag();
       if (!viewport || from === null || !onReorder) return;
-      const to = slotToIndex(from, slotUnder(viewport, clientY));
+      // A collaborator's edit landed during the hold: find the row by what
+      // it is, as the mouse drop does, or leave it if it's gone.
+      if (key !== null && items[from]?.key !== key) from = items.findIndex((item) => item.key === key);
+      if (from < 0) return;
+      const slot = slotUnder(viewport, clientY);
+      const block = blockFor(from);
+      if (block) {
+        if (!isNoopBlockMove(items.length, block, slot)) onMoveBlock?.(block, slot);
+        return;
+      }
+      const to = slotToIndex(from, slot);
       if (to !== from) onReorder(from, to);
     },
     onCancel: clearDrag,
   });
 
   // The gap the line is drawn on. Either gap beside the row itself is no move
-  // at all, so nothing is drawn there — the phone's list does the same.
+  // at all, so nothing is drawn there — the phone's list does the same. For a
+  // ticked block, any gap where dropping would change nothing.
+  const draggedBlock = drag !== null ? blockFor(drag.from) : null;
   const dropSlot =
-    drag !== null && drag.slot !== null && drag.slot !== drag.from && drag.slot !== drag.from + 1
-      ? drag.slot
-      : null;
+    drag === null || drag.slot === null
+      ? null
+      : draggedBlock
+        ? isNoopBlockMove(items.length, draggedBlock, drag.slot)
+          ? null
+          : drag.slot
+        : drag.slot !== drag.from && drag.slot !== drag.from + 1
+          ? drag.slot
+          : null;
 
   useEffect(() => {
     const element = viewportRef.current;
@@ -462,6 +602,18 @@ export function TrackList({
       */}
       {onSort && (
         <div className="flex shrink-0 items-center gap-3 border-b border-ink-800 bg-ink-900/60 px-3 py-1.5">
+          {showChecks &&
+            (onSelectAll ? (
+              <CheckBox
+                checked={allShownTicked}
+                mixed={!allShownTicked && selectedIndices.length > 0}
+                label={allShownTicked ? "Untick everything shown" : `Tick all ${items.length.toLocaleString()} shown`}
+                onClick={() => onSelectAll(!allShownTicked)}
+                quiet={false}
+              />
+            ) : (
+              <span className="w-6 shrink-0" aria-hidden="true" />
+            ))}
           <span className="w-9 shrink-0" aria-hidden="true" />
           <div className="flex min-w-0 flex-1 items-center gap-3">
             <SortHeader label="Title" sortKey="title" sort={sort} onSort={onSort} />
@@ -543,6 +695,9 @@ export function TrackList({
           {slice.map((item, i) => {
             const index = start + i;
             const active = item.key === currentKey;
+            const ticked = selected.has(item.key);
+            // The rows travelling with a drag: the grabbed one, or its whole selection.
+            const travelling = drag !== null && (drag.from === index || (draggedBlock !== null && ticked));
             /*
              * Shown, but visibly not playable. Hiding these was the old
              * behaviour and it meant you could own a record, sync it, and
@@ -571,7 +726,8 @@ export function TrackList({
               <li
                 key={`${item.key}:${index}`}
                 data-index={index}
-                data-dragging={drag?.from === index ? "" : undefined}
+                data-dragging={travelling ? "" : undefined}
+                data-selected={ticked ? "" : undefined}
                 style={{ height: ROW_HEIGHT }}
                 // Draggable, with a mouse, for two reasons: reordering an open
                 // playlist, and dropping any playable row onto a playlist in
@@ -587,15 +743,28 @@ export function TrackList({
                   // browser snapshots for the drag image.
                   if (reorderable && writeRowDrag(event.dataTransfer, index)) dragIndex.current = index;
                   writeClipDrag(event.dataTransfer, item.key);
+                  // Part of a selection: every ticked track comes along.
+                  const keys = dragKeys?.(item.key);
+                  if (keys && keys.length > 1) writeClipsDrag(event.dataTransfer, keys);
                 }}
                 onDragEnd={clearDrag}
                 className={`group border-b border-ink-850 ${
-                  active ? "bg-accent/10" : "hover:bg-ink-850"
+                  travelling
+                    ? "bg-accent/15 opacity-60"
+                    : active
+                      ? "bg-accent/10"
+                      : ticked
+                        ? "bg-ink-800"
+                        : "hover:bg-ink-850"
+                } ${
+                  // A ticked row says so at its edge too, so it still reads as
+                  // ticked when it's also the one playing.
+                  ticked ? "shadow-[inset_3px_0_0_var(--color-accent)]" : ""
                 } ${reorderable ? "cursor-grab active:cursor-grabbing" : ""} ${
                   // No text selection or iOS callout on a long press — that
                   // press is picking the record up.
-                  touchReorder ? "select-none [-webkit-touch-callout:none]" : ""
-                } ${drag?.from === index ? "bg-accent/15 opacity-60" : ""} ${
+                  touchReorder || selecting ? "select-none [-webkit-touch-callout:none]" : ""
+                } ${
                   silent
                     ? recordOnly
                       ? ""
@@ -615,9 +784,26 @@ export function TrackList({
                   ))}
 
                 <div className="flex items-center gap-3 px-3" style={{ height: BASE_ROW_HEIGHT }}>
+                {showChecks && onSelect && (
+                  <CheckBox
+                    checked={ticked}
+                    label={`${ticked ? "Untick" : "Tick"} ${item.title}`}
+                    onClick={(event) => onSelect(index, event.shiftKey ? "range" : "toggle")}
+                    quiet={!checksOn}
+                  />
+                )}
                 <button
                   type="button"
-                  onClick={() => onPlay(index)}
+                  onClick={(event) => {
+                    // Ticking: in select mode a tap ticks; with a mouse,
+                    // Cmd/Ctrl-click ticks one and Shift-click a run.
+                    if (onSelect && (selecting || event.metaKey || event.ctrlKey || event.shiftKey)) {
+                      onSelect(index, event.shiftKey ? "range" : "toggle");
+                      return;
+                    }
+                    onPlay(index);
+                  }}
+                  aria-pressed={selecting ? ticked : undefined}
                   className="flex min-w-0 flex-1 items-center gap-3 py-2 text-left"
                 >
                   <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-sm bg-ink-800">
@@ -797,9 +983,9 @@ export function TrackList({
                   </span>
                 )}
 
-                <ShareButton track={item} />
+                {rowActions && <ShareButton track={item} />}
 
-                {onAdd && (!silent || item.silence === "record-only") && (
+                {rowActions && onAdd && (!silent || item.silence === "record-only") && (
                   <button
                     type="button"
                     onClick={(event) => onAdd(item, event.shiftKey)}
@@ -811,14 +997,24 @@ export function TrackList({
                   </button>
                 )}
 
-                {onRemove && canRemove && !canRemove(item, index) && (
-                  <span
-                    className="h-[26px] w-[26px] shrink-0"
+                {/*
+                  Not yours to take out: on a shared set, a collaborator
+                  removes only what they added. A lock where the trash would
+                  be, rather than nothing — on a phone an empty space read as
+                  a missing button — and a tap says whose it is.
+                */}
+                {rowActions && onRemove && canRemove && !canRemove(item, index) && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveRefused?.(item, index)}
                     title="Added by someone else — only the owner can take it out"
-                    aria-hidden="true"
-                  />
+                    aria-label={`${item.title} was added by someone else — only the owner can take it out`}
+                    className="shrink-0 rounded-sm p-1.5 text-neutral-700 transition-opacity hover:bg-ink-800 hover:text-neutral-400 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                  >
+                    <Lock className="h-3.5 w-3.5" />
+                  </button>
                 )}
-                {onRemove && (!canRemove || canRemove(item, index)) && (
+                {rowActions && onRemove && (!canRemove || canRemove(item, index)) && (
                   <button
                     type="button"
                     onClick={() => onRemove(item, index)}

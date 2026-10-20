@@ -196,6 +196,7 @@ There's nothing to download or update: it is always the live version.
 | **Dig from anything** | Hit `D` (or **Dig from this** on a phone) on whatever's playing and pivot on any field. Two halves: what else you own, and what exists beyond it — other versions, the remixer or producer, the artist, the label, the style and the era. No lane dead-ends: each one ends in **More** or **Dig deeper**. |
 | **Playlists that follow you** | Stored against your Discogs account. Private by default, always. On a desktop, drag any record from the crate, a dig lane or the player (grab what's playing by its title, artist or record) straight onto a playlist (hover the Playlists tab and it opens), and clicking a playlist always brings it up, even from inside Dig; on a phone it's the + button. Drag a row to reorder — a green line shows the gap it will land in — and play in order or shuffled. **Whole list** opens the entire running order at once. **Compact** is one line per record — BPM, and a chip with the pitch the move into it needs, coloured by how comfortable it is — so a phone shows a dozen at a time; **Detailed** adds the full transition strip between every pair, the release and the label. Tap a record to hear it (the list stays open, with the player bar under it), press and hold a record — or drag its grip — to move it (the same hold moves a row in the playlist view too, with the same green line), tap its number to tick it off as it goes in the bag. On a phone the playlist screen keeps to one row of controls and a one-line set-prep summary that opens with a tap, so the records get the space. View by artist, genre, BPM or year without losing the order you built. |
 | **BPM catalogue** | Detect tempo from the audio as it plays — with a live beat meter showing exactly what it hears — or tap it in with `T`. Genre-aware: a record Discogs tags as drum & bass is counted at 174, not 87. **Measure** plays through everything on screen unattended, skipping what is already done. |
+| **Pick several at once** | Tick tracks in your crate or in a playlist — **Select** (on a phone it's the box button; in a playlist it sits on the set-prep line), or on a desktop the box on any row, Cmd/Ctrl-click and Shift-click, or the box at the top for everything a search or filter shows — and one bar acts on them all: add them to your current set in one tap (or **Other…** for another, or a new one), **Tag** them all, **Remove** them from the playlist, or drag (on a phone, hold) any one of them to move them together, with the same green line; on a desktop, drop them on a set in the sidebar. Tracks already in the set are skipped and the toast says so, and a shared set's chat gets one line for the lot. On a shared set you take out only what you added: a lock on the rest says who added it, and **Leave** under the set's **⋯** takes it off your list. |
 | **Your own tags** | Put your own words on any track — *deep*, *opening*, *closing*, whatever you file things under — from the player, a record-only track's card, or the phone's player sheet. Your most-used tags are one tap away. Type `#deep` in the search box, or pick tags in the **Your tags** filter (any or all of them), and there they are, in your collection and your wantlist. Tags are **private**: they never travel with a playlist, a shared set, a share link or an export. |
 | **One tap into the set you're building** | The first time you add something on a visit, you pick the set; after that every **+**, the record card, the player's add button and <kbd>A</kbd> put it straight into that set — the button says which (*Add to B2B at the Lot*), and so does the toast. **Other…**, <kbd>Shift</kbd>-click on a **+** or <kbd>Shift</kbd>+<kbd>A</kbd> picks a different one, which becomes the set from then on. With a playlist open, that playlist is the set. |
 | **Duplicate, export, import** | **Duplicate** any playlist you're on — yours or a shared one — for your own private copy, set BPMs and all, to rework the order or borrow from without touching the original or anyone's view of it. It opens straight away. Each playlist's **⋯** has Duplicate, **Export** (that one playlist as a file), Rename and Delete; **Export all** saves every playlist in one file, and **Import** takes either. Files carry the records and their order — not who added them. |
@@ -875,9 +876,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 723 offline tests, the schema applied to a
+the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 822 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 170 API tests against a running server. CodeQL
+reached the client bundle, then 189 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -1000,6 +1001,9 @@ scripts/
 ├── test-dig-links.mjs         which credits are worth following
 ├── test-sync-queue.mjs        what a first sync fetches next
 ├── test-clip-drag.mjs         a drop accepts our records and nothing else
+├── test-selection.mjs         ticking runs, moving a block, what a bulk add skips
+├── test-tags.mjs              one stored form, batches in order, where tags can't go
+├── test-source-text.mjs       no hidden characters in the source
 ├── test-pull-list.mjs         the running order you take to the shelves
 ├── test-search-play.mjs       play a search result from the track you asked for
 ├── test-mark.mjs              the logo's three cuts
@@ -1034,7 +1038,9 @@ src/
 │   ├── db.ts                  IndexedDB crate cache
 │   ├── sync.ts                resumable, rate-limit-aware background sync
 │   ├── syncQueue.ts           tapped and searched-for records load first
-│   ├── clipDrag.ts            drag a record onto a playlist, safely
+│   ├── clipDrag.ts            drag a record (or a selection) onto a playlist, safely
+│   ├── selection.ts           picking several: ranges, blocks, what a bulk add skips
+│   ├── serialWrites.ts        one save per track in flight, a selection's in a few requests
 │   ├── pullList.ts            numbered set, one sleeve per record, ticks
 │   ├── searchPlay.ts          a search result as a playable running order
 │   ├── playables.ts           video↔track matching, Fisher–Yates, spread shuffle
@@ -1094,8 +1100,10 @@ npm run test:views      # 16
 npm run test:dig-feed   # 9
 npm run test:dig-links  # 11
 npm run test:sync-queue # 7
-npm run test:clip-drag  # 8
+npm run test:clip-drag  # 12
 npm run test:pull-list  # 9
+npm run test:selection  # 21
+npm run test:tags       # 29
 npm run test:search-play # 4
 npm run test:invites    # 28
 npm run test:manifest   # 8
@@ -1104,8 +1112,9 @@ npm run test:collab-view # 7
 npm run test:chat       # 39
 npm run test:audit-gate # 15
 npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
-npm run test:db-tls     # 11 — 723 offline in all
-npm run test:api        # 170 checks, needs a running server + Postgres
+npm run test:db-tls     # 11 — 822 offline in all
+npm run test:source-text # every tracked text file, for hidden characters
+npm run test:api        # 189 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci

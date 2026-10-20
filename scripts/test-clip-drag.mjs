@@ -10,13 +10,17 @@
 import assert from "node:assert/strict";
 import {
   CLIP_MIME,
+  CLIPS_MAX,
+  CLIPS_MIME,
   ROW_MIME,
   isClipDrag,
   isClipKey,
   isRowDrag,
   readClipDrag,
+  readClipsDrag,
   readRowDrag,
   writeClipDrag,
+  writeClipsDrag,
   writeRowDrag,
 } from "../src/client/clipDrag.ts";
 
@@ -105,6 +109,48 @@ check("a row index that is not a whole number never starts or lands a move", () 
     t.setData(ROW_MIME, value);
     assert.equal(readRowDrag(t), null, JSON.stringify(value));
   }
+});
+
+check("several ticked tracks travel together, beside the grabbed one", () => {
+  const t = fake();
+  writeClipDrag(t, "4567:dQw4w9WgXcQ");
+  assert.equal(writeClipsDrag(t, ["4567:dQw4w9WgXcQ", "12:t.B2", "4567:dQw4w9WgXcQ", "88:aaaaaaaaaaa"]), true);
+  assert.deepEqual(readClipsDrag(t), ["4567:dQw4w9WgXcQ", "12:t.B2", "88:aaaaaaaaaaa"]);
+  assert.equal(readClipDrag(t), "4567:dQw4w9WgXcQ", "a target that knows one key still gets the grabbed row");
+  assert.equal(isClipDrag(t), true);
+});
+
+check("one key, or none that are good, is not a multi-drag", () => {
+  for (const keys of [[], ["4567:dQw4w9WgXcQ"], ["junk", "4567:dQw4w9WgXcQ"], ["4567:dQw4w9WgXcQ", "4567:dQw4w9WgXcQ"]]) {
+    const t = fake();
+    assert.equal(writeClipsDrag(t, keys), false, JSON.stringify(keys));
+    assert.equal(t.data.size, 0);
+  }
+  assert.equal(readClipsDrag(null), null);
+  assert.equal(readClipsDrag(fake()), null);
+});
+
+check("a list with anything malformed in it is refused whole", () => {
+  for (const raw of [
+    "4567:dQw4w9WgXcQ\n12:t.B2\nDROP TABLE",
+    "4567:dQw4w9WgXcQ\n\n12:t.B2",
+    "4567:dQw4w9WgXcQ,12:t.B2",
+    "4567:dQw4w9WgXcQ\r\n12:t.B2",
+  ]) {
+    const t = fake();
+    t.setData(CLIPS_MIME, raw);
+    assert.equal(readClipsDrag(t), null, JSON.stringify(raw));
+  }
+});
+
+check("a drag never carries more than a playlist can hold", () => {
+  const many = Array.from({ length: CLIPS_MAX + 50 }, (_, i) => `${i + 1}:aaaaaaaaaaa`);
+  const t = fake();
+  assert.equal(writeClipsDrag(t, many), true);
+  assert.equal(readClipsDrag(t).length, CLIPS_MAX);
+  const forged = fake();
+  forged.setData(CLIPS_MIME, many.join("\n"));
+  assert.equal(readClipsDrag(forged), null, "a forged over-long list is refused");
 });
 
 console.log(`${ran - failed}/${ran} clip drag tests passed`);

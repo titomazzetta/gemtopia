@@ -11,7 +11,7 @@ import {
   type SequenceReport,
   type SetLength,
 } from "@/lib/mixing";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Metronome, Shuffle } from "./Icons";
 
 /**
@@ -36,6 +36,7 @@ export function SetPrepBar({
   viewLabel = null,
   withoutBpm = 0,
   onMeasure,
+  trailing,
 }: {
   report: SequenceReport;
   pitchPercent: number;
@@ -54,6 +55,8 @@ export function SetPrepBar({
   onOpenChange?: (open: boolean) => void;
   /** A view other than your order ("bpm", "artist"…), named in the summary. */
   viewLabel?: string | null;
+  /** Phone only: a control at the end of the folded line (the Select button). */
+  trailing?: ReactNode;
 }) {
   /*
    * On a phone this bar is folded to one line by default. Opened up it is
@@ -107,11 +110,12 @@ export function SetPrepBar({
 
   return (
     <div className="border-b border-ink-800 bg-ink-900 px-4 py-2">
+      <div className="flex items-center gap-2 lg:hidden">
       <button
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 text-left lg:hidden"
+        className="flex min-w-0 flex-1 items-center gap-2 text-left"
       >
         <span className="font-mono text-sm font-semibold tabular-nums text-neutral-100">
           {length.partial ? "≥ " : ""}
@@ -137,6 +141,8 @@ export function SetPrepBar({
           {open ? "Less ▴" : "Set prep ▾"}
         </span>
       </button>
+      {trailing}
+      </div>
 
       <div className={open ? "mt-2 lg:mt-0" : "hidden lg:block"}>
       {/*

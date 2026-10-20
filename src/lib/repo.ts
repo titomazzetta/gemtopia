@@ -1936,62 +1936,86 @@ export async function listTrackTags(
 }
 
 export type SetTrackTagsResult =
-  | { ok: true; tags: string[] }
+  | { ok: true; entries: Array<{ clipKey: string; tags: string[] }> }
   | { ok: false; reason: "limit" };
 
 /**
- * Make one track's tags exactly `tags` — already in stored form
- * (lib/tags.normaliseTags) — and say what's stored.
+ * Make each track's tags exactly what's given — already in stored form
+ * (lib/tags.normaliseTags) — and say what's stored, in the order asked.
+ * One track from the tag editor; up to a couple of hundred at once when a
+ * selection is tagged (the route caps a request).
  *
- * A replace, not an add: the request says the whole set, so two edits can't
- * interleave into a set nobody chose (the browser sends one at a time per
- * track, newest last). Tags already there keep their row and its date.
+ * A replace, not an add: the request says each track's whole set, so two
+ * edits can't interleave into a set nobody chose (the browser sends one at a
+ * time per track, newest last, and a selection's tags go through the same
+ * queue). Tags already there keep their row and its date.
  *
  * The per-account ceiling (TAG_ROWS_PER_USER) is checked before anything is
  * written, under a lock held for the transaction, so two tabs saving at once
  * can't both squeeze under it. An advisory lock rather than the users row:
  * every request updates that row's last_seen_at, and tagging shouldn't hold
- * up the player's BPM writes.
+ * up the player's BPM writes. All of a request is written or none of it.
  */
 export async function setTrackTags(
   userId: string,
-  clipKey: string,
-  tags: readonly string[],
+  entries: ReadonlyArray<{ clipKey: string; tags: readonly string[] }>,
 ): Promise<SetTrackTagsResult> {
+  const keys = entries.map((entry) => entry.clipKey);
+  if (new Set(keys).size !== keys.length) throw new Error("setTrackTags: a track named twice");
+  // (clip, tag) pairs, flattened for one unnest.
+  const pairKeys: string[] = [];
+  const pairTags: string[] = [];
+  for (const entry of entries) {
+    for (const tag of entry.tags) {
+      pairKeys.push(entry.clipKey);
+      pairTags.push(tag);
+    }
+  }
+
   return tx(async (client) => {
     await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('track_tags:' || $1, 0))`, [
       userId,
     ]);
 
     const others = await client.query<{ n: string }>(
-      `SELECT count(*) AS n FROM track_tags WHERE user_id = $1 AND clip_key <> $2`,
-      [userId, clipKey],
+      `SELECT count(*) AS n FROM track_tags WHERE user_id = $1 AND clip_key <> ALL ($2::text[])`,
+      [userId, keys],
     );
-    if (Number(others.rows[0]?.n ?? 0) + tags.length > TAG_ROWS_PER_USER) {
+    if (Number(others.rows[0]?.n ?? 0) + pairTags.length > TAG_ROWS_PER_USER) {
       return { ok: false, reason: "limit" } as const;
     }
 
     await client.query(
-      `DELETE FROM track_tags
-        WHERE user_id = $1 AND clip_key = $2 AND tag <> ALL ($3::text[])`,
-      [userId, clipKey, tags],
+      `DELETE FROM track_tags t
+        WHERE t.user_id = $1
+          AND t.clip_key = ANY ($2::text[])
+          AND NOT EXISTS (
+            SELECT 1 FROM unnest($3::text[], $4::text[]) AS keep(clip_key, tag)
+             WHERE keep.clip_key = t.clip_key AND keep.tag = t.tag
+          )`,
+      [userId, keys, pairKeys, pairTags],
     );
-    if (tags.length > 0) {
+    if (pairTags.length > 0) {
       await client.query(
         `INSERT INTO track_tags (user_id, clip_key, tag)
-         SELECT $1, $2, t FROM unnest($3::text[]) AS t
+         SELECT $1, p.clip_key, p.tag FROM unnest($2::text[], $3::text[]) AS p(clip_key, tag)
          ON CONFLICT DO NOTHING`,
-        [userId, clipKey, tags],
+        [userId, pairKeys, pairTags],
       );
     }
 
-    const stored = await client.query<{ tag: string }>(
-      `SELECT tag FROM track_tags
-        WHERE user_id = $1 AND clip_key = $2
-        ORDER BY tag COLLATE "C"`,
-      [userId, clipKey],
+    const stored = await client.query<{ clip_key: string; tags: string[] }>(
+      `SELECT clip_key, array_agg(tag ORDER BY tag COLLATE "C") AS tags
+         FROM track_tags
+        WHERE user_id = $1 AND clip_key = ANY ($2::text[])
+        GROUP BY clip_key`,
+      [userId, keys],
     );
-    return { ok: true, tags: stored.rows.map((row) => row.tag) } as const;
+    const byKey = new Map(stored.rows.map((row) => [row.clip_key, row.tags]));
+    return {
+      ok: true,
+      entries: keys.map((clipKey) => ({ clipKey, tags: byKey.get(clipKey) ?? [] })),
+    } as const;
   });
 }
 

@@ -404,6 +404,26 @@ removed. Swapping someone's record for another counts as a removal. A refused
 edit is a 403 (`not_your_record`) and writes nothing; the UI only offers the
 remove button where it would be allowed.
 
+### Picking several tracks
+
+Ticking tracks and acting on them together adds no new route and no new
+power. A bulk add or remove is one ordinary playlist save
+(`PATCH /api/playlists/[id]` with the whole set and its `version`), so every
+rule a single edit meets still applies on the server: a collaborator's
+removals are worked out from the diff and refused unless they added those
+records, a stale version is a 409, the 1,000-track limit holds, and a shared
+set's chat gets one summary line rather than one per record. The browser
+skips what it knows will be refused (a record that isn't yours to take out,
+one already in the set) only so the toast can say so; it isn't the check.
+
+Dragging a selection onto a playlist carries the clip keys under a type of
+our own, `application/x-gemtopia-clips`, newline-separated beside the grabbed
+row's single key. A drop accepts that type and nothing else, refuses the whole
+list if any line isn't one of the two key shapes in `lib/clipKey.ts` or if
+there are more than a playlist can hold, and only looks the keys up among
+records this device already has — so text or a link dragged in from another
+tab can't become playlist entries (`test-clip-drag.mjs`).
+
 ### Your tags
 
 A tag is one person's note on one track — "deep", "opening", "for the
@@ -433,6 +453,10 @@ by structure, and pinned by tests, not by remembering:
   is written under a transaction-scoped advisory lock (not the users row, which
   every request updates), so two tabs can't race past the ceiling together;
   120 writes a minute; session, Origin and CSRF checks like every other write.
+  Tagging a selection sends up to 200 tracks in one request
+  (`{ entries: [...] }`, each track once, each its whole set): the same
+  function writes it, under the same lock, counted whole against the ceiling,
+  and one bad tag refuses the request and writes nothing.
 - **Not encrypted at rest.** Like the BPM catalogue's cue notes, tags are
   access-controlled rows. The chat's envelope encryption (above) is the model
   if they ever need it: the client loads them all and filters locally, so
