@@ -43,6 +43,9 @@ const apiResponseSchema = z.object({
     z.object({
       type: z.string(),
       text: z.string().optional(),
+      /** A tool_use block: the answer already parsed, when the call forced a tool. */
+      name: z.string().optional(),
+      input: z.unknown().optional(),
     }),
   ),
   usage: z
@@ -51,6 +54,85 @@ const apiResponseSchema = z.object({
       output_tokens: z.number().optional(),
     })
     .optional(),
+});
+
+/**
+ * The API's own one-line reason for a refusal — "invalid x-api-key",
+ * "credit balance is too low", an unknown model — for the server log. The
+ * type and the message only, cut short; never the request, never the key.
+ */
+async function errorReason(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: { type?: string; message?: string } };
+    const type = body.error?.type ?? "";
+    const message = (body.error?.message ?? "").replace(/\s+/g, " ").slice(0, 160);
+    return [type, message].filter(Boolean).join(": ") || "no detail";
+  } catch {
+    return "no detail";
+  }
+}
+
+/**
+ * The JSON in a model's answer.
+ *
+ * Asked the robust way first: the call names one tool and forces it
+ * (`tool_choice`), so the answer arrives as a `tool_use` block whose `input`
+ * is already an object the API validated against our schema. Should a model
+ * answer in text anyway — a stub, an older model, a refusal to call the tool
+ * — the text is tried as JSON: whole, then without a markdown fence, then
+ * the first `{` to the last `}`, because a chatty model wraps the object in
+ * a sentence. "Not JSON" was once the whole story of a working key that
+ * looked broken for an afternoon.
+ */
+function answerJson(
+  content: Array<{ type: string; text?: string; name?: string; input?: unknown }>,
+  tool: string,
+): unknown {
+  const used = content.find((block) => block.type === "tool_use" && block.name === tool);
+  if (used && used.input !== undefined) return used.input;
+  const text = content
+    .filter((block) => block.type === "text")
+    .map((block) => block.text ?? "")
+    .join("")
+    .trim();
+  const attempts = [
+    text,
+    text.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim(),
+    text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1),
+  ];
+  for (const attempt of attempts) {
+    if (!attempt) continue;
+    try {
+      return JSON.parse(attempt);
+    } catch {
+      /* the next shape */
+    }
+  }
+  return undefined;
+}
+
+/** A forced tool: the one shape an answer may take. */
+function forcedTool(name: string, description: string, schema: Record<string, unknown>) {
+  return {
+    tools: [{ name, description, input_schema: schema }],
+    tool_choice: { type: "tool", name },
+  };
+}
+
+const RANK_TOOL = forcedTool("rank", "The playlist's characterisation and the candidates in order.", {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    ranking: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { releaseId: { type: "integer" }, reason: { type: "string" } },
+        required: ["releaseId", "reason"],
+      },
+    },
+  },
+  required: ["summary", "ranking"],
 });
 
 function buildPrompt(
@@ -96,8 +178,7 @@ Do two things.
 
 2. Rank the candidates by how well they fit, best first. For each, give one short sentence saying specifically why it fits *this* playlist — reference the actual artist, label or era connection. Drop any candidate that genuinely does not belong rather than padding the list.
 
-Return only JSON, no markdown fence:
-{"summary": "...", "ranking": [{"releaseId": 12345, "reason": "..."}]}
+Answer with the rank tool: summary, then ranking as [{"releaseId": 12345, "reason": "..."}].
 
 Use only release ids from the list above. Do not invent records.`;
 }
@@ -144,12 +225,13 @@ export async function rankWithClaude(params: {
         messages: [
           { role: "user", content: buildPrompt(profile, candidates) },
         ],
+        ...RANK_TOOL,
       }),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
 
     if (!response.ok) {
-      console.error(`[llm] ${response.status} from Anthropic API`);
+      console.error(`[llm] ${response.status} from Anthropic API: ${await errorReason(response)}`);
       return { summary: null, recommendations: candidates, usedLlm: false, skipped: "error" };
     }
 
@@ -164,22 +246,8 @@ export async function rankWithClaude(params: {
       parsedApi.data.usage?.output_tokens ?? 0,
     );
 
-    const text = parsedApi.data.content
-      .filter((block) => block.type === "text")
-      .map((block) => block.text ?? "")
-      .join("")
-      .trim();
-
-    // Be forgiving about a stray markdown fence, strict about everything else.
-    const jsonText = text
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/\s*```$/, "")
-      .trim();
-
-    let raw: unknown;
-    try {
-      raw = JSON.parse(jsonText);
-    } catch {
+    const raw = answerJson(parsedApi.data.content, "rank");
+    if (raw === undefined) {
       console.warn("[llm] response was not JSON");
       return { summary: null, recommendations: candidates, usedLlm: false, skipped: "error" };
     }
