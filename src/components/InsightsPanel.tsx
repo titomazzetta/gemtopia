@@ -146,6 +146,20 @@ export function InsightsPanel({
             </p>
           )}
 
+          {/*
+            The call was made and refused, or timed out. Said plainly, with
+            where to look, because a silent fallback once hid a missing credit
+            balance for a whole afternoon.
+          */}
+          {!data.usedLlm && data.llmSkipped === "error" && (
+            <p className="rounded-sm border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[10px] leading-relaxed text-amber-300">
+              The AI pass didn&apos;t answer this time, so these are the graph results on
+              their own. A key is set; if this keeps happening, the deployment&apos;s logs
+              say why (<code>[llm]</code> and the status code — usually credits, or the
+              model name).
+            </p>
+          )}
+
           {/* Deterministic DNA */}
           <section className="space-y-3">
             <h4 className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
