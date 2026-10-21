@@ -4299,6 +4299,12 @@ export function CrateApp({
           sets={sourceIds}
           localDetail={(id) => detailById.get(id) ?? null}
           targetName={quickTarget?.name ?? null}
+          playingKey={current?.key ?? null}
+          playing={api.status === "playing"}
+          // Hear a scanned record before adding it: the search column's play,
+          // a detour that Back to shuffle returns from.
+          onPlay={playFromSearch}
+          onToggle={api.toggle}
           onAddTracks={(items, about, choose) => {
             // The sheet closes first: the picker sits under it otherwise.
             setScanFiles(null);
