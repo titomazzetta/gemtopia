@@ -10,6 +10,8 @@ import type {
   TrackMeta,
 } from "@/lib/types";
 import type { MemberRole } from "@/lib/roles";
+import type { SleeveRead } from "@/lib/sleeve";
+import type { SearchHit } from "@/lib/discogs";
 
 /**
  * Typed client for our own API.
@@ -303,6 +305,8 @@ export interface AdminOverview {
   maxLive: number;
   invites: InviteView[];
   members: MemberView[];
+  /** The optional model: on or not, and which models — never the key. */
+  ai: { configured: boolean; rankingModel: string; sleeveModel: string };
 }
 
 /** Counts and public key ids only — never key material or message content. */
@@ -418,6 +422,34 @@ export const collectionApi = {
       method: "POST",
       body: JSON.stringify({ releaseId }),
     }),
+};
+
+/* ------------------------------------------------------------------ */
+/* Scanning a sleeve                                                   */
+/* ------------------------------------------------------------------ */
+
+export const scanApi = {
+  /**
+   * Read a photographed sleeve. `image` is standard base64 of a JPEG, PNG
+   * or WebP the browser already re-encoded (client/sleeveImage.ts). The
+   * answer is text the model read, or null when it could read nothing.
+   */
+  read: (payload: { image: string; mime: "image/jpeg" | "image/png" | "image/webp" }) =>
+    request<{ read: SleeveRead | null; model?: string }>("/api/scan", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+};
+
+export const discogsSearchApi = {
+  /** One Discogs search by barcode, catalogue number, or words. */
+  search: (params: { barcode?: string; catno?: string; q?: string }) => {
+    const query = new URLSearchParams();
+    if (params.barcode) query.set("barcode", params.barcode);
+    if (params.catno) query.set("catno", params.catno);
+    if (params.q) query.set("q", params.q);
+    return request<{ results: SearchHit[] }>(`/api/discogs/search?${query.toString()}`);
+  },
 };
 
 export const releasesApi = {

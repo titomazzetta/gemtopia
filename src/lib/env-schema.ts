@@ -147,6 +147,32 @@ export const envSchema = z.object({
   ANTHROPIC_MODEL: z.string().min(1).default("claude-sonnet-4-5"),
 
   /**
+   * Model that reads a photographed sleeve (lib/llm.ts readSleeve). A small
+   * one: the job is transcription — artist, title, label, catalogue number,
+   * barcode — and the matching is done here, not by the model.
+   */
+  SLEEVE_READER_MODEL: z.string().min(1).default("claude-haiku-5-5"),
+
+  /**
+   * Where the Anthropic API is. Only ever changed to point the test suite at
+   * a stub on localhost; production leaves it alone. Must be an origin.
+   */
+  ANTHROPIC_BASE_URL: z
+    .string()
+    .default("https://api.anthropic.com")
+    .refine(
+      (v) => {
+        try {
+          const u = new URL(v);
+          return (u.protocol === "https:" || u.hostname === "127.0.0.1" || u.hostname === "localhost") && u.pathname === "/" && !u.search;
+        } catch {
+          return false;
+        }
+      },
+      { message: "ANTHROPIC_BASE_URL must be an https origin (or a localhost one for tests)" },
+    ),
+
+  /**
    * Per-user ceiling on LLM output tokens per rolling 24h. Stops one user
    * (or one runaway loop) from spending the deployment's whole budget.
    */

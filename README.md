@@ -206,6 +206,7 @@ There's nothing to download or update: it is always the live version.
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. Which records are on it is kept current in the background (one request per hundred wants, no tracklists), so every device knows what you're after. Anything playing that you don't own (a dig preview, a search preview, a friend's record on a shared set) gets a **heart right on the player**, the phone bar included, or press **W**. |
 | **Search Discogs and add** | The record arrived in the post: search by artist, title, **track name**, catalogue number or barcode, and put it in your collection or wantlist without leaving the app. On a desktop, **Search** opens in the middle of the screen like Dig, with room for the tracklists, and your playlists stay in the sidebar; on a phone it's a sheet. **What you have comes first**: results in your collection, then your wantlist, then everything else on Discogs, each under its own heading and each in Discogs' own order. **Tap a record you own and it plays** — from the track you searched for, if you searched by track — with its tracklist open to jump around; open any other result to preview its tracks. Every track in an open tracklist has a **+** for a playlist, and the ones with no preview open their tap pad — so a record with no clips at all is still something you can tap a BPM for and put in a set, from the laptop you're both standing at. What you add is playable immediately, not after the next sync. |
+| **Scan a record** | The camera button beside the search box. Photograph the barcode, the centre label or the sleeve — one record, or a stack of them — and each photo becomes a card: the record it found, why ("Barcode matches", "Cat # KDJ 44", "Reads like this record"), whether it's your copy, on your wantlist or neither, and its tracklist with every track ticked. Untick what stays on the shelf, tap **Not it** for the next match, then one button puts every ticked track into your set in photo order — or adds the records to your collection or wantlist, whichever you did last time. Browsers that can read barcodes themselves (Chrome, Android) do, and that photo never leaves the phone; otherwise the photo goes once, re-encoded without its camera metadata, to a small Claude model that transcribes the sleeve — Discogs and Gemtopia's own matching decide what it is. Needs `ANTHROPIC_API_KEY`; without it the button still works where the browser reads barcodes. |
 | **Newest first, by default** | Your collection and wantlist both open in the order you added to them, newest at the top — the same way Discogs presents them. No button to press and nothing to keep in sync: the dates come off the collection and wantlist endpoints, which we already read. Sortable both ways as an **Added** column. |
 | **Record-only tracks** | Most vinyl has no YouTube clip for every track. Those tracks are listed from the Discogs tracklist anyway — a disc on the artwork, a *record only* tag, side and length. Tap one — in the crate, in a record's running order, in Dig, or in a Discogs search result — for its card: put the record on and tap along (or press <kbd>T</kbd>), or press **Listen** and let the microphone measure it, and its BPM is in your catalogue. A tap always outranks what the mic heard. Add it to a playlist like any other track (<kbd>A</kbd>, or the **+** on its row), so you can **write the set list from the shelf** while listening to the real records. The player and shuffle skip them. |
 | **Build a set together (B2B)** | Turn any playlist into a shared one with a join link — anyone with a Gemtopia account presses **Join**. Everyone adds and reorders; you take out only what you added, and the owner has the last word. Shared playlists are edged in amber, and every row says who brought the record. A **chat** on every shared playlist, Telegram-style, with small notes when the set changes — *komron added Shiva — Kerri Chandler · 1998 · 124 BPM* — and an unread count, like a messenger, on the chat button, on the playlist and by the logo — the same on your phone and laptop. A tempo anyone logs becomes the set's BPM for everyone on it. |
@@ -424,6 +425,44 @@ Two honesty constraints fell out of that, both in `client/adopt.ts`:
 - The add and the detail fetch are two calls, and only the first changes
   anything on Discogs. If the POST lands and the fetch then fails, the record
   *is* in your collection, and the message must not read like nothing happened.
+
+### The record in your hand
+
+Typing is the slow part of all of that, at the shelves with a stack to pull or
+in a shop with ten minutes. So the search box has a camera button. You
+photograph the back of the sleeve, the centre label or the spine — one
+record, or a stack of them from your camera roll — and each photo becomes a
+card.
+
+**The photo is read, the record is matched, and those are different jobs.**
+Where the browser can read a barcode itself (`BarcodeDetector`: Chrome, Edge,
+Android), it does, and the photo goes nowhere. Otherwise the photo goes once
+to a small Claude model whose only job is transcription: artist, title, label,
+catalogue number, the digits under the barcode, as JSON. Which pressing that
+is, whether you own it, what goes in the set — Discogs answers that through
+the same search fields the box uses (barcode, then catalogue number, then
+words), and `lib/sleeve.ts` ranks what comes back: a barcode hit is near-
+certain, a catalogue number strong, words only as sure as the overlap, and
+your own copy wins a tie. The model never names a record; it can't put one in
+front of you that doesn't exist.
+
+**The card says why, and asks when it isn't sure.** "Is it this one?" with
+the reason under it, or "Could be this one · 1 of 4" with **Not it — next
+match**. A photo it couldn't read says so plainly and offers the search box
+with what it did read. Every track is ticked; untick what stays home. One
+button then adds every ticked track from every card, in photo order, to your
+set — so photographing your records in the order you'll play them gives you
+the set list in that order. A record you don't own goes to your collection or
+wantlist from its card instead, and the footer remembers which of the three
+you did last.
+
+**What happens to the photo.** It is re-encoded in the browser to a JPEG of
+at most 1,600px — that is what makes it small, and it is also what strips
+everything the camera wrote into the file (location, device, time). The
+server checks its first bytes, forwards it once, and keeps it nowhere: not on
+disk, not in the database, not in a log. Thumbnails live in memory until the
+sheet closes. The threat model's §7 covers the reader; §12 says what is left
+to a third party.
 
 ### What's not built
 
@@ -883,9 +922,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 834 offline tests, the schema applied to a
+the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 848 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 198 API tests against a running server. CodeQL
+reached the client bundle, then 204 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -1009,6 +1048,7 @@ scripts/
 ├── test-sync-queue.mjs        what a first sync fetches next
 ├── test-clip-drag.mjs         a drop accepts our records and nothing else
 ├── test-selection.mjs         ticking runs, moving a block, what a bulk add skips
+├── test-sleeve.mjs            a scanned photo: what the model may say, the ranking, your copy first
 ├── test-tags.mjs              one stored form, batches in order, where tags can't go
 ├── test-source-text.mjs       no hidden characters in the source
 ├── test-pull-list.mjs         the running order you take to the shelves
@@ -1033,6 +1073,7 @@ src/
 │   ├── dbTls.ts               verified TLS + channel binding to Postgres, decided in code
 │   ├── repo.ts                data access — every query scoped by user_id
 │   ├── roles.ts               who may do what on a shared set: Listen · Add · Full control
+│   ├── sleeve.ts              a scanned photo: the read, the searches it earns, the ranking
 │   ├── discogs.ts             signed client, graph traversal, search, writes
 │   ├── dig.ts                 links-first dig: versions, credits, artist, label, style, era
 │   ├── digLinks.ts            which credits to follow, how a version reads
@@ -1041,12 +1082,13 @@ src/
 │   ├── llm.ts                 optional Claude pass + anti-hallucination filter
 │   ├── validation.ts          every accepted payload shape, in one file
 │   └── ratelimit.ts           sliding-window limiter
-├── app/api/                   auth · discogs · dig · wantlist · collection · playlists · track-meta · insights
+├── app/api/                   auth · discogs · dig · wantlist · collection · playlists · track-meta · insights · scan
 ├── client/                    browser-only
 │   ├── db.ts                  IndexedDB crate cache
 │   ├── sync.ts                resumable, rate-limit-aware background sync
 │   ├── syncQueue.ts           tapped and searched-for records load first
 │   ├── clipDrag.ts            drag a record (or a selection) onto a playlist, safely
+│   ├── sleeveImage.ts         a photo re-encoded without its metadata; barcodes read on the device
 │   ├── selection.ts           picking several: ranges, blocks, what a bulk add skips
 │   ├── serialWrites.ts        one save per track in flight, a selection's in a few requests
 │   ├── pullList.ts            numbered set, one sleeve per record, ticks
@@ -1082,7 +1124,7 @@ src/
 
 ```bash
 npm run test           # everything below
-npm run test:env        # 49 cases, no server needed
+npm run test:env        # 50 cases, no server needed
 npm run test:headers    # 24
 npm run test:playables  # 45
 npm run test:sorting    # 26
@@ -1111,6 +1153,7 @@ npm run test:sync-queue # 7
 npm run test:clip-drag  # 12
 npm run test:pull-list  # 9
 npm run test:selection  # 21
+npm run test:sleeve     # 13 — a scanned photo: what the model may say, which searches it earns, your copy first
 npm run test:tags       # 29
 npm run test:search-play # 4
 npm run test:invites    # 28
@@ -1120,9 +1163,9 @@ npm run test:collab-view # 11
 npm run test:chat       # 40
 npm run test:audit-gate # 15
 npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
-npm run test:db-tls     # 11 — 834 offline in all
+npm run test:db-tls     # 11 — 848 offline in all
 npm run test:source-text # every tracked text file, for hidden characters
-npm run test:api        # 198 checks, needs a running server + Postgres
+npm run test:api        # 204 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci

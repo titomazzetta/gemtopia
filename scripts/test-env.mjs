@@ -52,8 +52,18 @@ check("a complete environment parses", () => {
 check("defaults are applied", () => {
   const env = parseEnv(base());
   assert.equal(env.ANTHROPIC_MODEL, "claude-sonnet-4-5");
+  assert.equal(env.SLEEVE_READER_MODEL, "claude-haiku-5-5");
+  assert.equal(env.ANTHROPIC_BASE_URL, "https://api.anthropic.com");
   assert.equal(env.LLM_DAILY_OUTPUT_TOKEN_BUDGET, 40000);
   assert.equal(env.DISCOGS_CONTACT, "+https://github.com/");
+});
+
+check("the Anthropic origin can only be https, or localhost for the test stub", () => {
+  assert.equal(parseEnv({ ...base(), ANTHROPIC_BASE_URL: "http://127.0.0.1:3299" }).ANTHROPIC_BASE_URL, "http://127.0.0.1:3299");
+  assert.equal(parseEnv({ ...base(), ANTHROPIC_BASE_URL: "https://proxy.example.com/" }).ANTHROPIC_BASE_URL, "https://proxy.example.com/");
+  for (const bad of ["http://evil.example.com", "https://api.anthropic.com/v1", "https://api.anthropic.com/?x=1", "api.anthropic.com", "ftp://x"]) {
+    assert.throws(() => parseEnv({ ...base(), ANTHROPIC_BASE_URL: bad }), bad);
+  }
 });
 
 check("result is frozen", () => {

@@ -21,7 +21,7 @@ import {
   tooShortMessage,
   type SearchField,
 } from "@/client/searchFields";
-import { Heart, InCollection, NoPreview, Plus, Search } from "./Icons";
+import { CameraIcon, Heart, InCollection, NoPreview, Plus, Search } from "./Icons";
 import { RecordSection } from "./DigDrawer";
 import { searchRecord, startIndexFor } from "@/client/searchPlay";
 
@@ -68,6 +68,12 @@ interface Props {
   /** The whole record into a set: its tracks in running order, and its title for the picker. */
   onAddAll?: (items: Playable[], releaseTitle: string, choose?: boolean) => void;
   addAllLabel?: string;
+  /**
+   * Photos of records to identify — the camera button beside the box. On a
+   * phone the picker offers the camera and the photo library; a desktop
+   * takes files. Absent, there's no button.
+   */
+  onScan?: (files: File[]) => void;
 }
 
 /*
@@ -91,7 +97,9 @@ export function DiscogsSearch({
   addLabel,
   onAddAll,
   addAllLabel,
+  onScan,
 }: Props) {
+  const scanInput = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState(initialQuery);
   const [field, setField] = useState<SearchField>("all");
   /*
@@ -292,6 +300,40 @@ export function DiscogsSearch({
             <Search className="h-3.5 w-3.5" />
             {status === "searching" ? "…" : "Search"}
           </button>
+          {/*
+            Scan a record instead of typing: a photo of its barcode, label or
+            sleeve. A plain file input, not a live camera — the page never
+            asks for camera permission (Permissions-Policy keeps camera=()),
+            the phone's own camera app takes the picture, and several photos
+            at once make a review list. See ScanSheet.
+          */}
+          {onScan && (
+            <>
+              <input
+                ref={scanInput}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                aria-hidden="true"
+                tabIndex={-1}
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  event.target.value = "";
+                  if (files.length > 0) onScan(files);
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => scanInput.current?.click()}
+                aria-label="Scan a record: photograph its barcode, label or sleeve"
+                title="Scan a record — a photo of its barcode, label or sleeve finds it"
+                className="flex shrink-0 items-center justify-center rounded-md border border-ink-700 px-2.5 py-2 text-neutral-300 hover:border-accent/50 hover:text-accent"
+              >
+                <CameraIcon className="h-4 w-4" />
+              </button>
+            </>
+          )}
         </form>
 
         {/*

@@ -183,6 +183,13 @@ export function InvitePanel({
                   : "Invite-only is off — anyone can sign in. Codes still work."}
               </p>
             )}
+            {data?.ai && (
+              <p className="mt-0.5 text-[11px] text-neutral-500">
+                {data.ai.configured
+                  ? `AI is on: sleeve reading with ${data.ai.sleeveModel}, dig ranking with ${data.ai.rankingModel}.`
+                  : "AI is not configured — sleeve reading and the dig ranking summary are off. Set ANTHROPIC_API_KEY to turn them on."}
+              </p>
+            )}
           </div>
           <button
             ref={closeRef}
