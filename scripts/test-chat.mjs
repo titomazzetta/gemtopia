@@ -336,6 +336,27 @@ check("your own note says You; summaries, joins and leaves read plainly", () => 
   assert.deepEqual(r.details, ["added by tito"]);
 });
 
+check("a change of level names who, and says you to the person it's about", () => {
+  const full = note(1, "role", { member: "komron", role: "full" }, "tito");
+  assert.equal(describeNote(full).who, "tito");
+  assert.equal(describeNote(full).verb, "gave komron full control — they can take out anyone's records");
+  assert.equal(describeNote(full, null, "Komron").verb, "gave you full control — you can take out anyone's records");
+  assert.equal(describeNote(full, null, "someone_else").verb, describeNote(full).verb);
+  assert.equal(
+    describeNote(note(2, "role", { member: "komron", role: "viewer" }, "tito"), null, "komron").verb,
+    "made you a listener — you can play and chat, not change the set",
+  );
+  assert.equal(
+    describeNote(note(3, "role", { member: "komron", role: "editor" }, "tito")).verb,
+    "let komron add records and take out their own",
+  );
+  assert.equal(
+    describeNote(note(3, "role", { member: "komron", role: "editor" }, "tito"), null, "komron").verb,
+    "let you add records and take out your own",
+  );
+  assert.equal(describeNote(note(4, "role", { role: "full" }, "tito")).verb.startsWith("gave someone"), true, "no name, no guess");
+});
+
 check("notes are their own runs, never folded into someone's messages", () => {
   const runs = groupRuns(
     [

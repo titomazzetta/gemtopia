@@ -650,10 +650,15 @@ playlists too.
 
 - **Amber means shared.** A playlist open to other people has an amber edge and
   says who's on it, from the moment its link is out.
-- **Everyone builds, one person owns.** Collaborators add and reorder
-  records, and can take out the ones they added. Only the owner takes out
-  anyone else's records, renames it, deletes it, makes a read-only share link,
-  or manages the join link and the people on it. Anyone can leave.
+- **Everyone builds, one person owns — and the owner says how much.**
+  Joining with the link lets you add and reorder records and take out the
+  ones you added. In the people panel the owner sets each person's level, one
+  tap each: **Listen** (play the set and chat, change nothing), **Add** (what
+  joining gives), or **Full control** (also take out anyone's records, and
+  rename it). Whatever the level, only the owner deletes it, makes a
+  read-only share link, or manages the join link and who's on it. A change of
+  level is said in the chat. Anyone can leave; coming back through the link
+  keeps a Listen level, but never hands back full control.
 - **Talk it through.** Every shared playlist has a chat — the running order,
   a blend that needs work, who's bringing which record. Your messages on the
   right, everyone else's on the left, and an unread count — on the chat button,
@@ -663,10 +668,11 @@ playlists too.
   HTML or a link. **Encrypted in transit and at rest**: each shared playlist's
   chat has its own AES-256 key, locked by a master key that never touches the
   database, so a copy of the database reads as noise.
-- **The chat keeps score.** Adding or taking out a record, joining and leaving
-  leave a small note in the chat — "komron added *Shiva* — Kerri Chandler ·
-  1998 · 124 BPM · 6:12" — and tapping the record's name plays it. A big
-  import is one line, not a flood; reorders say nothing.
+- **The chat keeps score.** Adding or taking out a record, joining, leaving
+  and a change of level each leave a small note in the chat — "komron added
+  *Shiva* — Kerri Chandler · 1998 · 124 BPM · 6:12" — and tapping the
+  record's name plays it. A big import is one line, not a flood; reorders say
+  nothing.
 - **One BPM per record, for everyone on the set.** A tempo anyone on the
   playlist logs becomes the set's BPM — so your partner sees your readings for
   records they don't own, and set prep agrees on both screens. The latest
@@ -876,9 +882,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 822 offline tests, the schema applied to a
+the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 832 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 189 API tests against a running server. CodeQL
+reached the client bundle, then 198 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -1025,6 +1031,7 @@ src/
 │   ├── db.ts                  pooled Postgres, parameterised queries only
 │   ├── dbTls.ts               verified TLS + channel binding to Postgres, decided in code
 │   ├── repo.ts                data access — every query scoped by user_id
+│   ├── roles.ts               who may do what on a shared set: Listen · Add · Full control
 │   ├── discogs.ts             signed client, graph traversal, search, writes
 │   ├── dig.ts                 links-first dig: versions, credits, artist, label, style, era
 │   ├── digLinks.ts            which credits to follow, how a version reads
@@ -1107,14 +1114,14 @@ npm run test:tags       # 29
 npm run test:search-play # 4
 npm run test:invites    # 28
 npm run test:manifest   # 8
-npm run test:collab     # 20
-npm run test:collab-view # 7
-npm run test:chat       # 39
+npm run test:collab     # 25
+npm run test:collab-view # 11
+npm run test:chat       # 40
 npm run test:audit-gate # 15
 npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
-npm run test:db-tls     # 11 — 822 offline in all
+npm run test:db-tls     # 11 — 832 offline in all
 npm run test:source-text # every tracked text file, for hidden characters
-npm run test:api        # 189 checks, needs a running server + Postgres
+npm run test:api        # 198 checks, needs a running server + Postgres
 npm run typecheck
 npm run lint
 npm run audit:ci
@@ -1164,6 +1171,15 @@ counts them (500 emoji fit; 501 characters are refused, never cut), and message
 ids that are positive BIGINTs and nothing else. The database half — the 404
 wall, who can delete what, a collaborator unable to take out someone else's
 record — is in `test-api.mjs`.
+
+**`test-collab.mjs`** pins who may do what on a shared set as one table —
+owner, Full control, Add and Listen against every action — and checks it in
+the directions that matter for security: what the set *is* (deleting it, the
+share link, the join link, who's on it and at what level) stays the owner's at
+every level, a level the code doesn't know can do nothing, and leaving keeps a
+restriction but never a grant. The database half — each level enforced in the
+SQL itself, and the same 404 for anyone but the owner who tries to set one —
+is in `test-api.mjs`.
 
 **`test-tempo.mjs`** synthesises onset envelopes at known tempi — with jitter,
 noise, off-beat hats and backbeats — and asserts the estimator recovers them. It

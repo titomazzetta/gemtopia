@@ -44,31 +44,18 @@ export function safeNextPath(input: unknown): string | null {
   return match ? `/join/${match[1]}` : null;
 }
 
-export type CollabRole = "owner" | "editor";
-
-export type PlaylistAction =
-  | "edit-items"
-  | "remove-any-record"
-  | "chat"
-  | "delete-any-message"
-  | "rename"
-  | "delete"
-  | "share-link"
-  | "manage-join-link"
-  | "remove-member"
-  | "leave";
-
-/**
- * Who may do what. Editors add records, reorder them, take out the ones
- * they added themselves (removalsNotAllowed), chat, and can leave.
- * Everything that changes what the playlist *is* — its name, its existence,
- * who can see or join it — stays with the owner, and so does taking out
- * anyone else's records or messages.
- */
-export function can(role: CollabRole, action: PlaylistAction): boolean {
-  if (role === "owner") return action !== "leave";
-  return action === "edit-items" || action === "chat" || action === "leave";
-}
+// Who may do what on a shared set: lib/roles.ts, safe to import in the
+// browser (this file is server-only — it hashes with node:crypto).
+export {
+  can,
+  DEFAULT_MEMBER_ROLE,
+  isMemberRole,
+  levelToRemember,
+  MEMBER_ROLES,
+  type CollabRole,
+  type MemberRole,
+  type PlaylistAction,
+} from "./roles";
 
 type Credited = ReadonlyArray<{ clipKey: string; addedBy: string | null }>;
 
@@ -92,8 +79,9 @@ function countKeys(keys: ReadonlyArray<string>): Map<string, number> {
 /**
  * How many records this edit takes out that the person making it may not.
  *
- * The rule for a shared set: anyone on it can add and reorder, but taking a
- * record *out* is the owner's call — except for records you put in yourself.
+ * The rule for a shared set: anyone who can edit it can add and reorder, but
+ * taking a record *out* is the owner's call (or someone they've given full
+ * control) — except for records you put in yourself.
  * Records from before anyone was credited (`addedBy` null) count as the
  * owner's.
  *
@@ -107,9 +95,10 @@ export function removalsNotAllowed(
   previous: Credited,
   next: ReadonlyArray<string>,
   actorId: string,
-  isOwner: boolean,
+  mayRemoveAny: boolean,
 ): number {
-  if (isOwner) return 0;
+  // The owner, and anyone they've given full control.
+  if (mayRemoveAny) return 0;
   const pool = creditsByKey(previous);
   const left = countKeys(next);
   let refused = 0;

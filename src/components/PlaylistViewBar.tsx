@@ -33,7 +33,8 @@ export function PlaylistViewBar({
   state: PlaylistViewState;
   onChange: (view: PlaylistView) => void;
   /** Make the current view the stored order. Only offered while a view is on. */
-  onKeep: () => void;
+  /** Make this view the order. Omitted where you can't change the set (a listener). */
+  onKeep?: () => void;
   /** Put back the order from before the last Keep / Smooth order. */
   onUndo?: () => void;
   undoLabel?: string;
@@ -102,15 +103,17 @@ export function PlaylistViewBar({
             >
               Back to your order
             </button>
-            <button
-              type="button"
-              onClick={onKeep}
-              disabled={busy}
-              title="Replace your order with this one. You can undo it."
-              className="text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-200 disabled:opacity-40"
-            >
-              Keep this order
-            </button>
+            {onKeep && (
+              <button
+                type="button"
+                onClick={onKeep}
+                disabled={busy}
+                title="Replace your order with this one. You can undo it."
+                className="text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-200 disabled:opacity-40"
+              >
+                Keep this order
+              </button>
+            )}
           </span>
         </div>
       )}

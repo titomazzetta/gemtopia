@@ -118,7 +118,7 @@ import { PullList } from "./PullList";
 import { InvitePanel } from "./InvitePanel";
 import { CollabPanel } from "./CollabPanel";
 import { ChatPanel } from "./ChatPanel";
-import { isCollabPlaylist, collabLine, canRemoveEntry } from "@/client/collabView";
+import { isCollabPlaylist, collabLine, canEditSet, canRemoveEntry } from "@/client/collabView";
 import { totalUnread, unreadBadge } from "@/client/chatView";
 import { InsightsPanel } from "./InsightsPanel";
 import { NowPlaying } from "./NowPlaying";
@@ -203,6 +203,11 @@ function toEntry(item: Playable): NewEntry | null {
     releaseTitle: item.releaseTitle.slice(0, 400),
     year: item.year,
   };
+}
+
+/** Why you can't add to a set you're only listening on. */
+function listenOnly(playlist: Playlist): string {
+  return `You're listening on “${playlist.name}” — ask ${playlist.owner} if you'd like to add to it`;
 }
 
 /** An already-stored row, ready to send back. */
@@ -1035,6 +1040,8 @@ export function CrateApp({
       ? viewChoice.state
       : YOUR_ORDER;
   const inYourOrder = playlistView.view === "yours";
+  /** Whether you can change the open set at all — not on one you're only listening on. */
+  const canChangeSet = activePlaylist ? canEditSet(activePlaylist.role) : true;
 
   /** Indices into the stored entries, in the order they are shown. */
   const viewOrder = useMemo(
@@ -1736,6 +1743,10 @@ export function CrateApp({
     async (playlistId: string, items: readonly Playable[]) => {
       const playlist = playlists.find((p) => p.id === playlistId);
       if (!playlist) return;
+      if (!canEditSet(playlist.role)) {
+        say(listenOnly(playlist));
+        return;
+      }
       const plan = planAdd(playlist.items, items, toEntry, PLAYLIST_MAX_TRACKS);
       if (plan.entries.length === 0) {
         say(addedMessage(playlist.name, plan, PLAYLIST_MAX_TRACKS));
@@ -1762,6 +1773,10 @@ export function CrateApp({
     async (playlistId: string, item: Playable) => {
       const playlist = playlists.find((p) => p.id === playlistId);
       if (!playlist) return;
+      if (!canEditSet(playlist.role)) {
+        say(listenOnly(playlist));
+        return;
+      }
       if (playlist.items.includes(item.key)) {
         say(`Already in "${playlist.name}"`);
         return;
@@ -1822,11 +1837,12 @@ export function CrateApp({
    * again, and Other… (Shift+A, Shift-click on a +) is always one step away.
    */
   const quickTarget = useMemo(() => {
+    // Only a set you can add to: never one you're only listening on.
     for (const id of recentPlaylists) {
       const recent = playlists.find((p) => p.id === id);
-      if (recent) return recent;
+      if (recent && canEditSet(recent.role)) return recent;
     }
-    return activePlaylist;
+    return activePlaylist && canEditSet(activePlaylist.role) ? activePlaylist : null;
   }, [recentPlaylists, playlists, activePlaylist]);
 
   const quickAdd = useCallback(
@@ -2660,7 +2676,7 @@ export function CrateApp({
     async (id: string) => {
       try {
         const target = playlists.find((p) => p.id === id);
-        if (target && target.role === "editor") {
+        if (target && target.role !== "owner") {
           // Not yours to delete — "delete" from a collaborator means leave.
           await playlistsApi.removeCollaborator(id, username);
           say(`You left “${target.name}” — what you added stays in it`);
@@ -3376,7 +3392,7 @@ export function CrateApp({
               report={sequenceReport}
               pitchPercent={pitchPercent}
               onPitchChange={(percent) => void changePitch(percent)}
-              onSmoothOrder={applySmoothOrder}
+              onSmoothOrder={canChangeSet ? applySmoothOrder : undefined}
               busy={loading}
               length={setLength(
                 visible.map((item) => item.duration),
@@ -3420,8 +3436,8 @@ export function CrateApp({
               <PlaylistViewBar
                 state={playlistView}
                 onChange={changePlaylistView}
-                onKeep={keepPlaylistView}
-                onUndo={undoAvailable ? undoReorder : undefined}
+                onKeep={canChangeSet ? keepPlaylistView : undefined}
+                onUndo={canChangeSet && undoAvailable ? undoReorder : undefined}
                 undoLabel={lastOrder?.label}
                 busy={loading}
               />
@@ -3511,7 +3527,7 @@ export function CrateApp({
                 onAdd={activePlaylist ? undefined : (item, choose) => quickAdd(item, { choose })}
                 addLabel={addLabel}
                 onRemove={
-                  activePlaylist
+                  activePlaylist && canChangeSet
                     ? (_item, index) => {
                         // In a sorted view the third row is not the third entry.
                         const entry = entryIndexAt(viewOrder, index);
@@ -3552,14 +3568,14 @@ export function CrateApp({
                 }
                 // Dragging and the transition checks belong to your order:
                 // they only mean something between records played in sequence.
-                reorderable={Boolean(activePlaylist) && inYourOrder}
+                reorderable={Boolean(activePlaylist) && inYourOrder && canChangeSet}
                 onReorder={reorderPlaylist}
                 selected={selectedKeys}
                 selecting={selecting}
                 onSelect={selectRow}
                 onSelectAll={activePlaylist ? undefined : tickAllShown}
                 dragKeys={dragKeys}
-                onMoveBlock={activePlaylist && inYourOrder ? moveSelectionTo : undefined}
+                onMoveBlock={activePlaylist && inYourOrder && canChangeSet ? moveSelectionTo : undefined}
                 onRemoveRefused={
                   activePlaylist
                     ? (_item, index) => {
@@ -3569,8 +3585,8 @@ export function CrateApp({
                         const by = activePlaylist.entries[entry]?.addedBy ?? owner;
                         say(
                           by.toLowerCase() === owner.toLowerCase()
-                            ? `${owner} added this one, and owns the set — only they can take it out`
-                            : `${by} added this one — only they or ${owner}, who owns the set, can take it out`,
+                            ? `${owner} added this one, and owns the set — only they or someone with full control can take it out`
+                            : `${by} added this one — only they, ${owner} (the owner) or someone with full control can take it out`,
                         );
                       }
                     : undefined
@@ -3630,11 +3646,11 @@ export function CrateApp({
               tagsReady={trackTags.ready}
               onTag={tagSelection}
               removal={
-                activePlaylist && removal
+                activePlaylist && canChangeSet && removal
                   ? { allowed: removal.removed, refused: removal.refused }
                   : undefined
               }
-              onRemove={activePlaylist ? removeSelection : undefined}
+              onRemove={activePlaylist && canChangeSet ? removeSelection : undefined}
               onSelectAll={() => tickAllShown(true)}
               onClear={clearSelection}
             />
@@ -3828,7 +3844,7 @@ export function CrateApp({
           // Audition without losing your place: the list stays open and the
           // player bar sits just below it.
           onPlay={(index) => playFrom(playlistItems, index)}
-          onReorder={reorderPlaylist}
+          onReorder={canChangeSet ? reorderPlaylist : undefined}
         />
       )}
 
@@ -4237,11 +4253,13 @@ export function CrateApp({
                 const isDefault = index === 0 && recentPlaylists.length > 0;
                 // Ticked in this very playlist: it holds them all already.
                 const isSource = picker.length > 1 && playlist.id === activePlaylist?.id;
+                // A set you're only listening on takes nothing from you.
+                const listening = !canEditSet(playlist.role);
                 return (
                   <li key={playlist.id}>
                     <button
                       type="button"
-                      disabled={isSource}
+                      disabled={isSource || listening}
                       onClick={() => {
                         if (picker.length === 1 && picker[0]) void addToPlaylist(playlist.id, picker[0]);
                         else void addManyToPlaylist(playlist.id, picker);
@@ -4270,6 +4288,7 @@ export function CrateApp({
                       </span>
                       <span className="min-w-0 flex-1 truncate">{playlist.name}</span>
                       {isSource && <span className="shrink-0 text-[10px] text-neutral-500">they&apos;re from here</span>}
+                      {listening && !isSource && <span className="shrink-0 text-[10px] text-neutral-500">listening only</span>}
                       {/*
                         Only the first row is marked, and only when something
                         actually put it there. A badge on every row would be

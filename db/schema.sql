@@ -692,3 +692,60 @@ CREATE TABLE IF NOT EXISTS track_tags (
 
 -- Your tags and how often you've used each: the Tags filter, the suggestions.
 CREATE INDEX IF NOT EXISTS track_tags_user_tag_idx ON track_tags (user_id, tag);
+
+-- ---------------------------------------------------------------------------
+-- Collaborator levels — what each person on a shared set may do
+--
+-- The owner sets them, one person at a time (repo.setMemberRole):
+--   viewer  listens and chats; changes nothing
+--   editor  adds, reorders, takes out what they added (what joining gives)
+--   full    all of that, plus taking out anyone's records and renaming
+-- Deleting the set, its share link, its join link, who's on it and what each
+-- can do stay with the owner, whatever the level (lib/roles.ts).
+--
+-- Existing members get 'editor', which is exactly what they could do before,
+-- so nobody's access changes when this runs. Safe while the previous build is
+-- live: it never reads the column, and its inserts take the default. A second
+-- run is a no-op.
+-- ---------------------------------------------------------------------------
+
+ALTER TABLE playlist_members
+  ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'editor';
+
+-- A restriction outlives leaving. If the owner made someone a listener,
+-- leaving and coming back through the join link mustn't hand them the default
+-- level — that would be a way round the owner's choice. So a level below the
+-- default is kept here when someone leaves or is taken off, and is theirs
+-- again if they rejoin (repo.removeCollaborator, repo.joinPlaylist).
+-- A grant is never kept: full control doesn't come back through a link that
+-- is still live (roles.levelToRemember), and the CHECK holds the database to
+-- that — the only level this table can hold is a listener's.
+CREATE TABLE IF NOT EXISTS playlist_member_levels (
+  playlist_id  UUID NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+  user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role         TEXT NOT NULL CHECK (role = 'viewer'),
+  PRIMARY KEY (playlist_id, user_id)
+);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'playlist_members_role_check'
+  ) THEN
+    ALTER TABLE playlist_members ADD CONSTRAINT playlist_members_role_check
+      CHECK (role IN ('viewer', 'editor', 'full'));
+  END IF;
+
+  -- A change of level is said in the set's chat ("Tito gave komron full
+  -- control"), so everyone on it knows who can take out what. One more kind
+  -- of note: the list widens, nothing already written is affected.
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'playlist_messages_kind_check'
+       AND pg_get_constraintdef(oid) LIKE '%''role''%'
+  ) THEN
+    ALTER TABLE playlist_messages DROP CONSTRAINT IF EXISTS playlist_messages_kind_check;
+    ALTER TABLE playlist_messages ADD CONSTRAINT playlist_messages_kind_check
+      CHECK (kind IN ('text', 'added', 'removed', 'joined', 'left', 'role'));
+  END IF;
+END $$;

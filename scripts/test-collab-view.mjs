@@ -4,7 +4,7 @@
  *   npm run test:collab-view
  */
 import assert from "node:assert/strict";
-import { canRemoveEntry, collabLine, isCollabPlaylist } from "../src/client/collabView.ts";
+import { canEditSet, canRemoveEntry, canRenameSet, collabLine, isCollabPlaylist } from "../src/client/collabView.ts";
 
 let ran = 0;
 let failed = 0;
@@ -58,6 +58,33 @@ check("a collaborator is offered remove only on their own records", () => {
   assert.equal(canRemoveEntry("editor", "Tito", "komron"), false);
   assert.equal(canRemoveEntry("editor", null, "komron"), false);
   assert.equal(canRemoveEntry("editor", undefined, "komron"), false);
+});
+
+check("full control is offered remove on every record, and rename", () => {
+  assert.equal(canRemoveEntry("full", "someone", "komron"), true);
+  assert.equal(canRemoveEntry("full", null, "komron"), true);
+  assert.equal(canRenameSet("full"), true);
+  assert.equal(canEditSet("full"), true);
+});
+
+check("a listener is offered nothing that changes the set, not even their own records", () => {
+  assert.equal(canRemoveEntry("viewer", "komron", "komron"), false);
+  assert.equal(canEditSet("viewer"), false);
+  assert.equal(canRenameSet("viewer"), false);
+});
+
+check("an editor adds but doesn't rename; the owner does both", () => {
+  assert.equal(canEditSet("editor"), true);
+  assert.equal(canRenameSet("editor"), false);
+  assert.equal(canRenameSet("owner"), true);
+});
+
+check("a set you joined at any level is marked, and names the owner", () => {
+  for (const role of ["viewer", "editor", "full"]) {
+    const p = { role, owner: "Tito", collaborators: ["komron"], joinLinkOn: false };
+    assert.equal(isCollabPlaylist(p), true, role);
+    assert.equal(collabLine(p, "komron"), "Collab with Tito", role);
+  }
 });
 
 console.log(`\n${ran - failed}/${ran} collab view tests passed.`);

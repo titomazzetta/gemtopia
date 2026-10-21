@@ -166,6 +166,9 @@ export const InCollection = ({ className = base }: Props) => (
   </svg>
 );
 
+/** The same tick, where it means "done" rather than "in your collection". */
+export const Check = InCollection;
+
 /** Two people — a playlist more than one person is building. */
 export const Users = ({ className = base }: Props) => (
   <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

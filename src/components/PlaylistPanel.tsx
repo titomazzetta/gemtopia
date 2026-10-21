@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import type { Playlist } from "@/lib/types";
 import { isClipDrag, readClipDrag, readClipsDrag } from "@/client/clipDrag";
-import { isCollabPlaylist, collabLine } from "@/client/collabView";
+import { canRenameSet, isCollabPlaylist, collabLine } from "@/client/collabView";
 import {
   CopyIcon,
   DownloadIcon,
@@ -121,6 +121,8 @@ export function PlaylistPanel({
               const active = playlist.id === activeId;
               const collab = isCollabPlaylist(playlist);
               const owner = playlist.role === "owner";
+              // The owner, and anyone they've given full control.
+              const renamable = canRenameSet(playlist.role);
               const line = collabLine(playlist, me);
               return (
                 <li
@@ -191,8 +193,8 @@ export function PlaylistPanel({
                         // it. "Back to crate" is the way out.
                         onClick={() => onSelect(playlist.id)}
                         onDoubleClick={() => {
-                          // Only the owner names the set.
-                          if (owner) setEditingId(playlist.id);
+                          // The owner names the set, or someone with full control.
+                          if (renamable) setEditingId(playlist.id);
                         }}
                         className="min-w-0 flex-1 text-left"
                       >
@@ -310,8 +312,10 @@ export function PlaylistPanel({
                         onClick={() => setMoreFor((open) => (open === playlist.id ? null : playlist.id))}
                         aria-expanded={moreFor === playlist.id}
                         aria-controls={`more-${playlist.id}`}
-                        aria-label={`More for ${playlist.name}: duplicate, export, ${owner ? "rename, delete" : "leave"}`}
-                        title={owner ? "Duplicate, export, rename, delete" : "Duplicate, export, leave"}
+                        aria-label={`More for ${playlist.name}: duplicate, export, ${
+                          owner ? "rename, delete" : renamable ? "rename, leave" : "leave"
+                        }`}
+                        title={owner ? "Duplicate, export, rename, delete" : renamable ? "Duplicate, export, rename, leave" : "Duplicate, export, leave"}
                         className={`rounded-sm p-1.5 hover:bg-ink-800 ${
                           moreFor === playlist.id ? "bg-ink-800 text-neutral-100" : "text-neutral-500 hover:text-neutral-200"
                         }`}
@@ -411,7 +415,7 @@ export function PlaylistPanel({
                         <DownloadIcon className="h-3 w-3" />
                         Export
                       </button>
-                      {owner && (
+                      {renamable && (
                         <button
                           type="button"
                           onClick={() => {

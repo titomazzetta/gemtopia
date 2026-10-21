@@ -128,6 +128,7 @@ Server logs record error context only, never tokens.
 | CSRF | Mutating routes are POST/PATCH/PUT/DELETE only, require `SameSite=Lax` cookies to have been sent, check `Origin` against `APP_ORIGIN`, and require a double-submit token compared in constant time. Enforced centrally by `requireUser(request, { mutating: true })` so a route cannot be written without it. Three cases in `test-api.mjs`. |
 | Clickjacking | `frame-ancestors 'none'` + `X-Frame-Options: DENY`. |
 | Skewing another user's recommendations | Seed metadata is client-supplied, but is intersected against the playlist's actual contents read from the database. Seeds for releases not in the playlist are discarded — covered by "seeds for releases outside the playlist are ignored". A user can only influence their own analysis. |
+| **A collaborator raising their own level** | Only a statement keyed on the owner (`p.user_id = $owner`) can change a level; a member's request is the same 404 as a stranger's. Every level is checked in SQL under the playlist's row lock, an unknown level can do nothing, and leaving and rejoining keeps a lower level but never restores full control. See §5, *Collaborator levels*; nine cases in `test-api.mjs`. |
 | **Writing to another user's Discogs account** | `/api/wantlist` is the only route that changes data on a third-party service. The username used to build the upstream URL comes from the session; the request body accepts nothing but a release id, and `.strict()` rejects an attempt to send a `username` field. Four cases in `test-api.mjs`. |
 | Reading or setting another user's deck preference | `/api/prefs` resolves the row from the session's user id; the request body carries nothing but a number. Five cases, including one asserting a second user does not inherit the first's setting. |
 | **Overwriting a human's tapped BPM** | Not a classic security issue but the same shape of bug: precedence is enforced in the SQL `ON CONFLICT` clause, not in the client. `tap`/`manual` always beat `auto`. Six cases in `test-api.mjs`. |
@@ -199,11 +200,12 @@ one playlist*, never what anyone can read about anyone else.
   dump yields no working link. Wrong, malformed and turned-off links are one
   indistinguishable 404. Turning the link off is permanent for that link;
   members already in stay until removed.
-- **Roles are fixed and small.** Owner: everything. Collaborator: add
-  records, reorder them, take out the ones they added, chat, and leave. The
-  rules are one pure function (`collab.can`), tested per action, and the SQL
-  enforces the same split —
-  owner-only statements never use the membership check.
+- **Levels are few, and set by the owner.** Owner: everything. A member is
+  at one of three levels the owner chooses per person — Listen, Add (what
+  joining gives) or Full control — and what each may do is one pure table
+  (`roles.can`), tested per action; the SQL enforces the same split, and
+  owner-only statements never use the membership check. See *Collaborator
+  levels* below.
 - **Nobody can remove the owner**, because the owner is not a member row; a
   collaborator can remove only themselves; everyone else asking gets a 404.
 - **Concurrent edits cannot silently clobber.** `playlists.version` is checked
@@ -224,8 +226,8 @@ one playlist*, never what anyone can read about anyone else.
   and can kill the link.
 - **Duplicating copies only what you can already read.** `POST
   /api/playlists/:id/duplicate` takes the id and nothing else; there is no
-  client-supplied content. `repo.duplicatePlaylist` checks `CAN_EDIT` in the
-  same transaction that copies, under a share lock on the source row (so the
+  client-supplied content. `repo.duplicatePlaylist` checks `CAN_SEE` (any
+  member, a listener included) in the same transaction that copies, under a share lock on the source row (so the
   copy is one version of the list), and a playlist you have no part in is the
   same 404 as reading it. The copy is owned by the caller and carries no
   members, join link, share link or chat — a collaborator can't use it to
@@ -240,9 +242,9 @@ one playlist*, never what anyone can read about anyone else.
 - **The set's BPM is shared; the catalogue isn't.** Each person's BPM
   catalogue stays theirs. What is shared is one reading per record *on a
   playlist you are on*: when you log a BPM, it is copied onto the matching
-  rows of the playlists you can edit (`repo.shareBpmWithSets`, `CAN_EDIT` in
-  the statement), so everyone on that set sees the same number whether or not
-  they own the record. Nothing about records outside the set, and nothing to
+  rows of the playlists you can change (`repo.shareBpmWithSets`, `CAN_EDIT`
+  in the statement — so not a listener's), and everyone on that set sees the
+  same number whether or not they own the record. Nothing about records outside the set, and nothing to
   anyone outside it. Between people the latest reading wins, except an
   auto-detect never replaces someone's tap or typed value; taking your reading
   back takes it off the sets, not anyone else's. It stays with the playlist if
@@ -395,14 +397,81 @@ and deleting a playlist deletes its key.
 
 ### Removing records from a shared playlist
 
-Collaborators can add and reorder anything, but can take out only records
-they added; the owner can take out any. Edits arrive as the whole list, so the
+Collaborators at the default level can add and reorder anything, but can
+take out only records they added; the owner, and anyone the owner has given
+full control, can take out any. Edits arrive as the whole list, so the
 server works out what was removed itself — per clip key, copies before minus
 copies after, compared with who added each copy, under the playlist row lock
 (`collab.removalsNotAllowed`). It never trusts the client's idea of what it
 removed. Swapping someone's record for another counts as a removal. A refused
 edit is a 403 (`not_your_record`) and writes nothing; the UI only offers the
 remove button where it would be allowed.
+
+### Collaborator levels
+
+The owner sets, per person, how much of a shared set they may change. One
+table says it (`lib/roles.ts`, `can()`), read by the server and the browser
+alike and pinned per action in `test-collab.mjs`:
+
+| | Listen | Add (joining) | Full control | Owner |
+|---|:-:|:-:|:-:|:-:|
+| Read it, play it, copy it, chat | ✓ | ✓ | ✓ | ✓ |
+| Add and reorder records, take out their own | | ✓ | ✓ | ✓ |
+| Take out anyone's records | | | ✓ | ✓ |
+| Rename it | | | ✓ | ✓ |
+| Delete it · share link · join link · who's on it and at what level · delete anyone's chat message | | | | ✓ |
+
+Full control is control of what's *in* the set, not of the set: it can't
+delete it, publish it, open it to more people, change anyone's level, or take
+down what someone said in the chat.
+
+- **Enforced in the SQL, not the browser.** Three membership predicates in
+  `repo.ts`, each a condition in the statement's `WHERE`: `CAN_SEE` (any
+  member) for reads, chat and copies; `CAN_EDIT` (`role IN ('editor',
+  'full')`) for writing the set's BPM; `CAN_RENAME` (`role = 'full'`) for
+  renaming. Saving the records reads the caller's level under the playlist's
+  row lock (`replaceItems`, `FOR UPDATE OF p`), refuses a listener before
+  anything else (403 `view_only`, nothing written), and only the owner or
+  full control skips "only what you added". The browser hides what a level
+  can't do so it never offers a button the server would refuse.
+- **Only the owner sets a level, by construction.** `repo.setMemberRole`
+  finds the member row through `p.user_id = $owner`, so a member or a
+  stranger asking matches nothing and gets the same 404 as for a playlist
+  they can't see. The owner has no member row, so no level of their own to
+  change. `PATCH /api/playlists/[id]/members` takes `{ username, role }` and
+  nothing else (`.strict()`), the role from a closed list (`owner`, `admin`
+  or anything else is a 400), behind the session, Origin and CSRF checks and
+  the member-change rate limit.
+- **Fail closed.** A level the code doesn't know can do nothing: `can()`
+  returns false, the SQL names the levels it allows rather than the ones it
+  refuses, a `CHECK` constraint keeps anything else out of the column, and a
+  row that somehow held one would be shown as Listen.
+- **A change counts from the next edit.** The level is read under the same
+  row lock as the edit it governs, so an edit already in flight finishes
+  under the old level and the next meets the new one. There's no window in
+  which a lowered level still writes.
+- **Leaving keeps a restriction, never a grant.** Without this, a listener
+  could leave and rejoin through a live link to get the default back. So
+  when someone below the default leaves or is taken off, their level is kept
+  in `playlist_member_levels` and restored if they rejoin
+  (`roles.levelToRemember`). Full control is never kept: someone taken off —
+  perhaps for misusing it — who opens a still-live link comes back at Add,
+  and the owner can give it again. The table's `CHECK` holds the database to
+  that: the only level it can store is a listener's. The rows go with the
+  playlist or the user (`ON DELETE CASCADE`).
+- **The people it affects are told.** A change of level writes a note in the
+  set's chat, signed by the owner and sealed like every message, so who can
+  take out what is never a secret on the set. Setting the level someone
+  already has changes nothing and says nothing.
+
+Nine cases in `test-api.mjs` cover it: the default, the 404 wall around
+setting a level (for each member level and a stranger, plus 401/403 without
+a session or CSRF token, and 400 for unknown levels or extra fields), a
+listener refused on add and reorder with nothing written but still able to
+chat and copy, full control removing anyone's records and renaming but
+refused every owner-only route, a lowered level refused on the next edit,
+a listener's tempo staying out of the set, and both directions of leaving
+and rejoining.
 
 ### Picking several tracks
 

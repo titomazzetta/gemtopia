@@ -9,6 +9,7 @@ import type {
   ReleaseDetail,
   TrackMeta,
 } from "@/lib/types";
+import type { MemberRole } from "@/lib/roles";
 
 /**
  * Typed client for our own API.
@@ -134,6 +135,13 @@ export const playlistsApi = {
     request<{ ok: true }>(`/api/playlists/${id}/members`, {
       method: "DELETE",
       body: JSON.stringify({ username }),
+    }),
+
+  /** Owner only: what one person on the set may do (lib/roles.ts). */
+  setMemberRole: (id: string, username: string, role: MemberRole) =>
+    request<{ ok: true; changed: boolean }>(`/api/playlists/${id}/members`, {
+      method: "PATCH",
+      body: JSON.stringify({ username, role }),
     }),
 
   /**
