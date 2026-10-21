@@ -82,7 +82,10 @@ export const HELP: ReadonlyArray<Section> = [
         <b>Leave</b> under its <b>⋯</b> takes it off your list.{" "}
         <b>Set prep</b> checks every transition against your decks&apos; pitch range.{" "}
         <b>Add all</b> on a record&apos;s tracklist (in Dig, on a search result, or on the phone&apos;s
-        player sheet) puts the whole EP in your set in order. <b>Duplicate</b> gives you a private copy
+        player sheet) puts the whole EP in your set in order. The camera button beside the search box{" "}
+        <b>scans</b> a record — photograph the barcode, the label or the sleeve, a whole stack at once —
+        and each photo becomes a card to confirm, tick tracks on, and add to the set in photo order, or
+        to your collection or wantlist. <b>Duplicate</b> gives you a private copy
         of any playlist you&apos;re on, shared ones included, to rework without touching the original;
         <b>Merge into…</b> adds everything in a playlist to another one and keeps the first; a
         playlist&apos;s <b>⋯</b> also exports it as a file that <b>Import</b> brings back.

@@ -118,6 +118,7 @@ import { PullList } from "./PullList";
 import { InvitePanel } from "./InvitePanel";
 import { CollabPanel } from "./CollabPanel";
 import { ChatPanel } from "./ChatPanel";
+import { ScanSheet } from "./ScanSheet";
 import { isCollabPlaylist, collabLine, canEditSet, canRemoveEntry } from "@/client/collabView";
 import { totalUnread, unreadBadge } from "@/client/chatView";
 import { InsightsPanel } from "./InsightsPanel";
@@ -361,6 +362,8 @@ export function CrateApp({
    * Discogs, rather than making you type them a second time.
    */
   const [searchSeed, setSearchSeed] = useState("");
+  /** Photos of records being identified (ScanSheet), or null. */
+  const [scanFiles, setScanFiles] = useState<File[] | null>(null);
   /*
    * Desktop: Discogs search takes the middle column, like Dig — the left rail
    * was 300px, which cut off titles and tracklists. Once opened it stays
@@ -3574,6 +3577,7 @@ export function CrateApp({
                       quickAddMany(items, recordAbout(releaseTitle, items.length), { choose })
                     }
                     addAllLabel={addAllLabel}
+                    onScan={setScanFiles}
                   />
                 </div>
               </section>
@@ -3994,6 +3998,10 @@ export function CrateApp({
               quickAddMany(items, recordAbout(releaseTitle, items.length), { choose })
             }
             addAllLabel={addAllLabel}
+            onScan={(files) => {
+              setSheet("none");
+              setScanFiles(files);
+            }}
           />
         </div>
       </Sheet>
@@ -4284,6 +4292,27 @@ export function CrateApp({
           )}
         </div>
       </Sheet>
+
+      {scanFiles && (
+        <ScanSheet
+          files={scanFiles}
+          sets={sourceIds}
+          localDetail={(id) => detailById.get(id) ?? null}
+          targetName={quickTarget?.name ?? null}
+          onAddTracks={(items, about, choose) => {
+            // The sheet closes first: the picker sits under it otherwise.
+            setScanFiles(null);
+            quickAddMany(items, about, { choose });
+          }}
+          onAddToCollection={addFromSearch}
+          onAddToWantlist={wantFromSearch}
+          onSearchInstead={(query) => {
+            setScanFiles(null);
+            openDiscogsSearch(query);
+          }}
+          onClose={() => setScanFiles(null)}
+        />
+      )}
 
       {picker && (
         <div

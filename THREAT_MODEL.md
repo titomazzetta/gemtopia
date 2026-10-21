@@ -57,6 +57,7 @@ secret, or the Anthropic key exists in client JavaScript.
 | User's Discogs access token | **Critical** — unscoped read *and write* on their account (see §12.1) | AES-256-GCM sealed cookie, browser only |
 | Playlists, BPM catalogue, analyses | Moderate — reveals taste and listening | Postgres, scoped by `user_id` |
 | Your tags (your own words on tracks) | Moderate — personal notes, can say what a set is for | Postgres `track_tags`, scoped by `user_id`; never in a playlist, share link, chat or export (§5) |
+| A photo of a record you scanned | Low–moderate — a sleeve, but a phone photo carries location and device metadata | **Transient.** Re-encoded in the browser (metadata gone), sent once to the model, kept nowhere: not on disk, in the database, or in logs (§7) |
 | Collection index (1,500 releases) | Low | The user's own IndexedDB, never uploaded |
 | Captured tab audio | **High** while in memory | Never leaves the browser; see §6 |
 
@@ -83,6 +84,7 @@ a database breach would yield.
 
 | Threat | Control |
 |---|---|
+| A sleeve photo (or a model answer) steering what goes in a set | The model transcribes; it never names a release. Its answer is parsed strictly, cleaned and bounded, then becomes an ordinary Discogs search; the user confirms the card. A file that isn't an image by its own bytes is a 400 before anything is forwarded. §7. |
 | Modifying session contents | AEAD. Any bit flip invalidates the tag. |
 | **SQL injection** | Every statement uses `$1` placeholders. There is no string concatenation of SQL anywhere in the codebase, and bulk inserts use `unnest($2::text[], …)` rather than building VALUES lists. `lib/db.ts` is the only module that talks to `pg`. |
 | Parameter tampering | Every route parses input with a `.strict()` Zod schema — an unexpected property is a **rejected request**, not a silently ignored one. Covered by "rejects an unknown property". |
@@ -107,12 +109,14 @@ Server logs record error context only, never tokens.
 | Referrer leakage | `Referrer-Policy: no-referrer`; artwork `<img>` also sets `referrerpolicy="no-referrer"`. |
 | Cross-origin reads of API responses | `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store` on every `/api/*` response. |
 | Secrets in the client bundle | No variable is prefixed `NEXT_PUBLIC_`. CI greps `.next/static` for the build-time secret and fails if it appears. |
+| A scanned photo leaking location or device data | The browser draws the photo onto a canvas and sends the new JPEG, which carries none of the camera's metadata. The server keeps nothing and logs nothing about the image. §7, "Reading a sleeve". |
 | Listening habits leaking between users | The BPM catalogue is keyed `(user_id, clip_key)`. Covered by "another user's catalogue is separate". The one deliberate exception: a reading for a record on a playlist you share is copied to that set, for its members only (§5). |
 
 ### Denial of service
 
 | Threat | Control |
 |---|---|
+| A flood of photos spending the model budget | One image per request, ≤ 900 KB decoded, type checked by signature; 20 a minute per user, bad requests included; the same per-user daily output-token budget as the ranking pass; a 30 s timeout on the model call. A refused request never reaches the model. |
 | One user burning the shared 60 req/min Discogs budget | Sliding-window limits per authenticated user: 12 batch fetches/min, 40 listings/min, 6 analyses/min. The client sync engine self-paces below that and backs off on `429`. |
 | Unauthenticated sign-in flood | 10 `/api/auth/login` and 20 `/api/auth/callback` per minute per IP. |
 | Hung upstream pinning invocations | `AbortSignal.timeout(15_000)` on Discogs, `45_000` on Anthropic. |
@@ -682,6 +686,52 @@ What is sent to Anthropic: aggregate counts of the user's own styles, labels
 and artists, plus candidate release titles. No tokens, no email, no username,
 no collection listing.
 
+### Reading a sleeve
+
+The second place a model is used, and the first that takes a photo. The same
+contract, stated for it:
+
+> **The model may transcribe what is printed on the record. It may not say
+> which record it is.**
+
+Mechanically (`lib/llm.ts` `readSleeve`, `app/api/scan/route.ts`,
+`lib/sleeve.ts`):
+
+1. The browser re-encodes the photo to a JPEG of at most 1,600px
+   (`client/sleeveImage.ts`). That makes it small, and it strips every byte
+   the camera wrote into the file — location, device, time — because the new
+   JPEG is drawn from pixels alone. Where the browser can read a barcode
+   itself (`BarcodeDetector`), it does, and the photo is never sent.
+2. `POST /api/scan` takes `{ mime, image }` and nothing else: standard base64
+   only, at most 900 KB decoded, a MIME from a list of three — and the first
+   bytes of the decoded image must match that MIME (JPEG, PNG and WebP
+   signatures), so the request's claim about the file is checked against the
+   file. It sits behind the session, Origin and CSRF checks, twenty a minute
+   per person (bad requests count), and the same per-user daily token budget
+   as the ranking pass.
+3. The image is forwarded once to the model with a prompt that asks for
+   seven fields as JSON. It is not written to disk, not stored, not logged;
+   nothing in the route or the client keeps it, and the thumbnail in the
+   sheet is an in-memory object URL revoked when the sheet closes.
+4. The answer is untrusted text. It is parsed with a strict schema, every
+   string is cleaned like a chat message (bidi overrides and invisible
+   characters removed) and cut to a length, a barcode keeps only its digits
+   and must be 8, 12 or 13 of them, a year must be plausible, confidence is
+   clamped. An answer that isn't JSON, or reads nothing searchable, is
+   "nothing read" — never a guess.
+5. **What the model read becomes a Discogs search the user could have
+   typed**, through the same validated route (`/api/discogs/search`:
+   barcode, then catalogue number, then words). The hits are ranked by what
+   the search proved and how well the words agree, your own copy first. The
+   model's text names no release id, chooses no candidate, and is shown only
+   as "Read: …" on a card that couldn't be matched.
+
+What is sent to Anthropic: the pixels of one photo the user chose to take of
+a record, and the prompt. No session, no username, no collection listing; the
+key is the deployment's, never the user's. A deployment without
+`ANTHROPIC_API_KEY` answers 503 and the browser says so; the barcode path
+still works where the browser has one.
+
 ---
 
 ## 8. Audio capture
@@ -997,6 +1047,20 @@ Honest list of what is *not* solved.
    `fetch` calls. `HttpOnly` limits blast radius; it does not eliminate it.
 
 10. **No formal pen test.** This is one developer's threat model, not an audit.
+
+### Scanning a sleeve: what is left to a third party
+
+A photo read by the model goes to Anthropic's API under their data-handling
+terms, over TLS, with the deployment's key. Gemtopia keeps nothing, but it
+cannot make promises about what happens on the other side; the README says
+so in the user's terms, and a browser that reads barcodes itself never sends
+the photo at all. The key is a static secret held in Vercel's environment
+(Production, marked sensitive). Anthropic's workload identity federation
+would replace it with short-lived tokens, but it lists AWS, Google Cloud,
+Microsoft Entra, GitHub Actions, Kubernetes, SPIFFE and Okta — not Vercel —
+and needs a token-exchange step the app's single `fetch` client doesn't
+have. Known, weighed, deferred: it becomes worth doing the day Vercel is a
+supported issuer, or if the app moves to one that is.
 
 ---
 

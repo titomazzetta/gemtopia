@@ -17,6 +17,7 @@
 import { strict as assert } from "node:assert";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -2324,6 +2325,146 @@ console.log("\ncollaborator levels");
   });
 }
 
+console.log("\nscanning a sleeve");
+
+/*
+ * The one route that takes an image. A stub stands in for the Anthropic API
+ * (ANTHROPIC_BASE_URL points the server at it; CI and the rig set it), so
+ * the whole path runs — body checks, the image's real type, the call, the
+ * strict parse of the answer — without a key or a network.
+ */
+{
+  const JPEG = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAA0JCgsKCA0LCgsODg0PEyAVExISEyccHhcgLikxMC4pLSwzOko+MzZGNywtQFdBRkxOUlNSMj5aYVpQYEpRUk//2wBDAQ4ODhMREyYVFSZPNS01T09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT09PT0//wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDCooorzj7E/9k=";
+  const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAFElEQVR4nGM8ISfHgA0wYRUdtBIA0MoBFD5jqJkAAAAASUVORK5CYII=";
+  const stubUrl = process.env.ANTHROPIC_BASE_URL ?? "";
+  const stubPort = /^https?:\/\/(127\.0\.0\.1|localhost):(\d+)\/?$/.exec(stubUrl)?.[2];
+  const seen = [];
+  let answer = () => ({ artist: "Moodymann", title: "Silentintroduction", label: "Planet E", catno: "PE 65225-1", barcode: null, year: 1997, confidence: 0.9 });
+  const stub = stubPort
+    ? createServer((req, res) => {
+        let body = "";
+        req.on("data", (chunk) => (body += chunk));
+        req.on("end", () => {
+          seen.push({ url: req.url, key: req.headers["x-api-key"], body: JSON.parse(body) });
+          const text = answer();
+          // A real answer is a tool_use block (the call forces the "read" tool);
+          // a string answer stands in for a model that replied in prose.
+          const content = typeof text === "string"
+            ? [{ type: "text", text }]
+            : [{ type: "tool_use", id: "toolu_01", name: "read", input: text }];
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ content, usage: { input_tokens: 900, output_tokens: 60 } }));
+        });
+      })
+    : null;
+  if (stub) await new Promise((resolve) => stub.listen(Number(stubPort), "127.0.0.1", resolve));
+
+  // A fresh actor per group: the limit is per person, and every request
+  // counts, bad ones included.
+  const fresh = async () => {
+    const who = actor(`scanner_${randomBytes(4).toString("hex")}`);
+    await who.call("/api/playlists");
+    return who;
+  };
+  let scanner = await fresh();
+  const scan = (body, extra = {}) => scanner.call("/api/scan", { method: "POST", body, ...extra });
+
+  await check("a sleeve read needs a session and a CSRF token, and takes exactly one small image", async () => {
+    assert.equal((await scan({ image: JPEG, mime: "image/jpeg" }, { cookie: "" })).status, 401);
+    assert.equal((await scan({ image: JPEG, mime: "image/jpeg" }, { csrfToken: null })).status, 403);
+    for (const bad of [
+      {},
+      { image: JPEG },
+      { mime: "image/jpeg" },
+      { image: JPEG, mime: "image/gif" },
+      { image: JPEG, mime: "image/jpeg", extra: 1 },
+      { image: `data:image/jpeg;base64,${JPEG}`, mime: "image/jpeg" },
+      { image: "not base64!!", mime: "image/jpeg" },
+      { image: "A".repeat(1_300_000), mime: "image/jpeg" },
+    ]) {
+      assert.equal((await scan(bad)).status, 400, JSON.stringify(bad).slice(0, 60));
+    }
+  });
+
+  await check("the image's own bytes decide what it is, not the request", async () => {
+    const lie = await scan({ image: PNG, mime: "image/jpeg" });
+    assert.equal(lie.status, 400, lie.raw);
+    const text = await scan({ image: Buffer.from("just some text that is long enough to pass the length check, twice over, fine").toString("base64"), mime: "image/jpeg" });
+    assert.equal(text.status, 400);
+  });
+
+  if (!stub) {
+    console.log("      (no ANTHROPIC_BASE_URL stub: skipping the read itself)");
+  } else {
+    scanner = await fresh();
+    await check("a readable sleeve comes back as cleaned fields, and the photo went to the model once", async () => {
+      seen.length = 0;
+      answer = () => ({ artist: " Moodymann\u200B", title: "Silentintroduction", label: "Planet E", catno: " PE 65225-1 ", barcode: "5 020105 123456", year: "1997", confidence: 2, extra: "x" });
+      const res = await scan({ image: JPEG, mime: "image/jpeg" });
+      assert.equal(res.status, 200, res.raw);
+      assert.deepEqual(res.body.read, {
+        barcode: "5020105123456", catno: "PE 65225-1", label: "Planet E", artist: "Moodymann", title: "Silentintroduction",
+        year: 1997, confidence: 1, source: "model",
+      });
+      assert.equal(seen.length, 1, "one call");
+      const call = seen[0];
+      assert.equal(call.url, "/v1/messages");
+      assert.equal(call.key, process.env.ANTHROPIC_API_KEY, "the server's key, never the user's anything");
+      assert.equal(call.body.model, "claude-haiku-5-5", "the sleeve model, not the ranking one");
+      const image = call.body.messages[0].content.find((c) => c.type === "image");
+      assert.equal(image.source.media_type, "image/jpeg");
+      assert.equal(image.source.data, JPEG, "the bytes as sent, nothing re-read from anywhere");
+      assert.ok(res.body.model);
+      assert.equal(call.body.tool_choice?.name, "read", "the answer is forced through a tool, so it arrives as JSON");
+      assert.ok(Array.isArray(call.body.tools) && call.body.tools[0].input_schema, "with a schema the API checks");
+    });
+
+    await check("a model that answers in prose around the JSON is still read", async () => {
+      seen.length = 0;
+      answer = () => 'Here is what I can see on the sleeve:\n```json\n{"artist": "Theo Parrish", "title": "Parallel Dimensions", "catno": "SS-010", "label": "Sound Signature", "barcode": null, "year": 2000, "confidence": 0.8}\n```\nLet me know if you need anything else.';
+      const res = await scan({ image: JPEG, mime: "image/jpeg" });
+      assert.equal(res.status, 200, res.raw);
+      assert.equal(res.body.read?.catno, "SS-010");
+      assert.equal(res.body.read?.artist, "Theo Parrish");
+    });
+
+    await check("a PNG is sent as a PNG", async () => {
+      seen.length = 0;
+      const res = await scan({ image: PNG, mime: "image/png" });
+      assert.equal(res.status, 200, res.raw);
+      assert.equal(seen[0].body.messages[0].content.find((c) => c.type === "image").source.media_type, "image/png");
+    });
+
+    await check("an answer that isn't JSON, or reads nothing, is 'nothing read' — never a crash, never a guess", async () => {
+      answer = () => "I can't see a record here.";
+      let res = await scan({ image: JPEG, mime: "image/jpeg" });
+      assert.equal(res.status, 200, res.raw);
+      assert.equal(res.body.read, null);
+      answer = () => ({ label: "KDJ", confidence: 0.4 });
+      res = await scan({ image: JPEG, mime: "image/jpeg" });
+      assert.equal(res.body.read, null, "a label alone finds nothing exact");
+      answer = () => ({ artist: "x".repeat(2000), title: "<script>alert(1)</script>", catno: "KDJ 44\u202E" });
+      res = await scan({ image: JPEG, mime: "image/jpeg" });
+      assert.equal(Array.from(res.body.read.artist).length, 200, "cut to the limit");
+      assert.equal(res.body.read.title, "<script>alert(1)</script>", "kept as text; the UI never renders it as markup");
+      assert.equal(res.body.read.catno, "KDJ 44", "a bidi override is stripped");
+    });
+
+    await check("twenty reads a minute, then a 429 — bad requests count too", async () => {
+      scanner = await fresh();
+      answer = () => ({ artist: "A", title: "B" });
+      seen.length = 0;
+      let last = null;
+      for (let i = 0; i < 21; i++) last = await scan(i % 2 ? { image: JPEG, mime: "image/jpeg" } : { nope: true });
+      assert.equal(last.status, 429, last.raw);
+      assert.equal(last.body.error.code, "rate_limited");
+      assert.equal(seen.length, 10, "ten good ones reached the model; the refused one didn't");
+    });
+  }
+
+  if (stub) await new Promise((resolve) => stub.close(resolve));
+}
+
 console.log("\ninvite codes");
 
 /*
@@ -2440,6 +2581,11 @@ if (!admin) {
     assert.ok(!res.raw.includes(made.code.replace("-", "")), "the plaintext code came back");
     assert.ok(!/[0-9a-f]{64}/.test(res.raw), "a hash came back");
     assert.ok(Array.isArray(res.body.members));
+    // The AI line: on or off, and which models — never the key.
+    assert.equal(res.body.ai.configured, Boolean(process.env.ANTHROPIC_API_KEY));
+    assert.equal(res.body.ai.sleeveModel, "claude-haiku-5-5");
+    assert.ok(typeof res.body.ai.rankingModel === "string" && res.body.ai.rankingModel.length > 0);
+    if (process.env.ANTHROPIC_API_KEY) assert.ok(!res.raw.includes(process.env.ANTHROPIC_API_KEY), "the key came back");
   });
 
   await check("a live code passes the door (and is only spent after Discogs)", async () => {

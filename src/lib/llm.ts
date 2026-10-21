@@ -2,6 +2,7 @@ import "server-only";
 import { z } from "zod";
 import { env, LLM_ENABLED } from "./env";
 import { outputTokensLast24h, recordLlmUsage } from "./repo";
+import { readFromModel, type SleeveRead } from "./sleeve";
 import type { PlaylistProfile, Recommendation } from "./types";
 
 /**
@@ -22,7 +23,7 @@ import type { PlaylistProfile, Recommendation } from "./types";
  * as-is. Nothing in the product hard-depends on it.
  */
 
-const API_URL = "https://api.anthropic.com/v1/messages";
+const API_URL = `${env.ANTHROPIC_BASE_URL.replace(/\/$/, "")}/v1/messages`;
 const TIMEOUT_MS = 45_000;
 const MAX_OUTPUT_TOKENS = 2_000;
 
@@ -286,5 +287,121 @@ export async function rankWithClaude(params: {
   } catch (error) {
     console.error("[llm]", error);
     return { summary: null, recommendations: candidates, usedLlm: false, skipped: "error" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Reading a sleeve                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the sleeve reader is, and isn't.
+ *
+ * A photo of a record goes to the model with one job: transcribe what is
+ * printed — artist, title, label, catalogue number, barcode digits, year —
+ * as JSON. That's all. Which pressing it is, whether you own it, what goes
+ * in the set: Discogs and lib/sleeve.ts decide that from the text, so a
+ * confident model can't put a record in front of you that doesn't exist.
+ *
+ * The photo is forwarded once and kept nowhere: not written to disk, not to
+ * the database, not logged. The answer is parsed with a strict schema and
+ * cleaned like a chat message before it reaches the browser.
+ */
+
+const SLEEVE_TIMEOUT_MS = 30_000;
+const SLEEVE_MAX_OUTPUT_TOKENS = 300;
+
+export type SleeveMime = "image/jpeg" | "image/png" | "image/webp";
+
+const SLEEVE_TOOL = forcedTool("read", "What is printed on the record, transcribed.", {
+  type: "object",
+  properties: {
+    artist: { type: ["string", "null"] },
+    title: { type: ["string", "null"] },
+    label: { type: ["string", "null"] },
+    catno: { type: ["string", "null"] },
+    barcode: { type: ["string", "null"] },
+    year: { type: ["integer", "null"] },
+    confidence: { type: "number" },
+  },
+  required: ["artist", "title", "label", "catno", "barcode", "year", "confidence"],
+});
+
+const SLEEVE_PROMPT = `This is a photo of a vinyl record: its sleeve, centre label, spine or the barcode on the back.
+Transcribe exactly what is printed, with the read tool.
+- artist: the main artist as printed (null if not visible)
+- title: the record's title as printed (not a track name, unless the record is named after it)
+- label: the record label's name
+- catno: the catalogue number as printed, e.g. "KDJ 44" or "PF-045" (null if not visible)
+- barcode: the digits printed under a barcode, digits only (null if there is no barcode)
+- year: a four-digit year if printed, else null
+- confidence: 0 to 1, how sure you are of artist and title
+Do not guess fields that are not visible; use null. Do not add fields.`;
+
+export type SleeveOutcome =
+  | { ok: true; read: SleeveRead; model: string }
+  | { ok: false; skipped: "no_key" | "budget" | "error" | "unread" };
+
+/** Whether the deployment can read sleeves at all (an API key is set). */
+export const SLEEVE_READER_ENABLED = LLM_ENABLED;
+export const SLEEVE_READER_MODEL = env.SLEEVE_READER_MODEL;
+
+export async function readSleeve(params: {
+  userId: string;
+  imageBase64: string;
+  mime: SleeveMime;
+}): Promise<SleeveOutcome> {
+  const { userId, imageBase64, mime } = params;
+  if (!LLM_ENABLED || !env.ANTHROPIC_API_KEY) return { ok: false, skipped: "no_key" };
+
+  const spent = await outputTokensLast24h(userId);
+  if (spent >= env.LLM_DAILY_OUTPUT_TOKEN_BUDGET) return { ok: false, skipped: "budget" };
+
+  try {
+    const response = await fetch(API_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: env.SLEEVE_READER_MODEL,
+        max_tokens: SLEEVE_MAX_OUTPUT_TOKENS,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: mime, data: imageBase64 } },
+              { type: "text", text: SLEEVE_PROMPT },
+            ],
+          },
+        ],
+        ...SLEEVE_TOOL,
+      }),
+      signal: AbortSignal.timeout(SLEEVE_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      console.error(`[sleeve] ${response.status} from Anthropic API: ${await errorReason(response)}`);
+      return { ok: false, skipped: "error" };
+    }
+    const parsedApi = apiResponseSchema.safeParse(await response.json());
+    if (!parsedApi.success) return { ok: false, skipped: "error" };
+
+    await recordLlmUsage(
+      userId,
+      parsedApi.data.usage?.input_tokens ?? 0,
+      parsedApi.data.usage?.output_tokens ?? 0,
+    );
+
+    const raw = answerJson(parsedApi.data.content, "read");
+    if (raw === undefined) return { ok: false, skipped: "unread" };
+    const read = readFromModel(raw);
+    if (!read) return { ok: false, skipped: "unread" };
+    return { ok: true, read, model: env.SLEEVE_READER_MODEL };
+  } catch (error) {
+    console.error("[sleeve]", error instanceof Error ? error.message : error);
+    return { ok: false, skipped: "error" };
   }
 }

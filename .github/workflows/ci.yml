@@ -28,6 +28,11 @@ env:
   # switch boots and lets test:api exercise the admin surface.
   INVITE_ONLY: "true"
   ADMIN_USERNAMES: ci_admin
+  # A placeholder key and a stub Anthropic API on localhost, so test:api can
+  # exercise the sleeve reader end to end without a real key or a real call.
+  # The stub is started by scripts/test-api.mjs itself.
+  ANTHROPIC_API_KEY: ci-placeholder-anthropic-key
+  ANTHROPIC_BASE_URL: http://127.0.0.1:3299
 
 jobs:
   verify:
@@ -141,7 +146,7 @@ jobs:
         run: |
           for suite in mark bpm-range beat-meter record views dig-feed dig-links \
                        sync-queue clip-drag pull-list search-play invites manifest collab collab-view chat \
-                       playlist-file tags selection source-text; do
+                       playlist-file tags selection sleeve source-text; do
             npm run "test:$suite"
           done
 
@@ -157,7 +162,7 @@ jobs:
           # is the key that seals every session cookie; leaking it into the
           # bundle would let anyone forge a login. CHAT_MASTER_KEY unwraps
           # every playlist's chat key; leaking it would undo encryption at rest.
-          for secret in "ci-placeholder-secret" "$SESSION_SECRET" "$CHAT_MASTER_KEY"; do
+          for secret in "ci-placeholder-secret" "$SESSION_SECRET" "$CHAT_MASTER_KEY" "$ANTHROPIC_API_KEY"; do
             if grep -rlF -- "$secret" .next/static/ 2>/dev/null; then
               echo "::error::A server-only secret was inlined into the client bundle"
               exit 1

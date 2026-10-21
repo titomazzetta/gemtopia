@@ -11,6 +11,7 @@ import {
 } from "@/lib/invite-code";
 import { INVITE_ONLY, inviteHash } from "@/lib/invites";
 import { countLiveInvites, createInvite, listInvites, listMembers } from "@/lib/repo";
+import { LLM_ENABLED, env } from "@/lib/env";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -40,6 +41,13 @@ export async function GET(request: NextRequest) {
       maxLive: MAX_LIVE_INVITES,
       invites: invites.map((row) => ({ ...row, status: inviteStatus(row, now) })),
       members,
+      // What the optional model does on this deployment: the dig ranking and
+      // reading photographed sleeves. Model names only, never the key.
+      ai: {
+        configured: LLM_ENABLED,
+        rankingModel: env.ANTHROPIC_MODEL,
+        sleeveModel: env.SLEEVE_READER_MODEL,
+      },
     });
   } catch (error) {
     return handleError("admin/invites/list", error);
