@@ -160,3 +160,16 @@ export function runningOrder(
 export function recordQueue(order: RunningOrder): Playable[] {
   return order.rows.flatMap((row) => (row.playable ? [row.playable] : []));
 }
+
+/**
+ * Every track on the record that can go in a set, in running order: the
+ * clip where there is one, else the track as a record-only row. "Add all"
+ * on an EP. Side rips and mixes (`extras`) are not tracks on the record, so
+ * they stay out — a set holds the EP, not the EP twice.
+ */
+export function recordTracks(order: RunningOrder): Playable[] {
+  return order.rows.flatMap((row) => {
+    const track = row.playable ?? row.recordOnly;
+    return track ? [track] : [];
+  });
+}

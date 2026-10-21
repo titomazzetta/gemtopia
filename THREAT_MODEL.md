@@ -485,6 +485,15 @@ set's chat gets one summary line rather than one per record. The browser
 skips what it knows will be refused (a record that isn't yours to take out,
 one already in the set) only so the toast can say so; it isn't the check.
 
+"Add all" on a record and "Merge into…" on a playlist are the same shape:
+one ordinary save to the target, built in the browser from records this
+device already holds (the record's running order, or the source playlist as
+the server returned it), with the target's `version`. The source playlist of
+a merge is never written, and a listener on it can still merge it into their
+own set — the same read a Duplicate makes. The target must be one the caller
+may change; the browser greys out sets it can't add to, and the server's
+level check (above) is what refuses.
+
 Dragging a selection onto a playlist carries the clip keys under a type of
 our own, `application/x-gemtopia-clips`, newline-separated beside the grabbed
 row's single key. A drop accepts that type and nothing else, refuses the whole

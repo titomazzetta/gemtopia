@@ -10,6 +10,7 @@ import {
   LeaveIcon,
   Link,
   Lock,
+  MergeIcon,
   MoreIcon,
   Play,
   Plus,
@@ -33,6 +34,7 @@ export function PlaylistPanel({
   onExport,
   onExportOne,
   onDuplicate,
+  onMerge,
   onImport,
   onShare,
   sharedIds,
@@ -54,6 +56,8 @@ export function PlaylistPanel({
   onExportOne: (id: string) => void;
   /** Your own private copy of any playlist you're on, opened straight away. */
   onDuplicate: (id: string) => void;
+  /** Every track of this playlist into another one you pick; this one stays. */
+  onMerge: (id: string) => void;
   onImport: (file: File) => void;
   /** Mint or revoke a read-only link. See repo.setPlaylistShare. */
   onShare: (id: string, shared: boolean) => void;
@@ -312,10 +316,16 @@ export function PlaylistPanel({
                         onClick={() => setMoreFor((open) => (open === playlist.id ? null : playlist.id))}
                         aria-expanded={moreFor === playlist.id}
                         aria-controls={`more-${playlist.id}`}
-                        aria-label={`More for ${playlist.name}: duplicate, export, ${
+                        aria-label={`More for ${playlist.name}: duplicate, merge, export, ${
                           owner ? "rename, delete" : renamable ? "rename, leave" : "leave"
                         }`}
-                        title={owner ? "Duplicate, export, rename, delete" : renamable ? "Duplicate, export, rename, leave" : "Duplicate, export, leave"}
+                        title={
+                          owner
+                            ? "Duplicate, merge, export, rename, delete"
+                            : renamable
+                              ? "Duplicate, merge, export, rename, leave"
+                              : "Duplicate, merge, export, leave"
+                        }
                         className={`rounded-sm p-1.5 hover:bg-ink-800 ${
                           moreFor === playlist.id ? "bg-ink-800 text-neutral-100" : "text-neutral-500 hover:text-neutral-200"
                         }`}
@@ -403,6 +413,25 @@ export function PlaylistPanel({
                         <CopyIcon className="h-3 w-3" />
                         Duplicate
                       </button>
+                      {/*
+                        Everything in here into another set, in one save. The
+                        picker asks which; this playlist isn't changed, so a
+                        wrong pick costs one Undo-less removal, not a set.
+                      */}
+                      {playlist.items.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMoreFor(null);
+                            onMerge(playlist.id);
+                          }}
+                          title="Add every track of this playlist to another one — this one stays as it is"
+                          className={CHIP}
+                        >
+                          <MergeIcon className="h-3 w-3" />
+                          Merge into…
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => {

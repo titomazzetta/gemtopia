@@ -8,7 +8,7 @@
  * left it. Every test here is a way that moment can go wrong.
  */
 import assert from "node:assert/strict";
-import { comparePositions, recordQueue, runningOrder } from "../src/client/recordOrder.ts";
+import { comparePositions, recordQueue, recordTracks, runningOrder } from "../src/client/recordOrder.ts";
 import { beginDetour, detourEnds, resumePoint } from "../src/client/detour.ts";
 import { buildPlayables } from "../src/client/playables.ts";
 
@@ -124,6 +124,21 @@ check("a track with no clip still appears, so you see what the record holds", ()
   const b1 = order.rows.find((r) => r.position === "B1");
   assert.equal(b1.title, "Seed");
   assert.equal(b1.playable, null);
+});
+
+check("add all: every track in running order, with no-clip tracks as record-only rows", () => {
+  const order = runningOrder(A1, detail(TRACKS), [RIP, B2, A2, A1]);
+  const all = recordTracks(order);
+  assert.deepEqual(all.map((p) => p.key), [A1.key, A2.key, `${RELEASE}:t.B1`, B2.key]);
+  assert.equal(all[2].silence, "record-only", "B1 has no clip, so it goes in as record only");
+  assert.ok(!all.some((p) => p.key === RIP.key), "a full-side rip is not a track on the record");
+  // Play the record skips B1; Add all keeps it: the set is the EP, the queue is what can play.
+  assert.deepEqual(recordQueue(order).map((p) => p.key), [A1.key, A2.key, B2.key]);
+});
+
+check("add all with no tracklist: the matched clips, in position order", () => {
+  const order = runningOrder(A1, null, [B2, A2, A1, RIP]);
+  assert.deepEqual(recordTracks(order).map((p) => p.key), [A1.key, A2.key, B2.key]);
 });
 
 check("durations come through from the tracklist", () => {

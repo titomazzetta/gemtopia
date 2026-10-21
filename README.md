@@ -199,7 +199,8 @@ There's nothing to download or update: it is always the live version.
 | **Pick several at once** | Tick tracks in your crate or in a playlist — **Select** (on a phone it's the box button; in a playlist it sits on the set-prep line), or on a desktop the box on any row, Cmd/Ctrl-click and Shift-click, or the box at the top for everything a search or filter shows — and one bar acts on them all: add them to your current set in one tap (or **Other…** for another, or a new one), **Tag** them all, **Remove** them from the playlist, or drag (on a phone, hold) any one of them to move them together, with the same green line; on a desktop, drop them on a set in the sidebar. Tracks already in the set are skipped and the toast says so, and a shared set's chat gets one line for the lot. On a shared set you take out only what you added: a lock on the rest says who added it, and **Leave** under the set's **⋯** takes it off your list. |
 | **Your own tags** | Put your own words on any track — *deep*, *opening*, *closing*, whatever you file things under — from the player, a record-only track's card, or the phone's player sheet. Your most-used tags are one tap away. Type `#deep` in the search box, or pick tags in the **Your tags** filter (any or all of them), and there they are, in your collection and your wantlist. Tags are **private**: they never travel with a playlist, a shared set, a share link or an export. |
 | **One tap into the set you're building** | The first time you add something on a visit, you pick the set; after that every **+**, the record card, the player's add button and <kbd>A</kbd> put it straight into that set — the button says which (*Add to B2B at the Lot*), and so does the toast. **Other…**, <kbd>Shift</kbd>-click on a **+** or <kbd>Shift</kbd>+<kbd>A</kbd> picks a different one, which becomes the set from then on. With a playlist open, that playlist is the set. |
-| **Duplicate, export, import** | **Duplicate** any playlist you're on — yours or a shared one — for your own private copy, set BPMs and all, to rework the order or borrow from without touching the original or anyone's view of it. It opens straight away. Each playlist's **⋯** has Duplicate, **Export** (that one playlist as a file), Rename and Delete; **Export all** saves every playlist in one file, and **Import** takes either. Files carry the records and their order — not who added them. |
+| **A whole record, or a whole playlist, in one go** | **Add all** on a record's tracklist — in Dig, on a Discogs search result, or on the phone's player sheet — puts every track of the EP into your current set in running order, the ones with no preview as record-only rows, with one tap (Shift-click to choose the set). **Merge into…** in a playlist's **⋯** adds everything in it to another set you pick; the first playlist stays as it is. Both are one save: tracks already in the set are skipped and the toast says so, and a shared set's chat gets one line for the lot. |
+| **Duplicate, export, import** | **Duplicate** any playlist you're on — yours or a shared one — for your own private copy, set BPMs and all, to rework the order or borrow from without touching the original or anyone's view of it. It opens straight away. Each playlist's **⋯** has Duplicate, Merge into…, **Export** (that one playlist as a file), Rename and Delete; **Export all** saves every playlist in one file, and **Import** takes either. Files carry the records and their order — not who added them. |
 | **Share a set** | One tap mints a read-only link to a playlist that anyone can open and play — no account, no route back to yours. Turn sharing off and the link is dead, not dormant. See [the one exception](#the-one-exception-and-why-it-looks-like-one). |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **out of range**. Flags the hard ones before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. |
@@ -882,7 +883,7 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 832 offline tests, the schema applied to a
+the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 834 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
 reached the client bundle, then 198 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
@@ -1101,7 +1102,7 @@ npm run test:tempo      # 37
 npm run test:mixing     # 82
 npm run test:bpm-range  # 22
 npm run test:beat-meter # 15
-npm run test:record     # 24
+npm run test:record     # 32
 npm run test:mark       # 14
 npm run test:views      # 16
 npm run test:dig-feed   # 9
@@ -1119,7 +1120,7 @@ npm run test:collab-view # 11
 npm run test:chat       # 40
 npm run test:audit-gate # 15
 npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
-npm run test:db-tls     # 11 — 832 offline in all
+npm run test:db-tls     # 11 — 834 offline in all
 npm run test:source-text # every tracked text file, for hidden characters
 npm run test:api        # 198 checks, needs a running server + Postgres
 npm run typecheck

@@ -205,6 +205,18 @@ function toEntry(item: Playable): NewEntry | null {
   };
 }
 
+/** What the add-to-playlist picker is open for. */
+interface PickerState {
+  title: "Add to playlist" | "Merge into";
+  items: readonly Playable[];
+  /** Under the title: the track, "4 ticked tracks", "Melon Ball EP · all 4 tracks". */
+  about: string;
+  /** The ticks in the open playlist, so that set holds them all already. */
+  fromSelection: boolean;
+  /** A set that can't be the target: the one being merged into another. */
+  excludeId: string | null;
+}
+
 /** Why you can't add to a set you're only listening on. */
 function listenOnly(playlist: Playlist): string {
   return `You're listening on “${playlist.name}” — ask ${playlist.owner} if you'd like to add to it`;
@@ -332,8 +344,8 @@ export function CrateApp({
     label: string;
   } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  /** The add-to-playlist picker, open for one track or a whole selection. */
-  const [picker, setPicker] = useState<readonly Playable[] | null>(null);
+  /** The add-to-playlist picker, open for one track, a selection, a record or a whole set. */
+  const [picker, setPicker] = useState<PickerState | null>(null);
 
   /*
    * Which bottom sheet is open on a phone. One at a time, by construction —
@@ -995,9 +1007,8 @@ export function CrateApp({
    * artwork, styles and BPM), and fall back to the denormalised row stored on
    * the server when a release has not been synced on this device yet.
    */
-  const playlistItems = useMemo(() => {
-    if (!activePlaylist) return [];
-    return activePlaylist.entries.map((entry): Playable => {
+  const playableFor = useCallback(
+    (entry: PlaylistItemRow): Playable => {
       // The set's BPM — the same number everyone on a shared playlist sees —
       // over your own catalogue's, when the set has one.
       const cached = byKey.get(entry.clipKey);
@@ -1032,8 +1043,14 @@ export function CrateApp({
         matchKind: entry.videoId === null ? "track" : "release",
         ...(trackTags.byKey.has(entry.clipKey) ? { tags: trackTags.byKey.get(entry.clipKey) } : {}),
       };
-    });
-  }, [activePlaylist, byKey, bpmByClip, trackTags.byKey]);
+    },
+    [byKey, bpmByClip, trackTags.byKey],
+  );
+
+  const playlistItems = useMemo(
+    () => (activePlaylist ? activePlaylist.entries.map(playableFor) : []),
+    [activePlaylist, playableFor],
+  );
 
   const playlistView: PlaylistViewState =
     activePlaylist && viewChoice?.playlistId === activePlaylist.id
@@ -1820,7 +1837,13 @@ export function CrateApp({
        * last is at the top, so the common case is tap-tap and gone.
        */
       setJustAdded(new Set());
-      setPicker([item]);
+      setPicker({
+        title: "Add to playlist",
+        items: [item],
+        about: `${item.artist} — ${item.title}`,
+        fromSelection: false,
+        excludeId: null,
+      });
     },
     [],
   );
@@ -1858,6 +1881,57 @@ export function CrateApp({
     [quickTarget, queueForPlaylist, addToPlaylist],
   );
   const addLabel = quickTarget ? `Add to ${quickTarget.name}` : "Add to playlist";
+
+  /*
+   * A whole record into a set — every track in running order, the ones with
+   * no clip as record-only rows (recordOrder.recordTracks). The same rule as
+   * one track: your current set in one tap, or the picker when there isn't
+   * one yet or you asked to choose. One save, so a shared set's chat gets
+   * one line for the record.
+   */
+  const quickAddMany = useCallback(
+    (items: readonly Playable[], about: string, options: { choose?: boolean } = {}) => {
+      if (items.length === 0) return;
+      if (options.choose || !quickTarget) {
+        setJustAdded(new Set());
+        setPicker({ title: "Add to playlist", items, about, fromSelection: false, excludeId: null });
+        return;
+      }
+      setRecentPlaylists((r) => promote(r, quickTarget.id));
+      void addManyToPlaylist(quickTarget.id, items);
+    },
+    [quickTarget, addManyToPlaylist],
+  );
+  const addAllLabel = quickTarget ? `Add all to ${quickTarget.name}` : "Add all to a playlist";
+  /** What a record's "Add all" says it's about: "Melon Ball EP · all 4 tracks". */
+  const recordAbout = (releaseTitle: string, count: number) =>
+    `${releaseTitle || "This record"} · all ${count.toLocaleString("en-US")} tracks`;
+
+  /*
+   * Everything in one playlist into another, keeping the first: "merge". It
+   * always asks which set, with the source greyed out. The target gets one
+   * ordinary save, so a shared set's rules — who may add, the size limit,
+   * who's credited — all still apply, and the source isn't touched at all.
+   */
+  const mergePlaylist = useCallback(
+    (id: string) => {
+      const source = playlists.find((p) => p.id === id);
+      if (!source) return;
+      if (source.entries.length === 0) {
+        say(`Nothing in “${source.name}” to merge yet`);
+        return;
+      }
+      setJustAdded(new Set());
+      setPicker({
+        title: "Merge into",
+        items: source.entries.map(playableFor),
+        about: `Every track of “${source.name}” · ${source.entries.length.toLocaleString("en-US")} — it stays as it is`,
+        fromSelection: false,
+        excludeId: source.id,
+      });
+    },
+    [playlists, playableFor, say],
+  );
   // For the window key handler, which is registered once.
   const quickAddRef = useRef(quickAdd);
   useEffect(() => {
@@ -1932,7 +2006,13 @@ export function CrateApp({
       if (selectedItems.length === 0) return;
       if (choose || !bulkTarget) {
         setJustAdded(new Set());
-        setPicker(selectedItems);
+        setPicker({
+          title: "Add to playlist",
+          items: selectedItems,
+          about: `${selectedItems.length.toLocaleString("en-US")} ticked tracks`,
+          fromSelection: true,
+          excludeId: null,
+        });
         return;
       }
       setRecentPlaylists((r) => promote(r, bulkTarget.id));
@@ -3010,6 +3090,7 @@ export function CrateApp({
                 onExport={exportPlaylists}
                 onExportOne={exportPlaylist}
                 onDuplicate={(id) => void duplicatePlaylist(id)}
+                onMerge={mergePlaylist}
                 onShare={(id, shared) => void sharePlaylist(id, shared)}
                 sharedIds={sharedIds}
                 onImport={(file) => void importPlaylists(file)}
@@ -3489,6 +3570,10 @@ export function CrateApp({
                     onRecordOnly={setRecordCard}
                     onAddToPlaylist={(item, choose) => quickAdd(item, { choose })}
                     addLabel={addLabel}
+                    onAddAll={(items, releaseTitle, choose) =>
+                      quickAddMany(items, recordAbout(releaseTitle, items.length), { choose })
+                    }
+                    addAllLabel={addAllLabel}
                   />
                 </div>
               </section>
@@ -3509,6 +3594,10 @@ export function CrateApp({
                 onPlayRecord={playRecord}
                 onAddToPlaylist={(item, choose) => quickAdd(item, { choose })}
                 addLabel={addLabel}
+                onAddAll={(items, choose) =>
+                  quickAddMany(items, recordAbout(digTarget.releaseTitle, items.length), { choose })
+                }
+                addAllLabel={addAllLabel}
                 onRecordOnly={setRecordCard}
                 onPivot={pivotFilter}
                 onPreviewExternal={previewExternal}
@@ -3901,6 +3990,10 @@ export function CrateApp({
             onRecordOnly={setRecordCard}
             onAddToPlaylist={(item, choose) => quickAdd(item, { choose })}
             addLabel={addLabel}
+            onAddAll={(items, releaseTitle, choose) =>
+              quickAddMany(items, recordAbout(releaseTitle, items.length), { choose })
+            }
+            addAllLabel={addAllLabel}
           />
         </div>
       </Sheet>
@@ -3950,6 +4043,10 @@ export function CrateApp({
             }}
             onExport={exportPlaylists}
             onExportOne={exportPlaylist}
+            onMerge={(id) => {
+              setSheet("none");
+              mergePlaylist(id);
+            }}
             onDuplicate={(id) => {
               // The copy opens behind the sheet: close it so you're looking at it.
               setSheet("none");
@@ -4100,6 +4197,10 @@ export function CrateApp({
                     onRecordOnly={setRecordCard}
                     onAdd={(item, choose) => quickAdd(item, { choose })}
                     addLabel={addLabel}
+                    onAddAll={(items, choose) =>
+                      quickAddMany(items, recordAbout(current.releaseTitle, items.length), { choose })
+                    }
+                    addAllLabel={addAllLabel}
                   />
                 </div>
               )}
@@ -4199,7 +4300,7 @@ export function CrateApp({
           className="fixed inset-0 z-50 flex flex-col justify-end bg-black/70 sm:grid sm:place-items-center sm:justify-center sm:p-4"
           role="dialog"
           aria-modal="true"
-          aria-label="Add to playlist"
+          aria-label={picker.title}
           /*
             Esc closes it even from inside the name field. The window-level
             shortcut handler ignores keys typed into inputs (it only blurs),
@@ -4218,12 +4319,8 @@ export function CrateApp({
             </div>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <h3 className="text-sm font-semibold text-neutral-100">Add to playlist</h3>
-                <p className="mt-0.5 truncate text-xs text-neutral-500">
-                  {picker.length === 1
-                    ? `${picker[0]?.artist} — ${picker[0]?.title}`
-                    : `${picker.length.toLocaleString()} ticked tracks`}
-                </p>
+                <h3 className="text-sm font-semibold text-neutral-100">{picker.title}</h3>
+                <p className="mt-0.5 truncate text-xs text-neutral-500">{picker.about}</p>
               </div>
               {/*
                 An explicit dismiss. The backdrop still closes it, but a sheet
@@ -4251,8 +4348,9 @@ export function CrateApp({
               {orderByRecent(playlists, recentPlaylists).map((playlist, index) => {
                 const added = justAdded.has(playlist.id);
                 const isDefault = index === 0 && recentPlaylists.length > 0;
-                // Ticked in this very playlist: it holds them all already.
-                const isSource = picker.length > 1 && playlist.id === activePlaylist?.id;
+                // Ticked in this very playlist, or the set being merged: it holds them all already.
+                const isSource =
+                  (picker.fromSelection && playlist.id === activePlaylist?.id) || playlist.id === picker.excludeId;
                 // A set you're only listening on takes nothing from you.
                 const listening = !canEditSet(playlist.role);
                 return (
@@ -4261,8 +4359,9 @@ export function CrateApp({
                       type="button"
                       disabled={isSource || listening}
                       onClick={() => {
-                        if (picker.length === 1 && picker[0]) void addToPlaylist(playlist.id, picker[0]);
-                        else void addManyToPlaylist(playlist.id, picker);
+                        const [only] = picker.items;
+                        if (picker.items.length === 1 && only) void addToPlaylist(playlist.id, only);
+                        else void addManyToPlaylist(playlist.id, picker.items);
                         setRecentPlaylists((r) => promote(r, playlist.id));
                         setJustAdded((a) => new Set(a).add(playlist.id));
                       }}
@@ -4287,7 +4386,11 @@ export function CrateApp({
                         {added ? "✓" : "+"}
                       </span>
                       <span className="min-w-0 flex-1 truncate">{playlist.name}</span>
-                      {isSource && <span className="shrink-0 text-[10px] text-neutral-500">they&apos;re from here</span>}
+                      {isSource && (
+                        <span className="shrink-0 text-[10px] text-neutral-500">
+                          {playlist.id === picker.excludeId ? "that's this one" : "they're from here"}
+                        </span>
+                      )}
                       {listening && !isSource && <span className="shrink-0 text-[10px] text-neutral-500">listening only</span>}
                       {/*
                         Only the first row is marked, and only when something
@@ -4317,10 +4420,10 @@ export function CrateApp({
                 ) as HTMLInputElement | null;
                 const name = input?.value.trim();
                 if (!name) return;
-                void createPlaylist(name, picker);
+                void createPlaylist(name, picker.items);
                 setPicker(null);
                 // A selection that went into a new set has done its job.
-                if (picker.length > 1) clearSelection();
+                if (picker.fromSelection) clearSelection();
               }}
               className="flex gap-1.5 border-t border-ink-800 pt-3"
             >
