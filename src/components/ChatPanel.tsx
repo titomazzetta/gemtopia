@@ -358,6 +358,7 @@ export function ChatPanel({
                     const note = describeNote(
                       message,
                       message.meta?.clipKey ? lookup?.(message.meta.clipKey) : null,
+                      me,
                     );
                     const playable =
                       note.clipKey !== null && onPlayRecord !== undefined && lookup?.(note.clipKey) != null;

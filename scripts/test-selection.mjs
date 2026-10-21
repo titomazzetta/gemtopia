@@ -194,10 +194,10 @@ check("a bulk remove says why anything ticked is still there", () => {
   assert.equal(removedMessage("B2B", { removed: 3, refused: 0 }), "Took 3 tracks out of B2B");
   assert.equal(
     removedMessage("B2B", { removed: 1, refused: 2 }),
-    "Took 1 track out of B2B · 2 added by others stay — only the owner can take those out",
+    "Took 1 track out of B2B · 2 added by others stay — you can take out only what you added",
   );
-  assert.equal(removedMessage("B2B", { removed: 0, refused: 1 }), "That one was added by someone else — only the owner can take it out");
-  assert.equal(removedMessage("B2B", { removed: 0, refused: 4 }), "Those were added by others — only the owner can take them out");
+  assert.equal(removedMessage("B2B", { removed: 0, refused: 1 }), "That one was added by someone else — you can take out only what you added");
+  assert.equal(removedMessage("B2B", { removed: 0, refused: 4 }), "Those were added by others — you can take out only what you added");
 });
 
 check("tagging a selection says what happened", () => {

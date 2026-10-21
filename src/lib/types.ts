@@ -266,8 +266,12 @@ export interface Playlist {
   items: string[];
   /** Full denormalised rows, in order. */
   entries: PlaylistItemRow[];
-  /** "owner" for your own playlists, "editor" for one you joined. */
-  role: "owner" | "editor";
+  /**
+   * What you may do here: "owner" for your own playlists; for one you
+   * joined, the level its owner gave you (lib/roles.ts) — "editor" unless
+   * they changed it.
+   */
+  role: import("./roles").CollabRole;
   /** The owner's Discogs username. */
   owner: string;
   /**
@@ -275,6 +279,8 @@ export interface Playlist {
    * means the playlist is being worked on together.
    */
   collaborators: string[];
+  /** The same people, in the same order, with the level each one has. */
+  members: Array<{ name: string; role: import("./roles").MemberRole }>;
   /**
    * Owner only: whether the join link is on. Always false for an editor —
    * they have no business knowing, and nothing to do with it.

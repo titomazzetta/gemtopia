@@ -157,7 +157,7 @@ export function SelectionBar({
                   onClick={onRemove}
                   title={
                     removal.refused > 0
-                      ? `${removal.refused} of these were added by others — only the owner can take those out`
+                      ? `${removal.refused} of these were added by others — not yours to take out`
                       : "Take the ticked tracks out of this playlist"
                   }
                   className={`${chip} hover:border-red-400/50 hover:text-red-300`}

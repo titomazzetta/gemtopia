@@ -14,11 +14,15 @@ import { chatKeyRing, requireChatKeyRing } from "./chatKeys";
 import { copyName } from "./playlistCopy";
 import { TAG_ROWS_PER_USER } from "./tags";
 import {
+  DEFAULT_MEMBER_ROLE,
   MAX_COLLABORATORS,
   carryAddedBy,
   hashJoinToken,
   isJoinToken,
+  isMemberRole,
+  levelToRemember,
   removalsNotAllowed,
+  type MemberRole,
 } from "./collab";
 import {
   MAX_MESSAGES_KEPT,
@@ -26,6 +30,7 @@ import {
   MESSAGE_PAGE,
   UNREAD_CAP,
   activityNotes,
+  cleanLabel,
   diffRecords,
   type ActivityMeta,
   type ActivityNote,
@@ -389,9 +394,12 @@ interface PlaylistRow {
   updated_at: Date;
   version: number;
   is_owner: boolean;
+  /** Your level when it isn't yours; null for the owner. */
+  my_role: string | null;
   join_link_on: boolean;
   owner: string;
   collaborators: string[] | null;
+  member_roles: string[] | null;
   last_message_id: string | null;
   unread: number;
 }
@@ -412,29 +420,51 @@ interface ItemRow {
 }
 
 /*
- * The access rule for playlists, as SQL, written once.
+ * The access rules for playlists, as SQL, written once.
  *
  * Before collaboration this was `user_id = $n` everywhere. It is now "you own
  * it, or you are a member of it" — still a condition in the WHERE clause of
  * every statement, still taking the caller's id from the session and never
  * from the request, so a playlist you have no part in still does not exist
- * as far as any query you can cause is concerned. Owner-only operations
- * (rename, delete, share link, join link, removing people) keep the stricter
- * `user_id = $n` and do not use this.
+ * as far as any query you can cause is concerned.
+ *
+ * Three of them, by what a member's level allows (lib/roles.ts):
+ *   CAN_SEE     any member: read it, play it, chat on it, copy it.
+ *   CAN_EDIT    editors and full control: change its records.
+ *   CAN_RENAME  full control only.
+ * Owner-only operations (delete, share link, join link, who's on it and at
+ * what level) keep the stricter `user_id = $n` and use none of these.
  */
-const CAN_EDIT = (playlist: string, user: string) =>
+const CAN_SEE = (playlist: string, user: string) =>
   `(${playlist}.user_id = ${user} OR EXISTS (
       SELECT 1 FROM playlist_members pm
        WHERE pm.playlist_id = ${playlist}.id AND pm.user_id = ${user}))`;
 
+const CAN_EDIT = (playlist: string, user: string) =>
+  `(${playlist}.user_id = ${user} OR EXISTS (
+      SELECT 1 FROM playlist_members pm
+       WHERE pm.playlist_id = ${playlist}.id AND pm.user_id = ${user}
+         AND pm.role IN ('editor', 'full')))`;
+
+const CAN_RENAME = (playlist: string, user: string) =>
+  `(${playlist}.user_id = ${user} OR EXISTS (
+      SELECT 1 FROM playlist_members pm
+       WHERE pm.playlist_id = ${playlist}.id AND pm.user_id = ${user}
+         AND pm.role = 'full'))`;
+
 const PLAYLIST_COLUMNS = `
   p.id, p.name, p.notes, p.visibility, p.created_at, p.updated_at, p.version,
   (p.user_id = $1) AS is_owner,
+  (SELECT m.role FROM playlist_members m
+    WHERE m.playlist_id = p.id AND m.user_id = $1) AS my_role,
   (p.user_id = $1 AND p.collab_token_hash IS NOT NULL) AS join_link_on,
   o.username_display AS owner,
-  (SELECT array_agg(u.username_display ORDER BY m.joined_at)
+  (SELECT array_agg(u.username_display ORDER BY m.joined_at, m.user_id)
      FROM playlist_members m JOIN users u ON u.id = m.user_id
     WHERE m.playlist_id = p.id) AS collaborators,
+  (SELECT array_agg(m.role ORDER BY m.joined_at, m.user_id)
+     FROM playlist_members m
+    WHERE m.playlist_id = p.id) AS member_roles,
   (SELECT max(c.id)::text FROM playlist_messages c
     WHERE c.playlist_id = p.id
       AND c.author_id IS DISTINCT FROM $1) AS last_message_id,
@@ -472,9 +502,15 @@ function toPlaylist(row: PlaylistRow, items: PlaylistItemRow[]): Playlist {
     updatedAt: row.updated_at.getTime(),
     items: items.map((i) => i.clipKey),
     entries: items,
-    role: row.is_owner ? "owner" : "editor",
+    // A level this code doesn't know (the CHECK constraint rules it out) reads
+    // as the least one, the same way the SQL treats it: fail closed.
+    role: row.is_owner ? "owner" : isMemberRole(row.my_role) ? row.my_role : "viewer",
     owner: row.owner,
     collaborators: row.collaborators ?? [],
+    members: (row.collaborators ?? []).map((name, i) => {
+      const role = row.member_roles?.[i];
+      return { name, role: isMemberRole(role) ? role : "viewer" };
+    }),
     joinLinkOn: row.join_link_on,
     version: row.version,
     lastMessageId: row.last_message_id,
@@ -487,7 +523,7 @@ export async function listPlaylists(userId: string): Promise<Playlist[]> {
     `SELECT ${PLAYLIST_COLUMNS}
        FROM playlists p
        JOIN users o ON o.id = p.user_id
-      WHERE ${CAN_EDIT("p", "$1")}
+      WHERE ${CAN_SEE("p", "$1")}
       ORDER BY p.updated_at DESC`,
     [userId],
   );
@@ -505,7 +541,7 @@ export async function listPlaylists(userId: string): Promise<Playlist[]> {
        JOIN playlists p ON p.id = i.playlist_id
        LEFT JOIN users a ON a.id = i.added_by
        LEFT JOIN users b ON b.id = i.bpm_by
-      WHERE ${CAN_EDIT("p", "$1")}
+      WHERE ${CAN_SEE("p", "$1")}
       ORDER BY i.playlist_id, i.position`,
     [userId],
   );
@@ -528,7 +564,7 @@ export async function getPlaylist(
     `SELECT ${PLAYLIST_COLUMNS}
        FROM playlists p
        JOIN users o ON o.id = p.user_id
-      WHERE p.id = $2 AND ${CAN_EDIT("p", "$1")}`,
+      WHERE p.id = $2 AND ${CAN_SEE("p", "$1")}`,
     [userId, playlistId],
   );
   if (!row) return null;
@@ -605,7 +641,7 @@ export async function duplicatePlaylist(
   const id = await tx(async (client) => {
     const source = await client.query<{ name: string }>(
       `SELECT p.name FROM playlists p
-        WHERE p.id = $2 AND ${CAN_EDIT("p", "$1")}
+        WHERE p.id = $2 AND ${CAN_SEE("p", "$1")}
         FOR SHARE OF p`,
       [userId, playlistId],
     );
@@ -613,7 +649,7 @@ export async function duplicatePlaylist(
     if (!from) return null;
 
     const names = await client.query<{ name: string }>(
-      `SELECT p.name FROM playlists p WHERE ${CAN_EDIT("p", "$1")}`,
+      `SELECT p.name FROM playlists p WHERE ${CAN_SEE("p", "$1")}`,
       [userId],
     );
     const created = await client.query<{ id: string }>(
@@ -735,17 +771,18 @@ export async function renamePlaylist(
   playlistId: string,
   name: string,
 ): Promise<boolean> {
+  // The owner, or someone they've given full control.
   const rows = await query<{ id: string }>(
-    `UPDATE playlists
+    `UPDATE playlists p
         SET name = $3, updated_at = now()
-      WHERE id = $1 AND user_id = $2
-      RETURNING id`,
+      WHERE p.id = $1 AND ${CAN_RENAME("p", "$2")}
+      RETURNING p.id`,
     [playlistId, userId, name],
   );
   return rows.length > 0;
 }
 
-export type ReplaceResult = "ok" | "not_found" | "conflict" | "not_yours";
+export type ReplaceResult = "ok" | "not_found" | "conflict" | "not_yours" | "view_only";
 
 /**
  * Replace a playlist's contents wholesale. Reorder, add and remove all funnel
@@ -773,17 +810,26 @@ export async function replaceItems(
   expectedVersion?: number,
 ): Promise<ReplaceResult> {
   return tx(async (client) => {
-    const locked = await client.query<{ version: number; is_owner: boolean }>(
-      `SELECT p.version, (p.user_id = $2) AS is_owner FROM playlists p
-        WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
-        FOR UPDATE`,
+    const locked = await client.query<{ version: number; is_owner: boolean; role: string | null }>(
+      `SELECT p.version, (p.user_id = $2) AS is_owner,
+              (SELECT m.role FROM playlist_members m
+                WHERE m.playlist_id = p.id AND m.user_id = $2) AS role
+         FROM playlists p
+        WHERE p.id = $1 AND ${CAN_SEE("p", "$2")}
+        FOR UPDATE OF p`,
       [playlistId, userId],
     );
     const current = locked.rows[0];
     if (!current) return "not_found";
+    // Someone who can see it but not change it: refused before anything else,
+    // under the same lock, so a level changed a moment ago is the one that counts.
+    if (!current.is_owner && current.role !== "editor" && current.role !== "full") {
+      return "view_only";
+    }
     if (expectedVersion !== undefined && current.version !== expectedVersion) {
       return "conflict";
     }
+    const mayRemoveAny = current.is_owner || current.role === "full";
 
     const previous = await client.query<{
       clip_key: string;
@@ -809,7 +855,7 @@ export async function replaceItems(
       addedBy: r.added_by,
     }));
     const nextKeys = entries.map((e) => e.clipKey);
-    if (removalsNotAllowed(credited, nextKeys, userId, current.is_owner) > 0) {
+    if (removalsNotAllowed(credited, nextKeys, userId, mayRemoveAny) > 0) {
       return "not_yours";
     }
     const addedBy = carryAddedBy(credited, nextKeys, userId);
@@ -961,7 +1007,7 @@ export async function previewJoin(
     `SELECT p.id, p.name, o.username_display AS owner,
             (SELECT count(*) FROM playlist_items i WHERE i.playlist_id = p.id)::text AS tracks,
             (SELECT count(*) FROM playlist_members m WHERE m.playlist_id = p.id)::text AS collaborators,
-            ${CAN_EDIT("p", "$2")} AS already_in
+            ${CAN_SEE("p", "$2")} AS already_in
        FROM playlists p
        JOIN users o ON o.id = p.user_id
       WHERE p.collab_token_hash = $1`,
@@ -1008,9 +1054,19 @@ export async function joinPlaylist(userId: string, token: string): Promise<JoinR
     if (mine) return { status: "already", playlistId: playlist.id };
     if (Number(n) >= MAX_COLLABORATORS) return { status: "full" };
 
+    // The level they had if they were on it before (a listener stays a
+    // listener), else what joining gives. See playlist_member_levels.
     await client.query(
-      `INSERT INTO playlist_members (playlist_id, user_id) VALUES ($1, $2)
+      `INSERT INTO playlist_members (playlist_id, user_id, role)
+       VALUES ($1, $2, COALESCE(
+         (SELECT l.role FROM playlist_member_levels l
+           WHERE l.playlist_id = $1 AND l.user_id = $2),
+         $3))
        ON CONFLICT DO NOTHING`,
+      [playlist.id, userId, DEFAULT_MEMBER_ROLE],
+    );
+    await client.query(
+      `DELETE FROM playlist_member_levels WHERE playlist_id = $1 AND user_id = $2`,
       [playlist.id, userId],
     );
     await client.query(`UPDATE playlists SET updated_at = now() WHERE id = $1`, [
@@ -1037,7 +1093,7 @@ export async function removeCollaborator(
   username: string,
 ): Promise<boolean> {
   return tx(async (client) => {
-    const deleted = await client.query<{ id: string }>(
+    const deleted = await client.query<{ id: string; role: string }>(
       `DELETE FROM playlist_members m
         USING playlists p, users u
         WHERE m.playlist_id = p.id
@@ -1045,11 +1101,22 @@ export async function removeCollaborator(
           AND p.id = $1
           AND u.username_key = lower($3)
           AND (p.user_id = $2 OR m.user_id = $2)
-        RETURNING m.user_id AS id`,
+        RETURNING m.user_id AS id, m.role`,
       [playlistId, actorId, username],
     );
     const gone = deleted.rows[0];
     if (!gone) return false;
+    // A restriction outlives leaving, so coming back through the link can't
+    // be a way round it; a grant (full control) doesn't come back that way.
+    // roles.levelToRemember says which.
+    const keep = isMemberRole(gone.role) ? levelToRemember(gone.role) : null;
+    if (keep) {
+      await client.query(
+        `INSERT INTO playlist_member_levels (playlist_id, user_id, role) VALUES ($1, $2, $3)
+         ON CONFLICT (playlist_id, user_id) DO UPDATE SET role = EXCLUDED.role`,
+        [playlistId, gone.id, keep],
+      );
+    }
     await client.query(
       `DELETE FROM playlist_reads WHERE playlist_id = $1 AND user_id = $2`,
       [playlistId, gone.id],
@@ -1065,6 +1132,60 @@ export async function removeCollaborator(
       },
     ]);
     return true;
+  });
+}
+
+export type SetRoleResult = "ok" | "unchanged" | "not_found";
+
+/** How a change of level reads in the chat, as plain text (the client draws its own line). */
+const ROLE_NOTE: Record<MemberRole, (name: string) => string> = {
+  viewer: (name) => `made ${name} a listener — they can play and chat, not change the set`,
+  editor: (name) => `let ${name} add records and take out their own`,
+  full: (name) => `gave ${name} full control of what's in the set`,
+};
+
+/**
+ * The owner sets what one person on their set may do (lib/roles.ts).
+ *
+ * Owner only, by construction: the row is found through `p.user_id = $2`, so
+ * a member or a stranger asking changes nothing and gets the same 404 as for
+ * a playlist they can't see. The owner isn't a member and has no level to
+ * change. The member row is locked, so the change and its note are one step;
+ * replaceItems reads the level under the playlist's lock, so an edit already
+ * in flight finishes under the old level and the next one meets the new.
+ *
+ * A change is said in the set's chat, signed by the owner, so everyone on it
+ * knows who can take out what. Setting the level someone already has is a
+ * no-op, and says nothing.
+ */
+export async function setMemberRole(
+  ownerId: string,
+  playlistId: string,
+  username: string,
+  role: MemberRole,
+): Promise<SetRoleResult> {
+  return tx(async (client) => {
+    const found = await client.query<{ user_id: string; role: string; name: string }>(
+      `SELECT m.user_id, m.role, u.username_display AS name
+         FROM playlist_members m
+         JOIN playlists p ON p.id = m.playlist_id
+         JOIN users u ON u.id = m.user_id
+        WHERE p.id = $1 AND p.user_id = $2 AND u.username_key = lower($3)
+        FOR UPDATE OF m`,
+      [playlistId, ownerId, username],
+    );
+    const member = found.rows[0];
+    if (!member) return "not_found";
+    if (member.role === role) return "unchanged";
+    await client.query(
+      `UPDATE playlist_members SET role = $3 WHERE playlist_id = $1 AND user_id = $2`,
+      [playlistId, member.user_id, role],
+    );
+    const name = cleanLabel(member.name, 64);
+    await writeNotes(client, playlistId, ownerId, [
+      { kind: "role", body: ROLE_NOTE[role](name), meta: { member: name, role } },
+    ]);
+    return "ok";
   });
 }
 
@@ -1227,7 +1348,7 @@ export async function listMessages(
   before: string | null,
 ): Promise<{ messages: ChatMessage[]; hasMore: boolean } | null> {
   const access = await queryOne<{ id: string }>(
-    `SELECT p.id FROM playlists p WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}`,
+    `SELECT p.id FROM playlists p WHERE p.id = $1 AND ${CAN_SEE("p", "$2")}`,
     [playlistId, userId],
   );
   if (!access) return null;
@@ -1286,7 +1407,7 @@ export async function postMessage(
   requireChatKeyRing();
 
   const access = await queryOne<{ id: string }>(
-    `SELECT p.id FROM playlists p WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}`,
+    `SELECT p.id FROM playlists p WHERE p.id = $1 AND ${CAN_SEE("p", "$2")}`,
     [playlistId, userId],
   );
   if (!access) return { status: "not_found" };
@@ -1314,7 +1435,7 @@ export async function postMessage(
          OVERRIDING SYSTEM VALUE
          SELECT $4::bigint, p.id, $2, $3
            FROM playlists p
-          WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
+          WHERE p.id = $1 AND ${CAN_SEE("p", "$2")}
          RETURNING id, kind, created_at
        )
        SELECT i.id::text AS id, i.kind, NULL::jsonb AS meta, NULL::text AS body,
@@ -1427,7 +1548,7 @@ export async function markChatRead(
             LEAST($3::bigint, COALESCE((SELECT max(m.id) FROM playlist_messages m
                                          WHERE m.playlist_id = p.id), 0))
        FROM playlists p
-      WHERE p.id = $1 AND ${CAN_EDIT("p", "$2")}
+      WHERE p.id = $1 AND ${CAN_SEE("p", "$2")}
      ON CONFLICT (playlist_id, user_id) DO UPDATE
         SET last_read_id = GREATEST(playlist_reads.last_read_id, EXCLUDED.last_read_id),
             read_at = now()
@@ -1454,7 +1575,7 @@ export async function deleteMessage(
       WHERE m.id = $3::bigint
         AND m.playlist_id = $1
         AND p.id = m.playlist_id
-        AND ${CAN_EDIT("p", "$2")}
+        AND ${CAN_SEE("p", "$2")}
         AND (m.author_id = $2 OR p.user_id = $2)
       RETURNING m.id::text AS id`,
     [playlistId, userId, messageId],

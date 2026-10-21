@@ -77,13 +77,23 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         parsed.data.version,
       );
       if (result === "not_found") return fail("not_found", "No such playlist.", 404);
+      if (result === "view_only") {
+        // They can see it, so a 404 would be a lie; they can't change it.
+        const current = await getPlaylist(auth.userId, id);
+        return fail(
+          "view_only",
+          `You can play and chat on this set, not change it. Ask ${current?.owner ?? "its owner"} if you'd like to add to it.`,
+          403,
+          { playlist: current },
+        );
+      }
       if (result === "not_yours") {
         // A collaborator tried to take out someone else's record. Refused
         // whole; hand back the list as it is so the client can put it back.
         const current = await getPlaylist(auth.userId, id);
         return fail(
           "not_your_record",
-          "You can only take out records you added. Ask the owner to remove the others.",
+          "You can only take out records you added. Ask the owner, or someone with full control, to remove the others.",
           403,
           { playlist: current },
         );

@@ -142,7 +142,7 @@ function length(seconds: number): string {
  * record had measured, if they had; otherwise your own, if you have. The
  * length comes from what this browser already knows about the record.
  */
-export function describeNote(message: ChatMessage, known?: KnownRecord | null): NoteView {
+export function describeNote(message: ChatMessage, known?: KnownRecord | null, me?: string): NoteView {
   const meta = message.meta ?? {};
   const who = message.mine ? "You" : (message.author ?? "Former member");
   const base = { who, title: null, artist: null, details: [] as string[], clipKey: null };
@@ -152,6 +152,21 @@ export function describeNote(message: ChatMessage, known?: KnownRecord | null): 
       return { ...base, verb: "joined" };
     case "left":
       return { ...base, verb: meta.removed ? "was taken off the playlist" : "left" };
+    case "role": {
+      // Signed by the owner, about someone else: "Tito gave komron full
+      // control" — or, to that someone, "Tito gave you full control".
+      const toMe =
+        typeof me === "string" && typeof meta.member === "string" && meta.member.toLowerCase() === me.toLowerCase();
+      const member = toMe ? "you" : meta.member || "someone";
+      const they = toMe ? "you" : "they";
+      const verb =
+        meta.role === "full"
+          ? `gave ${member} full control — ${they} can take out anyone's records`
+          : meta.role === "viewer"
+            ? `made ${member} a listener — ${they} can play and chat, not change the set`
+            : `let ${member} add records and take out ${toMe ? "your" : "their"} own`;
+      return { ...base, verb };
+    }
     case "added":
     case "removed": {
       const verb = message.kind === "added" ? "added" : "took out";

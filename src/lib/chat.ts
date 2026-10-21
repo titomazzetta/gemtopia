@@ -117,9 +117,10 @@ export function isMessageId(value: unknown): value is string {
 
 /**
  * Who can take a message down: whoever wrote it, and the playlist's owner —
- * the same shape as records, where the owner has the last word.
+ * the same shape as records, where the owner has the last word. Full control
+ * covers what's in the set, not what people say about it.
  */
-export function canDeleteMessage(role: "owner" | "editor", mine: boolean): boolean {
+export function canDeleteMessage(role: import("./roles").CollabRole, mine: boolean): boolean {
   return mine || role === "owner";
 }
 
@@ -129,14 +130,15 @@ export function canDeleteMessage(role: "owner" | "editor", mine: boolean): boole
 
 /*
  * Small centred lines in the chat — "komron added Shiva — Kerri Chandler" —
- * written by the server when the set changes or someone joins or leaves.
+ * written by the server when the set changes, someone joins or leaves, or
+ * the owner changes what someone may do.
  * Nobody can post one: the POST schema takes only { body }, and `kind` and
  * `meta` are set in repo.ts from rows the server already holds. What they
  * name (titles, artists) did come from people's edits once, so it is cleaned
  * here the same way a message is, and it is drawn as text like a message.
  */
 
-export type ActivityKind = "added" | "removed" | "joined" | "left";
+export type ActivityKind = "added" | "removed" | "joined" | "left" | "role";
 export type MessageKind = "text" | ActivityKind;
 
 export interface ActivityMeta {
@@ -153,6 +155,9 @@ export interface ActivityMeta {
   count?: number;
   /** left: taken off by the owner, rather than leaving. */
   removed?: boolean;
+  /** role: whose level the owner changed, and to what (lib/roles.ts). */
+  member?: string;
+  role?: import("./roles").MemberRole;
 }
 
 /** More records than this in one edit become one "added 12 records" line. */

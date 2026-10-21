@@ -41,7 +41,8 @@ export function SetPrepBar({
   report: SequenceReport;
   pitchPercent: number;
   onPitchChange: (percent: number) => void;
-  onSmoothOrder: () => void;
+  /** Reorder for smooth blends. Omitted where you can't change the set (a listener). */
+  onSmoothOrder?: () => void;
   busy: boolean;
   length: SetLength;
   transitionSeconds: number;
@@ -325,16 +326,18 @@ export function SetPrepBar({
           <span aria-hidden="true">%</span>
         </label>
 
-        <button
-          type="button"
-          onClick={onSmoothOrder}
-          disabled={busy || report.unknown === total}
-          className="shrink-0 rounded-md border border-ink-700 px-2 py-1 text-[11px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100 disabled:opacity-40"
-          title="Reorder so consecutive records beatmatch, climbing in tempo"
-        >
-          <Shuffle className="mr-1 inline h-3 w-3" />
-          Smooth order
-        </button>
+        {onSmoothOrder && (
+          <button
+            type="button"
+            onClick={onSmoothOrder}
+            disabled={busy || report.unknown === total}
+            className="shrink-0 rounded-md border border-ink-700 px-2 py-1 text-[11px] text-neutral-400 hover:border-ink-600 hover:text-neutral-100 disabled:opacity-40"
+            title="Reorder so consecutive records beatmatch, climbing in tempo"
+          >
+            <Shuffle className="mr-1 inline h-3 w-3" />
+            Smooth order
+          </button>
+        )}
       </div>
 
       {preset?.note && (

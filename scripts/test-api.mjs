@@ -2152,6 +2152,178 @@ console.log("\ncollaborative playlists");
   }
 }
 
+console.log("\ncollaborator levels");
+
+{
+  const boss = actor(`boss_${randomBytes(4).toString("hex")}`);
+  const adder = actor(`adder_${randomBytes(4).toString("hex")}`);
+  const trusted = actor(`trusted_${randomBytes(4).toString("hex")}`);
+  const listener = actor(`listener_${randomBytes(4).toString("hex")}`);
+  const outsider = actor(`outsider_${randomBytes(4).toString("hex")}`);
+  for (const a of [boss, adder, trusted, listener, outsider]) await a.call("/api/playlists");
+
+  const created = await boss.call("/api/playlists", {
+    method: "POST",
+    body: { name: "Levels", entries: [clip(7001, "aaaaaaaaaaa"), clip(7002, "bbbbbbbbbbb")] },
+  });
+  const id = created.body.playlist.id;
+  const link = await boss.call(`/api/playlists/${id}/collab`, { method: "POST", body: { on: true } });
+  const token = new URL(link.body.url).pathname.split("/")[2];
+  for (const a of [adder, trusted, listener]) await a.call(`/api/join/${token}`, { method: "POST" });
+
+  const view = async (who) => (await who.call(`/api/playlists/${id}`)).body?.playlist ?? null;
+  const levelOf = async (name) => (await view(boss)).members.find((m) => m.name === name)?.role;
+  const setLevel = (who, username, role, extra = {}) =>
+    who.call(`/api/playlists/${id}/members`, { method: "PATCH", body: { username, role }, ...extra });
+  const entriesOf = (playlist) =>
+    playlist.entries.map((e) => ({
+      clipKey: e.clipKey, releaseId: e.releaseId, videoId: e.videoId, title: e.title,
+      artist: e.artist, releaseTitle: e.releaseTitle, year: e.year,
+    }));
+  const save = async (who, entries) => {
+    const current = await view(who);
+    return who.call(`/api/playlists/${id}`, { method: "PATCH", body: { entries, version: current.version } });
+  };
+
+  await check("joining gives Add, and everyone on the set sees each person's level", async () => {
+    for (const a of [adder, trusted, listener]) assert.equal((await view(a)).role, "editor", a.username);
+    const members = (await view(adder)).members;
+    assert.deepEqual(
+      members.map((m) => [m.name, m.role]),
+      [[adder.username, "editor"], [trusted.username, "editor"], [listener.username, "editor"]],
+    );
+    assert.equal((await outsider.call(`/api/playlists/${id}`)).status, 404);
+  });
+
+  await check("only the owner sets levels; everyone else gets the same 404", async () => {
+    for (const who of [adder, trusted, listener, outsider]) {
+      const res = await setLevel(who, listener.username, "full");
+      assert.equal(res.status, 404, who.username);
+    }
+    assert.equal(await levelOf(listener.username), "editor", "nothing changed");
+    assert.equal((await setLevel(boss, listener.username, "full", { cookie: "" })).status, 401);
+    assert.equal((await setLevel(boss, listener.username, "full", { csrfToken: null })).status, 403);
+    for (const role of ["owner", "admin", "FULL", "", null]) {
+      assert.equal((await setLevel(boss, listener.username, role)).status, 400, String(role));
+    }
+    assert.equal((await setLevel(boss, outsider.username, "full")).status, 404, "not on the set");
+    assert.equal((await setLevel(boss, boss.username, "viewer")).status, 404, "the owner has no level");
+    const extra = await boss.call(`/api/playlists/${id}/members`, {
+      method: "PATCH",
+      body: { username: listener.username, role: "full", playlistId: id },
+    });
+    assert.equal(extra.status, 400, "nothing but { username, role }");
+  });
+
+  await check("the owner gives full control and makes a listener, and the chat says so", async () => {
+    const full = await setLevel(boss, trusted.username, "full");
+    assert.equal(full.status, 200, full.raw);
+    assert.equal(full.body.changed, true);
+    assert.equal((await setLevel(boss, listener.username, "viewer")).body.changed, true);
+    assert.equal((await setLevel(boss, listener.username, "viewer")).body.changed, false, "the same level again is a no-op");
+    assert.equal((await view(trusted)).role, "full");
+    assert.equal((await view(listener)).role, "viewer");
+    const notes = (await adder.call(`/api/playlists/${id}/messages`)).body.messages.filter((m) => m.kind === "role");
+    assert.equal(notes.length, 2, "one note per change, none for the no-op");
+    assert.ok(notes.every((n) => n.author === boss.username));
+    assert.deepEqual(
+      notes.map((n) => [n.meta.member, n.meta.role]).sort(),
+      [[listener.username, "viewer"], [trusted.username, "full"]].sort(),
+    );
+  });
+
+  await check("a listener reads, plays and chats — and can't change the set", async () => {
+    const before = await view(listener);
+    assert.ok(before, "they can see it");
+    const add = await save(listener, [...entriesOf(before), clip(7003, "ccccccccccc")]);
+    assert.equal(add.status, 403, add.raw);
+    assert.equal(add.body.error.code, "view_only");
+    const reorder = await save(listener, [...entriesOf(before)].reverse());
+    assert.equal(reorder.status, 403, "not even a reorder");
+    assert.deepEqual(entriesOf(await view(boss)), entriesOf(before), "nothing changed");
+    const rename = await listener.call(`/api/playlists/${id}`, { method: "PATCH", body: { name: "Mine now" } });
+    assert.equal(rename.status, 404);
+    const post = await listener.call(`/api/playlists/${id}/messages`, { method: "POST", body: { body: "sounds great" } });
+    assert.ok(post.status === 200 || post.status === 201, post.raw);
+    const copy = await listener.call(`/api/playlists/${id}/duplicate`, { method: "POST" });
+    assert.equal(copy.status, 201, "a private copy of what they can see is theirs");
+  });
+
+  await check("full control takes out anyone's records and renames — and nothing owner-only", async () => {
+    // The adder puts one in; full control takes out the owner's and theirs.
+    const withAdd = await save(adder, [...entriesOf(await view(adder)), clip(7004, "ddddddddddd")]);
+    assert.equal(withAdd.status, 200, withAdd.raw);
+    const trimmed = entriesOf(await view(trusted)).filter((e) => e.releaseId === 7002);
+    const res = await save(trusted, trimmed);
+    assert.equal(res.status, 200, res.raw);
+    assert.deepEqual(entriesOf(await view(boss)).map((e) => e.releaseId), [7002]);
+    const rename = await trusted.call(`/api/playlists/${id}`, { method: "PATCH", body: { name: "Levels, renamed" } });
+    assert.equal(rename.status, 200);
+    assert.equal((await view(boss)).name, "Levels, renamed");
+    assert.equal((await trusted.call(`/api/playlists/${id}`, { method: "DELETE" })).status, 404, "delete");
+    assert.ok(await view(boss), "still there");
+    assert.equal((await trusted.call(`/api/playlists/${id}/share`, { method: "POST", body: { shared: true } })).status, 404, "share link");
+    assert.equal((await trusted.call(`/api/playlists/${id}/collab`, { method: "POST", body: { on: false } })).status, 404, "join link");
+    assert.equal((await trusted.call(`/api/playlists/${id}/members`, { method: "DELETE", body: { username: adder.username } })).status, 404, "removing people");
+    assert.equal((await setLevel(trusted, adder.username, "full")).status, 404, "giving levels");
+  });
+
+  await check("an editor still takes out only their own; lowering a level counts from the next edit", async () => {
+    await save(boss, [...entriesOf(await view(boss)), clip(7005, "eeeeeeeeeee")]);
+    const adderTry = await save(adder, entriesOf(await view(adder)).filter((e) => e.releaseId !== 7005));
+    assert.equal(adderTry.status, 403);
+    assert.equal(adderTry.body.error.code, "not_your_record");
+    assert.equal((await setLevel(boss, trusted.username, "editor")).status, 200);
+    const trustedTry = await save(trusted, entriesOf(await view(trusted)).filter((e) => e.releaseId !== 7005));
+    assert.equal(trustedTry.status, 403, "full control is gone");
+    const rename = await trusted.call(`/api/playlists/${id}`, { method: "PATCH", body: { name: "Again" } });
+    assert.equal(rename.status, 404);
+  });
+
+  await check("a listener's tempo doesn't become the set's; an editor's does", async () => {
+    const key = "7005:eeeeeeeeeee";
+    await listener.call("/api/track-meta", { method: "PUT", body: { entries: [{ clipKey: key, bpm: 140, bpmSource: "tap" }] } });
+    assert.equal((await view(boss)).entries.find((e) => e.clipKey === key).bpm, null);
+    await adder.call("/api/track-meta", { method: "PUT", body: { entries: [{ clipKey: key, bpm: 122, bpmSource: "tap" }] } });
+    assert.equal((await view(boss)).entries.find((e) => e.clipKey === key).bpm, 122);
+  });
+
+  await check("leaving and coming back through the link keeps the level the owner chose", async () => {
+    assert.equal((await listener.call(`/api/playlists/${id}/members`, { method: "DELETE", body: { username: listener.username } })).status, 200);
+    assert.equal((await listener.call(`/api/playlists/${id}`)).status, 404, "gone while away");
+    assert.equal((await listener.call(`/api/join/${token}`, { method: "POST" })).body.status, "joined");
+    assert.equal((await view(listener)).role, "viewer", "still a listener");
+    // Taken off by the owner, the same.
+    await boss.call(`/api/playlists/${id}/members`, { method: "DELETE", body: { username: listener.username } });
+    await listener.call(`/api/join/${token}`, { method: "POST" });
+    assert.equal((await view(listener)).role, "viewer");
+    // And back at the default, it's the default that's remembered: nothing.
+    await setLevel(boss, listener.username, "editor");
+    await listener.call(`/api/playlists/${id}/members`, { method: "DELETE", body: { username: listener.username } });
+    await listener.call(`/api/join/${token}`, { method: "POST" });
+    assert.equal((await view(listener)).role, "editor");
+  });
+
+  await check("full control doesn't come back through a link that's still live", async () => {
+    // Someone taken off for misusing full control opens the same link again:
+    // they're back at Add, and taking out the owner's record is refused.
+    assert.equal((await setLevel(boss, trusted.username, "full")).status, 200);
+    await boss.call(`/api/playlists/${id}/members`, { method: "DELETE", body: { username: trusted.username } });
+    assert.equal((await trusted.call(`/api/join/${token}`, { method: "POST" })).body.status, "joined");
+    assert.equal((await view(trusted)).role, "editor", "the default, not full control");
+    const ownersRecord = (await view(trusted)).entries.find((e) => e.addedBy === boss.username);
+    assert.ok(ownersRecord, "the owner has a record in it");
+    const res = await save(trusted, entriesOf(await view(trusted)).filter((e) => e.clipKey !== ownersRecord.clipKey));
+    assert.equal(res.status, 403);
+    assert.equal(res.body.error.code, "not_your_record");
+    // The same when they leave on their own.
+    await setLevel(boss, trusted.username, "full");
+    await trusted.call(`/api/playlists/${id}/members`, { method: "DELETE", body: { username: trusted.username } });
+    await trusted.call(`/api/join/${token}`, { method: "POST" });
+    assert.equal((await view(trusted)).role, "editor");
+  });
+}
+
 console.log("\ninvite codes");
 
 /*

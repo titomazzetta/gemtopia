@@ -234,12 +234,12 @@ export function addedMessage(name: string, plan: AddPlan<unknown>, limit: number
 export function removedMessage(name: string, plan: Pick<RemovePlan<unknown>, "removed" | "refused">): string {
   if (plan.removed === 0) {
     return plan.refused === 1
-      ? "That one was added by someone else — only the owner can take it out"
-      : "Those were added by others — only the owner can take them out";
+      ? "That one was added by someone else — you can take out only what you added"
+      : "Those were added by others — you can take out only what you added";
   }
   const head = `Took ${tracks(plan.removed)} out of ${name}`;
   if (plan.refused === 0) return head;
-  return `${head} · ${plan.refused.toLocaleString("en-US")} added by others stay — only the owner can take those out`;
+  return `${head} · ${plan.refused.toLocaleString("en-US")} added by others stay — you can take out only what you added`;
 }
 
 /** After tagging a selection. */

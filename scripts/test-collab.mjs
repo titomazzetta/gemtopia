@@ -9,8 +9,12 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import {
+  DEFAULT_MEMBER_ROLE,
   MAX_COLLABORATORS,
+  MEMBER_ROLES,
+  isMemberRole,
   can,
+  levelToRemember,
   carryAddedBy,
   hashJoinToken,
   isJoinToken,
@@ -76,37 +80,69 @@ check("and nowhere else — no open redirect", () => {
   }
 });
 
+const ACTIONS = [
+  "edit-items",
+  "remove-any-record",
+  "chat",
+  "delete-any-message",
+  "rename",
+  "delete",
+  "share-link",
+  "manage-join-link",
+  "remove-member",
+  "set-roles",
+  "leave",
+];
+const allowed = (role) => ACTIONS.filter((action) => can(role, action));
+
 check("owners can do everything but leave", () => {
-  for (const action of [
-    "edit-items",
-    "remove-any-record",
-    "chat",
-    "delete-any-message",
-    "rename",
-    "delete",
-    "share-link",
-    "manage-join-link",
-    "remove-member",
-  ]) {
-    assert.ok(can("owner", action), action);
-  }
-  assert.equal(can("owner", "leave"), false);
+  assert.deepEqual(allowed("owner"), ACTIONS.filter((a) => a !== "leave"));
 });
 
 check("editors change the records, chat and can leave — nothing else", () => {
-  assert.ok(can("editor", "edit-items"));
-  assert.ok(can("editor", "chat"));
-  assert.ok(can("editor", "leave"));
-  for (const action of [
-    "remove-any-record",
-    "delete-any-message",
-    "rename",
-    "delete",
-    "share-link",
-    "manage-join-link",
-    "remove-member",
-  ]) {
-    assert.equal(can("editor", action), false, action);
+  assert.deepEqual(allowed("editor"), ["edit-items", "chat", "leave"]);
+});
+
+check("full control adds taking out anyone's records and renaming — and that's all", () => {
+  assert.deepEqual(allowed("full"), ["edit-items", "remove-any-record", "chat", "rename", "leave"]);
+});
+
+check("a listener chats and can leave; changes nothing", () => {
+  assert.deepEqual(allowed("viewer"), ["chat", "leave"]);
+});
+
+check("what the set is stays with the owner, whatever level anyone has", () => {
+  for (const role of MEMBER_ROLES) {
+    for (const action of ["delete", "share-link", "manage-join-link", "remove-member", "set-roles", "delete-any-message"]) {
+      assert.equal(can(role, action), false, `${role}: ${action}`);
+    }
+  }
+});
+
+check("the levels, and what joining gives", () => {
+  assert.deepEqual([...MEMBER_ROLES], ["viewer", "editor", "full"]);
+  assert.equal(DEFAULT_MEMBER_ROLE, "editor");
+  for (const ok of MEMBER_ROLES) assert.ok(isMemberRole(ok));
+  for (const bad of ["owner", "admin", "FULL", "", null, undefined, 1, ["full"]]) {
+    assert.equal(isMemberRole(bad), false, JSON.stringify(bad));
+  }
+  assert.equal(can("admin", "chat"), false, "an unknown level can do nothing");
+});
+
+check("leaving keeps a restriction, never a grant", () => {
+  // A listener who leaves and rejoins is a listener again; someone with full
+  // control who is taken off (or leaves) comes back at the default.
+  assert.equal(levelToRemember("viewer"), "viewer");
+  assert.equal(levelToRemember("editor"), null, "the default needs no remembering");
+  assert.equal(levelToRemember("full"), null, "full control is never handed back by a link");
+  for (const role of MEMBER_ROLES) {
+    const kept = levelToRemember(role);
+    if (kept !== null) {
+      assert.equal(can(kept, "edit-items") && !can(DEFAULT_MEMBER_ROLE, "edit-items"), false);
+      for (const action of ["edit-items", "remove-any-record", "rename"]) {
+        assert.ok(!can(kept, action) || can(DEFAULT_MEMBER_ROLE, action), `${role} keeps nothing beyond joining: ${action}`);
+      }
+    }
   }
 });
 

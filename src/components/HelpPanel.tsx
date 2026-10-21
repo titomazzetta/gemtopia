@@ -77,7 +77,8 @@ export const HELP: ReadonlyArray<Section> = [
           </>
         ) : null}
         : add them all to a set, tag them, remove them, or {fine ? "drag" : "hold"} one to move them
-        together. On a shared set you can take out what you added; a lock marks the rest, and{" "}
+        together. On a shared set you can take out what you added (everything, with full control); a
+        lock marks the rest, and{" "}
         <b>Leave</b> under its <b>⋯</b> takes it off your list.{" "}
         <b>Set prep</b> checks every transition against your decks&apos; pitch range.{" "}
         <b>Duplicate</b> gives you a private copy of any playlist you&apos;re on, shared ones included,
@@ -116,8 +117,10 @@ export const HELP: ReadonlyArray<Section> = [
     title: "Back-to-back",
     body: () => (
       <>
-        <b>Collaborate</b> on a playlist makes a join link. Shared playlists are amber; everyone adds and
-        reorders, you take out only what you added, and each row says who brought it.
+        <b>Collaborate</b> on a playlist makes a join link. Shared playlists are amber; everyone who joins
+        adds and reorders, takes out only what they added, and each row says who brought it. In the same
+        panel, set each person to <b>Listen</b> (play and chat, change nothing), <b>Add</b> or{" "}
+        <b>Full control</b> (take out anyone&apos;s records, rename it) — the chat says when you do.
       </>
     ),
   },
