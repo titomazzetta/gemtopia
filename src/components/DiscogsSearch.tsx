@@ -65,6 +65,9 @@ interface Props {
   onAddToPlaylist?: (item: Playable, choose?: boolean) => void;
   /** "Add to B2B at the Lot", for the + buttons' labels. */
   addLabel?: string;
+  /** The whole record into a set: its tracks in running order, and its title for the picker. */
+  onAddAll?: (items: Playable[], releaseTitle: string, choose?: boolean) => void;
+  addAllLabel?: string;
 }
 
 /*
@@ -86,6 +89,8 @@ export function DiscogsSearch({
   onRecordOnly,
   onAddToPlaylist,
   addLabel,
+  onAddAll,
+  addAllLabel,
 }: Props) {
   const [query, setQuery] = useState(initialQuery);
   const [field, setField] = useState<SearchField>("all");
@@ -488,6 +493,8 @@ export function DiscogsSearch({
                   onRecordOnly={onRecordOnly}
                   onAdd={onAddToPlaylist}
                   addLabel={addLabel}
+                  onAddAll={onAddAll}
+                  addAllLabel={addAllLabel}
                 />
               )}
             </li>
@@ -518,6 +525,8 @@ function ReleasePanel({
   onRecordOnly,
   onAdd,
   addLabel,
+  onAddAll,
+  addAllLabel,
 }: {
   hit: SearchHit;
   detail: ReleaseDetail | "loading" | "failed" | undefined;
@@ -527,6 +536,8 @@ function ReleasePanel({
   onRecordOnly?: (item: Playable) => void;
   onAdd?: (item: Playable, choose?: boolean) => void;
   addLabel?: string;
+  onAddAll?: (items: Playable[], releaseTitle: string, choose?: boolean) => void;
+  addAllLabel?: string;
 }) {
   const record =
     onPlay && detail !== undefined && detail !== "loading" && detail !== "failed"
@@ -594,6 +605,8 @@ function ReleasePanel({
                 onRecordOnly={onRecordOnly}
                 onAdd={onAdd}
                 addLabel={addLabel}
+                onAddAll={onAddAll ? (items, choose) => onAddAll(items, detail.title, choose) : undefined}
+                addAllLabel={addAllLabel}
               />
             </div>
           ) : detail.tracks.length > 0 && (

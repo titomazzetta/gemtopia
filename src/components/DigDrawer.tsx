@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { DigResult, Playable, ReleaseDetail } from "@/lib/types";
 import { digWithinCollection, type LocalLane } from "@/client/digLocal";
-import { recordQueue, runningOrder, type RunningOrder } from "@/client/recordOrder";
+import { recordQueue, recordTracks, runningOrder, type RunningOrder } from "@/client/recordOrder";
 import { ApiError, digApi, releasesApi, wantlistApi } from "@/client/api";
 import { addedCount, appendLanes, finishedLanes, nextDigPage, revealMore, visibleCount } from "@/client/digFeed";
 import { writeClipDrag } from "@/client/clipDrag";
@@ -359,6 +359,8 @@ export function RecordSection({
   onRecordOnly,
   onAdd,
   addLabel = "Add to playlist",
+  onAddAll,
+  addAllLabel = "Add all to a playlist",
 }: {
   order: RunningOrder;
   releaseTitle: string;
@@ -375,8 +377,16 @@ export function RecordSection({
   onAdd?: (item: Playable, choose?: boolean) => void;
   /** What the + does, for its label: "Add to B2B at the Lot". */
   addLabel?: string;
+  /**
+   * The whole record into a playlist — every track in running order
+   * (recordOrder.recordTracks), the same one-tap-or-choose rule as `onAdd`.
+   */
+  onAddAll?: (items: Playable[], choose?: boolean) => void;
+  /** What Add all does, for its label: "Add all to B2B at the Lot". */
+  addAllLabel?: string;
 }) {
   const playable = order.rows.filter((row) => row.playable !== null);
+  const tracks = recordTracks(order);
   if (order.rows.length === 0 && order.extras.length === 0) return null;
 
   // Map each row to its index in the playable queue, so a click starts the
@@ -386,33 +396,57 @@ export function RecordSection({
 
   return (
     <section className="@container mx-4 mb-4 rounded-md border border-ink-800 bg-ink-850/50">
-      <header className="flex items-center gap-2 border-b border-ink-800 px-3 py-2">
-        <Disc className="h-3.5 w-3.5 shrink-0 text-accent" />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-semibold text-neutral-100">
-            {releaseTitle || "This record"}
-            {year ? <span className="font-normal text-neutral-600"> · {year}</span> : null}
-          </p>
-          <p className="text-[10px] text-neutral-600">
-            {order.rows.length > 0
-              ? playable.length === order.rows.length
-                ? `${tracksLabel(order.rows.length)} · all with a preview`
-                : playable.length === 0
-                  ? `${tracksLabel(order.rows.length)} · none with a preview`
-                  : `${tracksLabel(order.rows.length)} · ${playable.length} with a preview · ${order.rows.length - playable.length} without`
-              : "Clips on YouTube for this release"}
-          </p>
+      {/*
+        Title and buttons side by side where the container is wide (Dig's
+        drawer), the buttons on their own line where it isn't (the phone's
+        player sheet, the 300px search rail) — so neither squeezes the title.
+      */}
+      <header className="flex flex-col gap-2 border-b border-ink-800 px-3 py-2 @md:flex-row @md:items-center">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Disc className="h-3.5 w-3.5 shrink-0 text-accent" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-xs font-semibold text-neutral-100">
+              {releaseTitle || "This record"}
+              {year ? <span className="font-normal text-neutral-600"> · {year}</span> : null}
+            </p>
+            <p className="text-[10px] text-neutral-600">
+              {order.rows.length > 0
+                ? playable.length === order.rows.length
+                  ? `${tracksLabel(order.rows.length)} · all with a preview`
+                  : playable.length === 0
+                    ? `${tracksLabel(order.rows.length)} · none with a preview`
+                    : `${tracksLabel(order.rows.length)} · ${playable.length} with a preview · ${order.rows.length - playable.length} without`
+                : "Clips on YouTube for this release"}
+            </p>
+          </div>
         </div>
-        {playable.length > 1 && (
-          <button
-            type="button"
-            onClick={() => onPlay(0)}
-            className="flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-[11px] font-semibold text-ink-950"
-            title="Play the record in order, then return to your shuffle"
-          >
-            <Play className="h-3 w-3" />
-            Play the record
-          </button>
+        {(playable.length > 1 || (onAddAll && tracks.length > 1)) && (
+          <div className="flex shrink-0 gap-1.5">
+            {playable.length > 1 && (
+              <button
+                type="button"
+                onClick={() => onPlay(0)}
+                className="flex shrink-0 items-center gap-1.5 rounded-md bg-accent px-2.5 py-1.5 text-[11px] font-semibold text-ink-950"
+                title="Play the record in order, then return to your shuffle"
+              >
+                <Play className="h-3 w-3" />
+                Play the record
+              </button>
+            )}
+            {/* The whole EP in one go, the same one-tap-or-choose rule as each row's +. */}
+            {onAddAll && tracks.length > 1 && (
+              <button
+                type="button"
+                onClick={(event) => onAddAll(tracks, event.shiftKey)}
+                aria-label={`${addAllLabel}: ${releaseTitle || "this record"}, ${tracksLabel(tracks.length)}`}
+                title={`${addAllLabel} — ${tracksLabel(tracks.length)} in order. Shift-click to choose`}
+                className="flex shrink-0 items-center gap-1 rounded-md border border-ink-700 px-2 py-1.5 text-[11px] font-medium text-neutral-200 hover:border-accent/50 hover:text-accent"
+              >
+                <Plus className="h-3 w-3" />
+                Add all
+              </button>
+            )}
+          </div>
         )}
       </header>
 
@@ -553,6 +587,8 @@ export function DigDrawer({
   onPlayRecord,
   onAddToPlaylist,
   addLabel = "Add to playlist",
+  onAddAll,
+  addAllLabel,
   onRecordOnly,
   onPivot,
   onPreviewExternal,
@@ -580,6 +616,9 @@ export function DigDrawer({
   onPlayRecord: (items: Playable[], index: number, label: string) => void;
   /** Your current set in one tap; `choose` (Shift-click) opens the picker. */
   onAddToPlaylist: (item: Playable, choose?: boolean) => void;
+  /** The whole record into a set, from its running order's header. */
+  onAddAll?: (items: Playable[], choose?: boolean) => void;
+  addAllLabel?: string;
   /** "Add to B2B at the Lot", for the + buttons' labels. */
   addLabel?: string;
   /** A track on the record with no clip: open its record card. */
@@ -955,6 +994,8 @@ export function DigDrawer({
           onRecordOnly={onRecordOnly}
           onAdd={onAddToPlaylist}
           addLabel={addLabel}
+          onAddAll={onAddAll}
+          addAllLabel={addAllLabel}
         />
 
         {half === "crate" ? (

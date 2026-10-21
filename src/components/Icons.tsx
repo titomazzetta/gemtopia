@@ -166,6 +166,13 @@ export const InCollection = ({ className = base }: Props) => (
   </svg>
 );
 
+/** Two lines joining into one — a playlist merged into another. */
+export const MergeIcon = ({ className = base }: Props) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M4 6h5l4 6-4 6H4M13 12h7M17 9l3 3-3 3" />
+  </svg>
+);
+
 /** The same tick, where it means "done" rather than "in your collection". */
 export const Check = InCollection;
 
