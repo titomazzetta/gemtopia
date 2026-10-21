@@ -16,7 +16,7 @@ import { ApiError, discogsSearchApi, releasesApi, scanApi } from "@/client/api";
 import { prepareImage, readBarcodeHere, releaseImage, type PreparedImage } from "@/client/sleeveImage";
 import { searchRecord } from "@/client/searchPlay";
 import { recordTracks } from "@/client/recordOrder";
-import { CameraIcon, InCollection, NoPreview, Play, Plus } from "./Icons";
+import { CameraIcon, InCollection, NoPreview, Pause, Play, Plus } from "./Icons";
 
 /**
  * Scan records: photos in, a card per record out, then one add.
@@ -29,6 +29,14 @@ import { CameraIcon, InCollection, NoPreview, Play, Plus } from "./Icons";
  * ticked. Tick off what you don't want, then one button puts them all in
  * the set in photo order. A record you don't own can go to your collection
  * or wantlist from its card instead.
+ *
+ * Hearing it before adding it: every track with a clip is a play button —
+ * the record plays from there as a detour, the same way a search result
+ * does, so Back to shuffle returns you — and the card has Play the record.
+ * The sheet stays open while it plays; the row that's playing says so and
+ * pauses on a second tap. Tito's note after the first stack: "when I have
+ * all the pictures there, I should be able to press play to preview those
+ * tracks".
  *
  * Where the photo goes: nowhere, when the browser can read the barcode
  * itself. Otherwise, once, to the reader (/api/scan → the model), as a
@@ -77,6 +85,10 @@ export function ScanSheet({
   sets,
   localDetail,
   targetName,
+  playingKey,
+  playing,
+  onPlay,
+  onToggle,
   onAddTracks,
   onAddToCollection,
   onAddToWantlist,
@@ -89,6 +101,14 @@ export function ScanSheet({
   localDetail: (releaseId: number) => ReleaseDetail | null;
   /** The set one tap adds to, or null when the picker will ask. */
   targetName: string | null;
+  /** The clip in the player, so the row that's playing can say so. */
+  playingKey: string | null;
+  /** Whether that clip is playing (rather than paused). */
+  playing: boolean;
+  /** Play a scanned record from one of its clips, as a detour — the search column's play. */
+  onPlay: (detail: ReleaseDetail, startKey: string) => void;
+  /** Pause or resume what's playing. */
+  onToggle: () => void;
   /** Ticked tracks, in photo order, into a set: one tap or the picker. */
   onAddTracks: (items: Playable[], about: string, choose: boolean) => void;
   onAddToCollection: (hit: SearchHit) => Promise<void>;
@@ -389,8 +409,12 @@ export function ScanSheet({
               const sure = candidate ? candidate.score >= SURE_SCORE : false;
               const owned = candidate?.ownership === "collection" || item.added === "collection";
               const wanted = candidate?.ownership === "wantlist" || item.added === "wantlist";
-              const record = item.detail && item.detail !== "loading" && item.detail !== "failed" ? searchRecord(item.detail) : null;
+              const detail = item.detail && item.detail !== "loading" && item.detail !== "failed" ? item.detail : null;
+              const record = detail ? searchRecord(detail) : null;
               const tracks = record ? recordTracks(record.order) : [];
+              // This record is in the player: one of its clips is the current one.
+              const thisPlaying = playingKey !== null && tracks.some((track) => track.key === playingKey);
+              const firstClip = record?.queue[0] ?? null;
               return (
                 <li key={item.id} className="rounded-lg border border-ink-800 bg-ink-900/60" aria-label={`Photo ${index + 1}`}>
                   <div className="flex gap-3 p-3">
@@ -470,6 +494,20 @@ export function ScanSheet({
                       {item.error && hit && <p className="mt-1 text-[11px] text-red-300">{item.error}</p>}
 
                       <div className="mt-2 flex flex-wrap gap-1.5">
+                        {/* Hear it before it goes in: the record from the top, or pause what's playing. */}
+                        {detail && firstClip && (
+                          <button
+                            type="button"
+                            onClick={() => (thisPlaying ? onToggle() : onPlay(detail, firstClip.key))}
+                            title={thisPlaying ? undefined : "Play the record in order, then return to your shuffle"}
+                            className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                              thisPlaying ? "border border-accent/60 text-accent" : "bg-accent text-ink-950"
+                            }`}
+                          >
+                            {thisPlaying && playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                            {thisPlaying ? (playing ? "Pause" : "Resume") : "Play the record"}
+                          </button>
+                        )}
                         {item.candidates.length > 1 && (
                           <button
                             type="button"
@@ -516,7 +554,13 @@ export function ScanSheet({
                     </div>
                   </div>
 
-                  {/* The tracklist: every track ticked, untick what stays on the shelf. */}
+                  {/*
+                    The tracklist: every track ticked, untick what stays on the
+                    shelf. Two targets per row — the box ticks, the title plays
+                    — because the first stack Tito scanned left him wanting to
+                    hear a track before deciding, and a row that only ticks
+                    with a play icon on it promised otherwise.
+                  */}
                   {item.detail === "loading" && <p className="px-3 pb-3 text-[11px] text-neutral-600">Loading the tracklist…</p>}
                   {item.detail === "failed" && (
                     <p className="px-3 pb-3 text-[11px] text-neutral-500">Couldn&apos;t load the tracklist — the record can still go to your collection or wantlist.</p>
@@ -525,41 +569,74 @@ export function ScanSheet({
                     <ol className="border-t border-ink-800" aria-label={`Tracks on ${hit?.title ?? "this record"}`}>
                       {tracks.map((track) => {
                         const ticked = !item.unticked.has(track.key);
+                        const current = playingKey === track.key;
+                        const name = [track.position, track.title].filter(Boolean).join(" ");
+                        const rowText = (
+                          <>
+                            <span className="w-7 shrink-0 font-mono text-[10px] text-neutral-600">{track.position ?? ""}</span>
+                            <span
+                              className={`min-w-0 flex-1 truncate ${
+                                current ? "font-medium text-accent" : ticked ? "text-neutral-200" : "text-neutral-500"
+                              }`}
+                            >
+                              {track.title}
+                            </span>
+                          </>
+                        );
                         return (
-                          <li key={track.key}>
+                          <li key={track.key} className={`flex items-stretch ${current ? "bg-accent/5" : ""}`}>
                             <button
                               type="button"
                               role="checkbox"
                               aria-checked={ticked}
+                              aria-label={name}
                               onClick={() =>
-                                update(item.id, (current) => {
-                                  const next = new Set(current.unticked);
+                                update(item.id, (card) => {
+                                  const next = new Set(card.unticked);
                                   if (next.has(track.key)) next.delete(track.key);
                                   else next.add(track.key);
                                   return { unticked: next };
                                 })
                               }
-                              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs hover:bg-ink-800/60"
+                              className="flex w-11 shrink-0 items-center justify-center hover:bg-ink-800/60"
                             >
                               <span
-                                className={`grid h-4 w-4 shrink-0 place-items-center rounded-[3px] border ${
+                                className={`grid h-4 w-4 place-items-center rounded-[3px] border ${
                                   ticked ? "border-accent bg-accent text-ink-950" : "border-neutral-600 bg-ink-950/40"
                                 }`}
                                 aria-hidden="true"
                               >
                                 {ticked && <InCollection className="h-2.5 w-2.5" />}
                               </span>
-                              <span className="w-7 shrink-0 font-mono text-[10px] text-neutral-600">{track.position ?? ""}</span>
-                              <span className={`min-w-0 flex-1 truncate ${ticked ? "text-neutral-200" : "text-neutral-500"}`}>{track.title}</span>
-                              {track.silence === "record-only" ? (
+                            </button>
+                            {detail && track.videoId !== null ? (
+                              <button
+                                type="button"
+                                onClick={() => (current ? onToggle() : onPlay(detail, track.key))}
+                                aria-label={`${current ? (playing ? "Pause" : "Resume") : "Play"}: ${name}`}
+                                title={current ? undefined : "Play from here, then return to your shuffle"}
+                                aria-current={current ? "true" : undefined}
+                                className="flex min-w-0 flex-1 items-center gap-2.5 py-2.5 pr-3 text-left text-xs hover:bg-ink-800/60 lg:py-2"
+                              >
+                                {rowText}
+                                {current ? (
+                                  <span className="flex shrink-0 items-center gap-1 text-[9px] uppercase tracking-wider text-accent">
+                                    {playing ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
+                                    {playing ? "playing" : "paused"}
+                                  </span>
+                                ) : (
+                                  <Play className="h-3 w-3 shrink-0 text-neutral-500" aria-hidden="true" />
+                                )}
+                              </button>
+                            ) : (
+                              <div className="flex min-w-0 flex-1 items-center gap-2.5 py-2.5 pr-3 text-xs lg:py-2">
+                                {rowText}
                                 <span className="flex shrink-0 items-center gap-1 text-[9px] text-neutral-600">
                                   <NoPreview className="h-3 w-3" />
                                   record only
                                 </span>
-                              ) : (
-                                <Play className="h-3 w-3 shrink-0 text-neutral-500" aria-hidden="true" />
-                              )}
-                            </button>
+                              </div>
+                            )}
                           </li>
                         );
                       })}
