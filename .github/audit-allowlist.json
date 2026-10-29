@@ -1,9 +1,1 @@
-[
-  {
-    "advisory": "GHSA-vfj7-8cjw-p6xm",
-    "package": "braces",
-    "scope": "dev",
-    "reason": "Stack-exhaustion DoS on deeply nested glob patterns. No fixed braces release exists (3.0.3 is the latest and is affected). Since the Tailwind 4 upgrade it is reached only through eslint-config-next (@next/eslint-plugin-next -> fast-glob 3.3.1 -> micromatch -> braces), which expands lint patterns written in this repo, never user input, and is not in the production bundle. Re-check at expiry: the fix is a fast-glob/micromatch release that drops it, or a braces fix.",
-    "expires": "2027-01-05"
-  }
-]
+[]
