@@ -35,15 +35,23 @@ export function withoutBlanks(raw: RawEnv): RawEnv {
   return out;
 }
 
+/**
+ * The message for a key that is not there at all — Zod 4's `error` map in
+ * place of Zod 3's `required_error`. Anything else (a wrong type) keeps Zod's
+ * own wording, which names the type it expected.
+ */
+const absent = (message: string) => (issue: { input?: unknown }) =>
+  issue.input === undefined ? message : undefined;
+
 export const envSchema = z.object({
   /** Discogs application consumer key (public half of the app credential). */
   DISCOGS_CONSUMER_KEY: z
-    .string({ required_error: "DISCOGS_CONSUMER_KEY is missing" })
+    .string({ error: absent("DISCOGS_CONSUMER_KEY is missing") })
     .min(8, "DISCOGS_CONSUMER_KEY looks truncated"),
 
   /** Discogs application consumer secret. Never leaves the server. */
   DISCOGS_CONSUMER_SECRET: z
-    .string({ required_error: "DISCOGS_CONSUMER_SECRET is missing" })
+    .string({ error: absent("DISCOGS_CONSUMER_SECRET is missing") })
     .min(8, "DISCOGS_CONSUMER_SECRET looks truncated"),
 
   /**
@@ -51,7 +59,7 @@ export const envSchema = z.object({
    * session cookies. Generate with `npm run keygen`.
    */
   SESSION_SECRET: z
-    .string({ required_error: "SESSION_SECRET is missing — run `npm run keygen`" })
+    .string({ error: absent("SESSION_SECRET is missing — run `npm run keygen`") })
     .min(43, "SESSION_SECRET must be 32 bytes, base64url encoded")
     .refine(
       (v) => {
@@ -102,7 +110,7 @@ export const envSchema = z.object({
    * Require the scheme explicitly.
    */
   APP_ORIGIN: z
-    .string({ required_error: "APP_ORIGIN is missing" })
+    .string({ error: absent("APP_ORIGIN is missing") })
     .url("APP_ORIGIN must be an absolute URL")
     .refine((v) => /^https?:\/\//.test(v), {
       message: "APP_ORIGIN must start with http:// or https://",
@@ -130,7 +138,7 @@ export const envSchema = z.object({
    * constantly and would exhaust a direct endpoint.
    */
   DATABASE_URL: z
-    .string({ required_error: "DATABASE_URL is missing" })
+    .string({ error: absent("DATABASE_URL is missing") })
     .min(1, "DATABASE_URL is missing")
     .refine((v) => v.startsWith("postgres://") || v.startsWith("postgresql://"), {
       message: "DATABASE_URL must be a postgres:// connection string",
@@ -197,9 +205,7 @@ export const envSchema = z.object({
    * wrong way round for a security switch.
    */
   INVITE_ONLY: z
-    .enum(["true", "false"], {
-      errorMap: () => ({ message: 'INVITE_ONLY must be "true" or "false"' }),
-    })
+    .enum(["true", "false"], { error: 'INVITE_ONLY must be "true" or "false"' })
     .default("false")
     .transform((v) => v === "true"),
 
