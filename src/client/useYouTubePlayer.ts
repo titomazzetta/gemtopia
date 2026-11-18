@@ -134,7 +134,11 @@ export interface PlayerApi {
   duration: number;
   volume: number;
   error: string | null;
-  load(videoId: string, autoplay: boolean, title?: string): void;
+  /**
+   * `startSeconds` cues or starts the clip part-way in: picking up where a
+   * reload left off. Omitted, the clip starts from the top.
+   */
+  load(videoId: string, autoplay: boolean, title?: string, startSeconds?: number): void;
   play(): void;
   pause(): void;
   toggle(): void;
@@ -195,6 +199,7 @@ export function useYouTubePlayer(options: {
     videoId: string;
     autoplay: boolean;
     title: string;
+    startSeconds?: number;
   } | null>(null);
 
   /*
@@ -314,19 +319,24 @@ export function useYouTubePlayer(options: {
    * the whole fix.
    */
   const startPlayback = useCallback(
-    (videoId: string, autoplay: boolean, title: string) => {
+    (videoId: string, autoplay: boolean, title: string, startSeconds?: number) => {
       const player = playerRef.current;
       if (!player) return;
       stallTitle.current = title;
+      // YouTube takes the start as a second argument; undefined means the top.
+      const start = startSeconds !== undefined && startSeconds > 0 ? Math.floor(startSeconds) : undefined;
 
       if (autoplay) {
-        player.loadVideoById(videoId);
+        player.loadVideoById(videoId, start);
         // Armed only when playback was actually asked for. A cued clip is
         // sitting there on purpose and is not stuck.
         armStallTimer();
       } else {
         clearStallTimer();
-        player.cueVideoById(videoId);
+        player.cueVideoById(videoId, start);
+        // A cued clip reports where it will start from, so the scrubber
+        // shows the position it was left at rather than 0:00.
+        if (start !== undefined) setCurrentTime(start);
       }
     },
     [armStallTimer, clearStallTimer],
@@ -365,7 +375,7 @@ export function useYouTubePlayer(options: {
                 // Deliberately still autoplays. The gesture that asked for
                 // this happened seconds ago and has not been withdrawn;
                 // honouring it late is what the viewer is waiting for.
-                startPlayback(queued.videoId, queued.autoplay, queued.title);
+                startPlayback(queued.videoId, queued.autoplay, queued.title, queued.startSeconds);
               }
 
               // A press of play that landed before the player did. Replayed
@@ -473,20 +483,20 @@ export function useYouTubePlayer(options: {
   }, [ready]);
 
   const load = useCallback(
-    (videoId: string, autoplay: boolean, title = "") => {
+    (videoId: string, autoplay: boolean, title = "", startSeconds?: number) => {
       setError(null);
-      setCurrentTime(0);
+      setCurrentTime(startSeconds !== undefined && startSeconds > 0 ? Math.floor(startSeconds) : 0);
       setDuration(0);
       setStatus("loading");
 
       if (!playerRef.current) {
         // Queue it and show "loading" rather than doing nothing at all. The
         // status is honest: the clip really is on its way.
-        pendingLoad.current = { videoId, autoplay, title };
+        pendingLoad.current = { videoId, autoplay, title, startSeconds };
         return;
       }
 
-      startPlayback(videoId, autoplay, title);
+      startPlayback(videoId, autoplay, title, startSeconds);
     },
     [startPlayback],
   );

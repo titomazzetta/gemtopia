@@ -85,7 +85,11 @@ export const HELP: ReadonlyArray<Section> = [
         player sheet) puts the whole EP in your set in order. The camera button beside the search box{" "}
         <b>scans</b> a record — photograph the barcode, the label or the sleeve, a whole stack at once —
         and each photo becomes a card to confirm, hear (tap a track; <b>Back to shuffle</b> returns you),
-        tick tracks on, and add to the set in photo order, or to your collection or wantlist. <b>Duplicate</b> gives you a private copy
+        tick tracks on, and add to the set in photo order, or to your collection or wantlist. Search has
+        an <b>Artist</b> field for an artist&apos;s records alone, the heart on a result is filled when the
+        record is already on your wantlist (press it again to take it off), and <b>Open on YouTube</b> on the
+        player opens the clip itself. Leave the app and come back and it <b>picks up where you left off</b>:
+        the set open, the clip cued where it was (tap play), the search as you left it. <b>Duplicate</b> gives you a private copy
         of any playlist you&apos;re on, shared ones included, to rework without touching the original;
         <b>Merge into…</b> adds everything in a playlist to another one and keeps the first; a
         playlist&apos;s <b>⋯</b> also exports it as a file that <b>Import</b> brings back.

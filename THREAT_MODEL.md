@@ -59,6 +59,7 @@ secret, or the Anthropic key exists in client JavaScript.
 | Your tags (your own words on tracks) | Moderate — personal notes, can say what a set is for | Postgres `track_tags`, scoped by `user_id`; never in a playlist, share link, chat or export (§5) |
 | A photo of a record you scanned | Low–moderate — a sleeve, but a phone photo carries location and device metadata | **Transient.** Re-encoded in the browser (metadata gone), sent once to the model, kept nowhere: not on disk, in the database, or in logs (§7) |
 | Collection index (1,500 releases) | Low | The user's own IndexedDB, never uploaded |
+| Where you left off; your last search | Low — a playlist id, a clip key, a position, a query and public search rows | The user's own `localStorage`, parsed as untrusted on the way back in, expires in 12 h, wiped on sign-out (§5) |
 | Captured tab audio | **High** while in memory | Never leaves the browser; see §6 |
 
 The collection index deliberately stays client-side. Only the small,
@@ -547,6 +548,37 @@ by structure, and pinned by tests, not by remembering:
 **Digging leaks nothing between users either.** `/api/dig` takes the seed's
 metadata and the exclusion lists from the caller, and those only shape what that
 caller sees. The `dig_log` table is keyed on `user_id`.
+
+### Two notes on the device: where you were, and your last search
+
+A phone reloads the page after a while in the background, so the app keeps
+two small notes in the browser's `localStorage` to pick up where it left off
+(`client/resume.ts`, `client/searchMemory.ts`). They are the only state the
+app writes there beyond preferences, and `localStorage` is writable by
+anything running on this origin, so they are treated as untrusted input on
+the way back in:
+
+- **What they hold.** The resume note: the username it belongs to, the
+  crate or wantlist, the open playlist's id, the current clip's key, the
+  position in seconds, whether the search was open, and when it was written.
+  No track names, no playlist names, no tokens. The search note: the words
+  typed, the field, and the result rows Discogs returned — public catalogue
+  data. Neither holds anything a share link or an export doesn't already.
+- **Read back field by field.** Each note is parsed with the same posture as
+  a request body: a wrong version, a malformed field, a playlist id that
+  isn't a UUID, a clip key that isn't one (`lib/clipKey.ts`), a thumbnail
+  that isn't an `https:` URL — each is dropped or the note is ignored, never
+  thrown on during boot. `test-resume.mjs` feeds both parsers garbage, the
+  wrong shape, stale and future timestamps, oversized text and lists.
+- **What a forged note can do, at most.** Open a playlist that is already in
+  the signed-in account's list (the plan is made against that list, and
+  `/api/playlists/[id]` decides the rest), cue a clip the crate already
+  holds, re-open the search panel with rows that render as text. It cannot
+  start playback, reach a record the account doesn't have, or send a request
+  that a tap couldn't.
+- **Bounded in time and to a person.** Both expire after twelve hours; the
+  resume note names the account it belongs to and is ignored by any other
+  login on the same device; **Sign out & wipe local cache** removes both.
 
 ## 6. Session lifetime and revocation
 

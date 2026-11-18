@@ -37,10 +37,12 @@ const querySchema = z
      * returned nothing.
      */
     track: z.string().trim().min(2).max(120).optional(),
+    /** The artist field on its own, where `q` also matches titles and labels. */
+    artist: z.string().trim().min(2).max(120).optional(),
     page: z.coerce.number().int().min(1).max(20).optional(),
   })
   .strict()
-  .refine((v) => v.q || v.catno || v.barcode || v.track, {
+  .refine((v) => v.q || v.catno || v.barcode || v.track || v.artist, {
     message: "Give something to search for",
   });
 
@@ -76,6 +78,7 @@ export async function GET(request: NextRequest) {
         catno: parsed.data.catno,
         barcode: parsed.data.barcode,
         track: parsed.data.track,
+        artist: parsed.data.artist,
         page: parsed.data.page ?? 1,
         perPage: 25,
       },

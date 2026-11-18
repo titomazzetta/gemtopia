@@ -40,6 +40,23 @@ check("a track search does not go out as q", () => {
   assert.ok(!query.startsWith("q="), "track search went out as a title search");
 });
 
+check("an artist search goes out as the artist field, not as q", () => {
+  // Under q, "Heard" is every record with the word in a title or label name;
+  // under artist it is Larry Heard's records.
+  const query = searchQueryFor("artist", "Larry Heard");
+  assert.equal(query, "artist=Larry+Heard");
+  assert.equal(specFor("artist").label, "Artist");
+  assert.equal(searchQueryFor("artist", "L"), null, "one letter is not an artist search");
+  assert.equal(tooShortMessage("artist"), "Type at least 2 characters.");
+});
+
+check("the fields sit in the order a record is identified: all, artist, track, cat #, barcode", () => {
+  assert.deepEqual(
+    SEARCH_FIELDS.map((f) => f.key),
+    ["all", "artist", "track", "catno", "barcode"],
+  );
+});
+
 check("catalogue number and barcode keep their own parameters", () => {
   assert.equal(searchQueryFor("catno", "PF-045"), "catno=PF-045");
   assert.equal(searchQueryFor("barcode", "5021392"), "barcode=5021392");

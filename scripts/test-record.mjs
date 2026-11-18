@@ -8,7 +8,7 @@
  * left it. Every test here is a way that moment can go wrong.
  */
 import assert from "node:assert/strict";
-import { comparePositions, recordQueue, recordTracks, runningOrder } from "../src/client/recordOrder.ts";
+import { clipLength, comparePositions, recordQueue, recordTracks, runningOrder, trackArtist } from "../src/client/recordOrder.ts";
 import { beginDetour, detourEnds, resumePoint } from "../src/client/detour.ts";
 import { buildPlayables } from "../src/client/playables.ts";
 
@@ -144,6 +144,55 @@ check("add all with no tracklist: the matched clips, in position order", () => {
 check("durations come through from the tracklist", () => {
   const order = runningOrder(A1, detail(TRACKS), [A1]);
   assert.equal(order.rows[0].duration, "6:12");
+});
+
+check("a track the tracklist gives no length shows its clip's runtime instead", () => {
+  // A2 is printed without a length; its clip runs 5:32. B1 has neither.
+  const a2 = { ...A2, duration: 332 };
+  const order = runningOrder(A1, detail(TRACKS), [A1, a2]);
+  assert.equal(order.rows[1].duration, "5:32");
+  assert.equal(order.rows[2].duration, null, "no clip, no length — nothing is invented");
+  // The printed length wins over the clip's when both exist.
+  const order2 = runningOrder(A1, detail(TRACKS), [{ ...A1, duration: 400 }]);
+  assert.equal(order2.rows[0].duration, "6:12");
+});
+
+check("clip lengths print the way Discogs prints them", () => {
+  assert.equal(clipLength(332), "5:32");
+  assert.equal(clipLength(59.6), "1:00");
+  assert.equal(clipLength(3725), "1:02:05");
+  assert.equal(clipLength(0), null);
+  assert.equal(clipLength(null), null);
+  assert.equal(clipLength(Number.NaN), null);
+});
+
+check("a compilation's rows say who made each track; a single-artist record's don't", () => {
+  const va = {
+    ...detail([
+      { position: "A1", title: "Mirror", duration: "5:34", artists: ["Nate Krafft"] },
+      { position: "A2", title: "Dolphin Dreams", duration: null, artists: ["Larry Heard"] },
+      { position: "B1", title: "Untitled", duration: null, artists: [] },
+    ]),
+    artist: "Various",
+  };
+  const order = runningOrder(A1, va, []);
+  assert.deepEqual(
+    order.rows.map((r) => r.artist),
+    ["Nate Krafft", "Larry Heard", null],
+    "named per track on a VA record, nothing where the tracklist names nobody",
+  );
+  const single = runningOrder(A1, detail([{ position: "A1", title: "Melon Ball", duration: null, artists: ["Din"] }]), [A1]);
+  assert.equal(single.rows[0].artist, null, "the record's own artist on its own track is not repeated");
+  assert.equal(trackArtist("  din ", "Din"), null, "case and spacing do not make a different artist");
+  assert.equal(trackArtist("Din & Friend", "Din"), "Din & Friend");
+  assert.equal(trackArtist("", "Din"), null);
+});
+
+check("without a tracklist, the clip's own artist and length fill the row", () => {
+  const seed = { ...A1, artist: "Larry Heard", duration: 400 };
+  const order = runningOrder(seed, { ...detail([]), artist: "Various" }, [seed]);
+  assert.equal(order.rows[0].artist, "Larry Heard");
+  assert.equal(order.rows[0].duration, "6:40");
 });
 
 check("clips from other releases never leak in", () => {

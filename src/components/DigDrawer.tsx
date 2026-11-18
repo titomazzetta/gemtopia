@@ -461,18 +461,28 @@ export function RecordSection({
                 <span className="w-7 shrink-0 font-mono text-[10px] text-neutral-600">
                   {row.position}
                 </span>
-                <span
-                  className={`min-w-0 flex-1 truncate ${
-                    row.current
-                      ? "font-medium text-accent"
-                      : row.playable
-                        ? "text-neutral-200"
-                        : openItem
-                          ? "text-neutral-500 group-hover/row:text-neutral-200"
-                          : "text-neutral-600"
-                  }`}
-                >
-                  {row.title}
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={`block truncate ${
+                      row.current
+                        ? "font-medium text-accent"
+                        : row.playable
+                          ? "text-neutral-200"
+                          : openItem
+                            ? "text-neutral-500 group-hover/row:text-neutral-200"
+                            : "text-neutral-600"
+                    }`}
+                  >
+                    {row.title}
+                  </span>
+                  {/*
+                    Who made this one: only on a compilation, where the
+                    record's artist is "Various" and the row would otherwise
+                    be the one place in the app that doesn't say.
+                  */}
+                  {row.artist && (
+                    <span className="block truncate text-[10px] text-neutral-500">{row.artist}</span>
+                  )}
                 </span>
                 {row.current ? (
                   <span className="shrink-0 text-[9px] uppercase tracking-wider text-accent">

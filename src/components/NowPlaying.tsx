@@ -23,6 +23,7 @@ import {
   Waveform,
 } from "./Icons";
 import { ShareButton } from "./ShareButton";
+import { YouTubeLink } from "./YouTubeLink";
 import { WantButton, type WantHeart } from "./WantButton";
 import { TagEditor } from "./TagEditor";
 import { writeClipDrag } from "@/client/clipDrag";
@@ -841,7 +842,11 @@ export function NowPlaying({
             )}
           </div>
 
-          <ShareButton track={current} variant="wide" />
+          <div className={`grid gap-2 ${current?.videoId ? "grid-cols-2" : "grid-cols-1"}`}>
+            <ShareButton track={current} variant="wide" />
+            {/* The clip in YouTube itself, for the notes people keep there. */}
+            <YouTubeLink videoId={current?.videoId} />
+          </div>
 
           <p className="text-center font-mono text-[10px] text-neutral-600">
             {queueLength > 0
