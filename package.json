@@ -60,7 +60,8 @@
     "test:tags": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-tags.mjs",
     "test:selection": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-selection.mjs",
     "test:sleeve": "node --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-sleeve.mjs",
-    "test:source-text": "node scripts/test-source-text.mjs"
+    "test:source-text": "node scripts/test-source-text.mjs",
+    "e2e": "node e2e/run.mjs"
   },
   "dependencies": {
     "next": "16.4.6",
@@ -78,6 +79,7 @@
     "@types/react-dom": "19.3.0",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.5",
+    "playwright": "1.63.0",
     "postcss": "8.5.32",
     "tailwindcss": "4.3.5",
     "typescript": "^5.9.3"
