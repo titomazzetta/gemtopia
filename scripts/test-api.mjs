@@ -659,6 +659,15 @@ await check("search rejects an unknown parameter", async () => {
   );
 });
 
+await check("search takes the artist field on its own, with the same floor as q", async () => {
+  // Accepted: not a 400. What comes back then depends on Discogs, which this
+  // suite never reaches, so only the validation is pinned here.
+  const ok = await alice.call("/api/discogs/search?artist=Larry+Heard");
+  assert.notEqual(ok.status, 400, "artist= is a valid search on its own");
+  const short = await alice.call("/api/discogs/search?artist=L");
+  assert.equal(short.status, 400, "one letter is not an artist search");
+});
+
 console.log("\ndig endpoint");
 
 await check("dig requires authentication", async () => {

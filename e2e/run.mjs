@@ -3,7 +3,7 @@
  * Run the browser flows: every file in e2e/flows, or the ones named.
  *
  *   npm run e2e                 # all of them
- *   npm run e2e -- crate noah   # some of them
+ *   npm run e2e -- crate usability   # some of them
  *
  * Each flow exports a default async function that returns true when every
  * check passed. The process exits non-zero if any flow fails, so this can sit

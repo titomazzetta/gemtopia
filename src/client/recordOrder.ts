@@ -25,8 +25,20 @@ export interface RecordRow {
   /** Discogs position: "A1", "B2", "3". */
   position: string;
   title: string;
-  /** "5:32" as Discogs prints it, or null. */
+  /**
+   * "5:32" as Discogs prints it; failing that, the clip's own runtime in the
+   * same shape; null when neither is known. A compilation's tracklist often
+   * has no lengths while every clip knows its own, and a row with no length
+   * on the one screen where you are deciding whether to play it is the gap a
+   * friend reported first.
+   */
   duration: string | null;
+  /**
+   * The track's own artist when the record names one and it isn't the
+   * record's — "Larry Heard" on a Various Artists compilation. Null on a
+   * single-artist record, where saying the artist on every row is noise.
+   */
+  artist: string | null;
   /** The clip for this track, or null when Discogs has no audio for it. */
   playable: Playable | null;
   /**
@@ -47,6 +59,25 @@ export interface RunningOrder {
 
 const norm = (value: string | null | undefined) =>
   (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+/** Seconds as Discogs prints a track length: "5:32", "1:02:10". */
+export function clipLength(seconds: number | null | undefined): string | null {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds) || seconds <= 0) return null;
+  const whole = Math.round(seconds);
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const sec = whole % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
+    : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/** A track's own artist, only when it differs from the record's. */
+export function trackArtist(artist: string | null | undefined, releaseArtist: string | null | undefined): string | null {
+  const own = (artist ?? "").trim();
+  if (!own) return null;
+  return norm(own) === norm(releaseArtist) ? null : own;
+}
 
 /**
  * Tracklist order when there is no tracklist: A2 before A10, A10 before B1,
@@ -85,6 +116,8 @@ export function runningOrder(
     ? listed.filter((t) => norm(t.position) !== "")
     : listed;
 
+  const releaseArtist = detail?.artist ?? seed.artist;
+
   if (tracks.length === 0) {
     const ordered = [...clips].sort((a, b) =>
       comparePositions(a.position ?? "~", b.position ?? "~"),
@@ -94,7 +127,8 @@ export function runningOrder(
       rows: matched.map((c) => ({
         position: c.position ?? "",
         title: c.title,
-        duration: null,
+        duration: clipLength(c.duration),
+        artist: trackArtist(c.artist, releaseArtist),
         playable: c,
         recordOnly: null,
         current: isCurrent(c),
@@ -114,6 +148,7 @@ export function runningOrder(
     position: track.position,
     title: track.title,
     duration: track.duration,
+    artist: trackArtist(track.artists.join(", "), releaseArtist),
     playable: null,
     recordOnly: null,
     current: false,
@@ -130,6 +165,8 @@ export function runningOrder(
   });
   rows.forEach((row) => {
     row.current = isCurrent(row.playable);
+    // No printed length, but the clip knows how long it runs.
+    if (row.duration === null && row.playable) row.duration = clipLength(row.playable.duration);
   });
 
   /*

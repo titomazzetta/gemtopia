@@ -571,16 +571,25 @@ export function ScanSheet({
                         const ticked = !item.unticked.has(track.key);
                         const current = playingKey === track.key;
                         const name = [track.position, track.title].filter(Boolean).join(" ");
+                        // A compilation's rows say who made each track; a length comes
+                        // from the tracklist or, failing that, the clip (recordOrder).
+                        const row = record?.order.rows.find((r) => (r.playable ?? r.recordOnly)?.key === track.key);
                         const rowText = (
                           <>
                             <span className="w-7 shrink-0 font-mono text-[10px] text-neutral-600">{track.position ?? ""}</span>
-                            <span
-                              className={`min-w-0 flex-1 truncate ${
-                                current ? "font-medium text-accent" : ticked ? "text-neutral-200" : "text-neutral-500"
-                              }`}
-                            >
-                              {track.title}
+                            <span className="min-w-0 flex-1">
+                              <span
+                                className={`block truncate ${
+                                  current ? "font-medium text-accent" : ticked ? "text-neutral-200" : "text-neutral-500"
+                                }`}
+                              >
+                                {track.title}
+                              </span>
+                              {row?.artist && <span className="block truncate text-[10px] text-neutral-500">{row.artist}</span>}
                             </span>
+                            {row?.duration && (
+                              <span className="w-9 shrink-0 text-right font-mono text-[10px] text-neutral-600">{row.duration}</span>
+                            )}
                           </>
                         );
                         return (

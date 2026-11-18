@@ -222,14 +222,22 @@ export function MobileBar({
         </button>
 
         <div className="flex shrink-0 items-center gap-0.5">
+          {/*
+            Transport at thumb size. These were 28px — "skip buttons maybe a
+            little too small on screen" was the first thing a friend said
+            after a week on an iPhone, and 28px is under every platform's
+            floor for a touch target. 40px for the skips and 44px for play,
+            with the icons a size up so the bigger buttons don't look empty;
+            the title column gives up the difference, and it truncates anyway.
+          */}
           <button
             type="button"
             onClick={onPrev}
             disabled={!current}
             aria-label="Previous"
-            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-400 active:bg-ink-800 disabled:opacity-30"
           >
-            <Prev className="h-4 w-4" />
+            <Prev className="h-5 w-5" />
           </button>
 
           <button
@@ -237,9 +245,9 @@ export function MobileBar({
             onClick={onToggle}
             disabled={!current}
             aria-label={playing ? "Pause" : "Play"}
-            className="rounded-full bg-accent p-2.5 text-ink-950 active:scale-95 disabled:opacity-30"
+            className="flex h-11 w-11 items-center justify-center rounded-full bg-accent text-ink-950 active:scale-95 disabled:opacity-30"
           >
-            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
           </button>
 
           <button
@@ -247,9 +255,9 @@ export function MobileBar({
             onClick={onNext}
             disabled={!current}
             aria-label="Next"
-            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-400 active:bg-ink-800 disabled:opacity-30"
           >
-            <Next className="h-4 w-4" />
+            <Next className="h-5 w-5" />
           </button>
 
           {/*
@@ -269,7 +277,7 @@ export function MobileBar({
           {want ? (
             <WantButton want={want} variant="icon" />
           ) : (
-            <ShareButton track={current} className="text-neutral-400 active:bg-ink-800" />
+            <ShareButton track={current} className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-400 active:bg-ink-800" />
           )}
 
           <button
@@ -277,9 +285,9 @@ export function MobileBar({
             onClick={onAddToPlaylist}
             disabled={!current}
             aria-label={addLabel}
-            className="rounded-full p-1.5 text-neutral-400 active:bg-ink-800 disabled:opacity-30"
+            className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-400 active:bg-ink-800 disabled:opacity-30"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="h-5 w-5" />
           </button>
 
           {/*

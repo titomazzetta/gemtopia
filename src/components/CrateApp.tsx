@@ -119,6 +119,7 @@ import { InvitePanel } from "./InvitePanel";
 import { CollabPanel } from "./CollabPanel";
 import { ChatPanel } from "./ChatPanel";
 import { ScanSheet } from "./ScanSheet";
+import { YouTubeLink } from "./YouTubeLink";
 import { isCollabPlaylist, collabLine, canEditSet, canRemoveEntry } from "@/client/collabView";
 import { totalUnread, unreadBadge } from "@/client/chatView";
 import { InsightsPanel } from "./InsightsPanel";
@@ -141,6 +142,8 @@ import { DiscogsSearch } from "./DiscogsSearch";
 import { RecordOnlyCard } from "./RecordOnlyCard";
 import { TagEditor } from "./TagEditor";
 import { useTrackTags } from "@/client/useTrackTags";
+import { forgetResume, readResume, resumePlan, writeResume, RESUME_WRITE_EVERY_MS, type ResumePlan } from "@/client/resume";
+import { forgetSearch } from "@/client/searchMemory";
 import { suggestTags, TAGS_PER_TRACK, withTags } from "@/lib/tags";
 import { isClipKey, isTrackOnlyKey } from "@/lib/clipKey";
 import type { SearchHit } from "@/lib/discogs";
@@ -1349,6 +1352,12 @@ export function CrateApp({
   const waitingFor = useRef<number | null>(null);
   /** Key of the clip last handed to the player, so a re-render never reloads it. */
   const lastLoaded = useRef<string | null>(null);
+  /**
+   * A clip to cue rather than play, at a position: the one that was on the
+   * decks before the page reloaded (client/resume.ts). Consumed by the load
+   * effect for that one clip; anything chosen after plays as usual.
+   */
+  const pendingResume = useRef<{ key: string; position: number } | null>(null);
 
   /**
    * Back to the shuffle from a record you were exploring. Picks up at the
@@ -1401,9 +1410,13 @@ export function CrateApp({
     // silently continuing to show the previous track as if it were this one.
     if (current.videoId === null) return;
     lastLoaded.current = current.key;
+    // Picking up after a reload: cued where it was, not started. A reload is
+    // not a tap, and phones refuse autoplay without one anyway.
+    const resume = pendingResume.current?.key === current.key ? pendingResume.current : null;
+    pendingResume.current = null;
     // The title goes with it so a stall can name the record rather than
     // reporting an error code that does not exist on this path.
-    api.load(current.videoId, true, current.title);
+    api.load(current.videoId, resume === null, current.title, resume?.position);
 
     // New track: throw away the tempo evidence gathered for the previous one.
     detector.reset();
@@ -1536,15 +1549,21 @@ export function CrateApp({
    * in your collection — the listing only, one Discogs request per hundred
    * wants, no tracklists. It's what lets a search put your wants second and
    * the heart know a record is already wanted on a device that has never
-   * opened wantlist mode. Waits for the crate's own sync to finish so the two
-   * never share the rate limit, and runs once per visit at most (the rule in
+   * opened wantlist mode. Runs once per visit at most (the rule in
    * crateFreshness.needsListing decides whether it's due at all).
+   *
+   * It waits for the crate's own *listing* to finish, not for the whole
+   * sync: the details phase of a first sync on a big collection runs for
+   * minutes, and until this had run every heart in search said "not wanted"
+   * about records that were — the first bug a friend reported from a new
+   * phone. A wantlist listing is one request per hundred wants, a second
+   * apart; the details loop already pauses itself on a rate limit.
    */
   const wantlistListed = useRef(false);
   const { refreshListing } = crate;
   useEffect(() => {
     if (loading || wantlistListed.current || source !== "collection") return;
-    if (sync && sync.status !== "done") return;
+    if (sync && (sync.status === "listing" || sync.status === "paused")) return;
     wantlistListed.current = true;
     void (async () => {
       try {
@@ -2468,6 +2487,15 @@ export function CrateApp({
     [applyWantlistChange],
   );
 
+  /** The search row's heart pressed again: the same DELETE the player's heart uses. */
+  const unwantFromSearch = useCallback(
+    async (hit: SearchHit) => {
+      await wantlistApi.remove(hit.id);
+      applyWantlistChange(hit.id, false);
+    },
+    [applyWantlistChange],
+  );
+
   /*
    * The account menu is a <details>, which on its own only closes when its
    * summary is pressed again — a tap anywhere else, or Esc, left it hanging
@@ -2551,6 +2579,8 @@ export function CrateApp({
   const signOut = useCallback(async () => {
     await authApi.logout().catch(() => {});
     await nuke();
+    forgetResume();
+    forgetSearch();
     // Deliberate hard navigation: a client-side route change would keep the
     // in-memory queue and cached crate alive in this tab after we have just
     // wiped them from disk.
@@ -2809,6 +2839,102 @@ export function CrateApp({
     },
     [playlists, byKey, playFrom, say],
   );
+
+  /* ================= pick up where you left off ================= */
+
+  /*
+   * Written as you go, read back once on the next load (client/resume.ts).
+   * The search panel keeps its own note the same way (client/searchMemory.ts).
+   */
+  const searchOpenNow = isDesktop ? searchOpen : sheet === "search";
+  const positionRef = useRef(0);
+  useEffect(() => {
+    positionRef.current = api.currentTime;
+  }, [api.currentTime]);
+  const resumeRead = useRef(false);
+  const [resumeCue, setResumeCue] = useState<ResumePlan["cue"] | null>(null);
+  const [resumeInto, setResumeInto] = useState<string | null>(null);
+
+  // Read first, before anything below can write over it: once, when the
+  // crate and the playlists are in.
+  useEffect(() => {
+    if (loading || resumeRead.current) return;
+    resumeRead.current = true;
+    const plan = resumePlan(readResume(username), {
+      playlistIds: new Set(playlists.map((p) => p.id)),
+      keys: new Set(allPlayables.map((p) => p.key)),
+    });
+    if (!plan) return;
+    if (plan.source !== source) switchSource(plan.source);
+    if (plan.playlistId) {
+      openPlaylist(plan.playlistId);
+      setRail("playlists");
+    }
+    if (plan.searchOpen) openDiscogsSearch("");
+    if (plan.cue) {
+      // The position survives the next write, which happens before the player
+      // has reported anything.
+      positionRef.current = plan.cue.position;
+      setResumeInto(plan.playlistId);
+      setResumeCue(plan.cue);
+    }
+  }, [loading, username, playlists, allPlayables, source, switchSource, openPlaylist, openDiscogsSearch]);
+
+  // Then cue the clip, once the list it was playing from is the one on screen.
+  useEffect(() => {
+    if (!resumeCue) return;
+    const items = resumeInto
+      ? activePlaylist?.id === resumeInto
+        ? playlistItems
+        : null
+      : filtered.some((p) => p.key === resumeCue.key)
+        ? filtered
+        : allPlayables;
+    if (!items) return;
+    const index = items.findIndex((p) => p.key === resumeCue.key);
+    setResumeCue(null);
+    setResumeInto(null);
+    if (index < 0) return;
+    pendingResume.current = resumeCue;
+    if (!loadQueue(items, index)) pendingResume.current = null;
+  }, [resumeCue, resumeInto, activePlaylist, playlistItems, filtered, allPlayables, loadQueue]);
+
+  const writeNote = useCallback(() => {
+    // Not before the old note has been read, and not while its clip is still
+    // on its way to the decks — a write then would record "nothing playing".
+    if (loading || !resumeRead.current || resumeCue) return;
+    writeResume({
+      at: Date.now(),
+      user: username,
+      source,
+      playlistId: activePlaylistId,
+      key: current?.key ?? null,
+      position: positionRef.current,
+      searchOpen: searchOpenNow,
+    });
+  }, [loading, username, source, activePlaylistId, current?.key, searchOpenNow, resumeCue]);
+
+  // On every change of what's open or playing; every few seconds while it
+  // plays, for the position; and the moment the page goes into the background.
+  useEffect(() => {
+    writeNote();
+  }, [writeNote]);
+  useEffect(() => {
+    if (api.status !== "playing") return;
+    const id = window.setInterval(writeNote, RESUME_WRITE_EVERY_MS);
+    return () => window.clearInterval(id);
+  }, [api.status, writeNote]);
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState === "hidden") writeNote();
+    };
+    document.addEventListener("visibilitychange", onHide);
+    window.addEventListener("pagehide", writeNote);
+    return () => {
+      document.removeEventListener("visibilitychange", onHide);
+      window.removeEventListener("pagehide", writeNote);
+    };
+  }, [writeNote]);
 
   /* ================= render ================= */
 
@@ -3567,6 +3693,7 @@ export function CrateApp({
                     initialQuery={searchSeed}
                     onAddToCollection={addFromSearch}
                     onAddToWantlist={wantFromSearch}
+                    onRemoveFromWantlist={unwantFromSearch}
                     localDetail={(id) => detailById.get(id) ?? null}
                     onPlay={playFromSearch}
                     playingKey={current?.key ?? null}
@@ -3988,6 +4115,7 @@ export function CrateApp({
             initialQuery={searchSeed}
             onAddToCollection={addFromSearch}
             onAddToWantlist={wantFromSearch}
+            onRemoveFromWantlist={unwantFromSearch}
             localDetail={(id) => detailById.get(id) ?? null}
             onPlay={playFromSearch}
             playingKey={current?.key ?? null}
@@ -4177,6 +4305,18 @@ export function CrateApp({
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <WantButton want={currentWant} variant="wide" />
                   <ShareButton track={current} variant="wide" />
+                </div>
+              )}
+
+              {/*
+                The clip in YouTube itself, for the notes people keep there.
+                A wantlist is per record on Discogs; for one track off a
+                record you don't want whole, a YouTube list (or a playlist
+                here) is the honest answer, and this is the way out to it.
+              */}
+              {current?.videoId && (
+                <div className="mt-2">
+                  <YouTubeLink videoId={current.videoId} />
                 </div>
               )}
 

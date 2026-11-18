@@ -24,6 +24,7 @@ import {
 import { CameraIcon, Heart, InCollection, NoPreview, Plus, Search } from "./Icons";
 import { RecordSection } from "./DigDrawer";
 import { searchRecord, startIndexFor } from "@/client/searchPlay";
+import { readSearch, writeSearch } from "@/client/searchMemory";
 
 /**
  * Look a record up on Discogs and put it in your collection.
@@ -47,6 +48,12 @@ interface Props {
   initialQuery?: string;
   onAddToCollection: (hit: SearchHit) => Promise<void>;
   onAddToWantlist: (hit: SearchHit) => Promise<void>;
+  /**
+   * Take a record off your wantlist again — the heart is a toggle, and a
+   * filled heart that could only add was the complaint. Absent, the heart
+   * only adds.
+   */
+  onRemoveFromWantlist?: (hit: SearchHit) => Promise<void>;
   /**
    * A release this device already holds — your collection or wantlist — so
    * opening it costs no Discogs request and it can play the moment you tap.
@@ -89,6 +96,7 @@ export function DiscogsSearch({
   initialQuery = "",
   onAddToCollection,
   onAddToWantlist,
+  onRemoveFromWantlist,
   localDetail,
   onPlay,
   playingKey = null,
@@ -100,14 +108,25 @@ export function DiscogsSearch({
   onScan,
 }: Props) {
   const scanInput = useRef<HTMLInputElement | null>(null);
-  const [query, setQuery] = useState(initialQuery);
-  const [field, setField] = useState<SearchField>("all");
+  /*
+   * The last search, back as it was. A phone that reloaded in the background
+   * opens this panel empty otherwise, with the thing you were doing gone
+   * (client/searchMemory.ts). Only when nothing was asked for explicitly: a
+   * seed from the crate's empty search, or from a scan, wins over memory.
+   * Read once, as the panel mounts — which is only ever after a tap or the
+   * resume step, never in the server's HTML, so there is nothing to mismatch.
+   */
+  const [remembered] = useState(() => (initialQuery === "" ? readSearch() : null));
+  const [query, setQuery] = useState(remembered?.query ?? initialQuery);
+  const [field, setField] = useState<SearchField>(remembered?.field ?? "all");
   /*
    * Grouped when they land — your collection, your wantlist, then the rest
    * (ownership.groupBySet) — and kept in that order after, so a record you
    * add from here doesn't jump to the top from under the pointer.
    */
-  const [hits, setHits] = useState<Array<{ hit: SearchHit; group: SearchGroup }> | null>(null);
+  const [hits, setHits] = useState<Array<{ hit: SearchHit; group: SearchGroup }> | null>(() =>
+    remembered ? groupBySet(remembered.hits, sets) : null,
+  );
   const [status, setStatus] = useState<"idle" | "searching" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<number, RowState>>({});
@@ -235,6 +254,7 @@ export function DiscogsSearch({
 
       const body = (await response.json()) as { results: SearchHit[] };
       setHits(groupBySet(body.results, sets));
+      writeSearch({ query: query.trim(), field, hits: body.results });
       // A pending confirmation belongs to a row that no longer exists.
       setConfirmId(null);
       setStatus("idle");
@@ -246,7 +266,9 @@ export function DiscogsSearch({
             ? "Nothing matched. If that was a track name, try Track."
             : field === "track"
               ? "No tracklist matched. Try All, or the catalogue number."
-              : "Nothing matched that exactly. Try All.",
+              : field === "artist"
+                ? "No artist by that name. Try All, which also reads titles and labels."
+                : "Nothing matched that exactly. Try All.",
         );
       }
     } catch {
@@ -265,6 +287,18 @@ export function DiscogsSearch({
       if (kind === "collection") await onAddToCollection(hit);
       else await onAddToWantlist(hit);
       setRows((r) => ({ ...r, [hit.id]: kind === "collection" ? "collected" : "wanted" }));
+    } catch {
+      setRows((r) => ({ ...r, [hit.id]: "failed" }));
+    }
+  };
+
+  /** The heart pressed again: off the wantlist, and the row back to plain. */
+  const unwant = async (hit: SearchHit) => {
+    if (!onRemoveFromWantlist) return;
+    setRows((r) => ({ ...r, [hit.id]: "working" }));
+    try {
+      await onRemoveFromWantlist(hit);
+      setRows((r) => ({ ...r, [hit.id]: "idle" }));
     } catch {
       setRows((r) => ({ ...r, [hit.id]: "failed" }));
     }
@@ -370,7 +404,13 @@ export function DiscogsSearch({
       <ul>
         {(hits ?? []).map(({ hit, group }, index, all) => {
           const state = rows[hit.id] ?? "idle";
-          const badge = badgeFor(ownershipFrom(sets, hit.id), state);
+          const ownership = ownershipFrom(sets, hit.id);
+          const badge = badgeFor(ownership, state);
+          // What the heart shows: the wantlist as this device knows it, or
+          // the add that just went through. A record you own gets no heart —
+          // the player hides it for the same reason.
+          const owned = ownership.inCollection === true || state === "collected";
+          const wanted = ownership.onWantlist === true || state === "wanted";
           // Headings only when there's something to separate: a search that
           // turned up nothing of yours is just the Discogs list.
           const heading =
@@ -451,18 +491,30 @@ export function DiscogsSearch({
               </button>
 
               <span className="flex shrink-0 items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => void act(hit, "wantlist")}
-                  disabled={state === "working"}
-                  // With the title in it: a list of these read aloud was
-                  // otherwise "Add to wantlist" a dozen times over.
-                  aria-label={`Add ${hit.title} to your wantlist`}
-                  title="Add to wantlist"
-                  className="rounded-full p-2 text-neutral-500 hover:text-accent active:bg-ink-800 disabled:opacity-40"
-                >
-                  <Heart className="h-4 w-4" />
-                </button>
+                {/*
+                  Filled when the record is on your wantlist, and a second
+                  press takes it off. It used to be an add-only button that
+                  never filled, so a record you already wanted looked like
+                  one you didn't — "heart icon does not fill in" was the
+                  first bug report from the first friend to use it.
+                */}
+                {!owned && (
+                  <button
+                    type="button"
+                    onClick={() => void (wanted ? unwant(hit) : act(hit, "wantlist"))}
+                    disabled={state === "working" || (wanted && !onRemoveFromWantlist)}
+                    aria-pressed={wanted}
+                    // With the title in it: a list of these read aloud was
+                    // otherwise "Add to wantlist" a dozen times over.
+                    aria-label={wanted ? `Remove ${hit.title} from your wantlist` : `Add ${hit.title} to your wantlist`}
+                    title={wanted ? "On your wantlist — press to remove" : "Add to wantlist"}
+                    className={`rounded-full p-2 active:bg-ink-800 disabled:opacity-40 ${
+                      wanted ? "text-accent" : "text-neutral-500 hover:text-accent"
+                    }`}
+                  >
+                    <Heart className="h-4 w-4" filled={wanted} />
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() =>

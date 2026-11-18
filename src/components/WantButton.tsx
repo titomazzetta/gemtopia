@@ -74,11 +74,11 @@ export function WantButton({
       disabled={want.busy}
       aria-pressed={want.wanted}
       aria-label={label}
-      className={`rounded-full p-1.5 active:bg-ink-800 disabled:opacity-50 ${
+      className={`flex h-10 w-10 items-center justify-center rounded-full active:bg-ink-800 disabled:opacity-50 ${
         want.wanted ? "text-accent" : "text-neutral-400"
       }`}
     >
-      <Heart className="h-4 w-4" filled={want.wanted} />
+      <Heart className="h-5 w-5" filled={want.wanted} />
     </button>
   );
 }

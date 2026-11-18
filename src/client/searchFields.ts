@@ -8,6 +8,9 @@
  *     look at tracklists, so searching a track name only works when that name
  *     also happens to be the release title. For a 12" with four untitled cuts
  *     it returns nothing at all.
+ *   - `artist` is the artist field alone. `q` reaches it too, but through
+ *     titles and label names as well, so a one-word artist name under `q`
+ *     is a page of records that merely mention the word.
  *   - `track` searches tracklists. This is the "I know the track, I want the
  *     EP it is on" case, and it was the biggest gap in the panel.
  *   - `catno` and `barcode` are exact-match fields. A catalogue number typed
@@ -19,7 +22,7 @@
  * catalogue numbers — and a search that silently ran a different query than
  * you asked for is worse than one extra tap.
  */
-export type SearchField = "all" | "track" | "catno" | "barcode";
+export type SearchField = "all" | "artist" | "track" | "catno" | "barcode";
 
 export interface FieldSpec {
   key: SearchField;
@@ -35,6 +38,19 @@ export const SEARCH_FIELDS: readonly FieldSpec[] = [
     key: "all",
     label: "All",
     placeholder: "Artist or release title…",
+    minLength: 2,
+  },
+  {
+    /*
+     * `artist` filters by the artist field proper, where `q` also matches
+     * titles and labels: "Heard" under All turns up every record with the
+     * word in its name; under Artist it is Larry Heard's records. Asked for
+     * by the first friend to use it — "Search Discogs by artist" was the
+     * last line of his notes.
+     */
+    key: "artist",
+    label: "Artist",
+    placeholder: "Artist name, for their records…",
     minLength: 2,
   },
   {

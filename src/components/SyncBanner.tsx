@@ -211,7 +211,7 @@ export function SyncBanner({
         <SpinningRecord spinning={active && sync.status !== "paused"} />
 
         <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
+          <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="text-[13px] font-medium text-neutral-200">
               {sync.status === "listing"
                 ? "Reading your collection…"
@@ -232,7 +232,12 @@ export function SyncBanner({
             saying it's warranted. Announcing "this will take a while" for
             something that finishes in four seconds is worse than saying nothing.
           */}
-          <p className="mt-0.5 truncate text-[11px] leading-relaxed text-neutral-500">
+          {/*
+            Two lines, not one: `truncate` cut "Discogs allows 60 requests a
+            minute, so this takes a moment." to its first half on a phone, and
+            a sentence that ends in an ellipsis reads as an error.
+          */}
+          <p className="mt-0.5 line-clamp-2 text-[11px] leading-relaxed text-neutral-500">
             {longHaulEta !== null
               ? `${opener} Give me ${formatEta(longHaulEta)} to go through it — everything already loaded is playable right now.`
               : (sync.message ?? "Discogs allows 60 requests a minute, so this takes a moment.")}
