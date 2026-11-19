@@ -1,13 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReleaseDetail, ReleaseSummary, Source, SyncState } from "@/lib/types";
+import type { CollectionFolder, ReleaseDetail, ReleaseSummary, Source, SyncState } from "@/lib/types";
 import {
   getAllDetails,
+  getFolders,
   getSummaries,
   putDetails,
   putSummaries,
+  setFolders,
 } from "@/client/db";
+import { foldersApi } from "@/client/api";
 import { listSource, startSync, type SyncHandle } from "@/client/sync";
 import { mergeDetail, summaryOf } from "@/client/adopt";
 import { applyWantEdits, retireWantEdits, type WantEdit } from "@/client/wantEdits";
@@ -32,6 +35,14 @@ export interface CrateCache {
   /** Release id -> when it entered the list. Only the collection and wantlist
    *  endpoints know this; a detail fetch always reports null. */
   addedAt: Map<number, string | null>;
+  /**
+   * Release id -> the Discogs folders it is filed in, from the collection
+   * listing. A release listed before folders were read is absent here, and
+   * the Folder filter treats absent as unknown, not as "in no folder".
+   */
+  folderIds: Map<number, number[]>;
+  /** The person's own folders, names and counts, as last read; empty until then. */
+  folders: CollectionFolder[];
   sourceIds: Record<Source, Set<number>>;
   sync: SyncState | null;
   loading: boolean;
@@ -66,6 +77,11 @@ export interface CrateCache {
    * time; a call while one is running is dropped.
    */
   refreshListing: (source: Source) => Promise<void>;
+  /**
+   * Read the folder list from Discogs (one request), keep it on this device,
+   * and hand it back — the caller prunes the standing Folder choice with it.
+   */
+  refreshFolders: () => Promise<CollectionFolder[]>;
 
   /**
    * A record just added to the collection, folded in where a sync would have
@@ -89,6 +105,8 @@ export interface CrateCache {
 export function useCrateCache(username: string): CrateCache {
   const [details, setDetails] = useState<ReleaseDetail[]>([]);
   const [addedAt, setAddedAt] = useState<Map<number, string | null>>(new Map());
+  const [folderIds, setFolderIds] = useState<Map<number, number[]>>(new Map());
+  const [folders, setFoldersState] = useState<CollectionFolder[]>([]);
   const [sourceIds, setSourceIds] = useState<Record<Source, Set<number>>>({
     collection: new Set(),
     wantlist: new Set(),
@@ -106,11 +124,20 @@ export function useCrateCache(username: string): CrateCache {
   const wantEdits = useRef(new Map<number, WantEdit>());
 
   const reload = useCallback(async () => {
-    const [cachedDetails, collection, wantlist] = await Promise.all([
+    const [cachedDetails, collection, wantlist, storedFolders] = await Promise.all([
       getAllDetails(),
       getSummaries(username, "collection"),
       getSummaries(username, "wantlist"),
+      getFolders(username),
     ]);
+    setFolderIds(
+      new Map(
+        collection
+          .filter((s) => Array.isArray(s.folderIds))
+          .map((s) => [s.id, s.folderIds as number[]] as const),
+      ),
+    );
+    if (storedFolders) setFoldersState(storedFolders);
     setDetails(cachedDetails);
     const detailed = new Set(cachedDetails.map((d) => d.id));
     setPending(
@@ -173,6 +200,13 @@ export function useCrateCache(username: string): CrateCache {
     },
     [runSync],
   );
+
+  const refreshFolders = useCallback(async () => {
+    const { folders: fresh } = await foldersApi.list();
+    await setFolders(username, fresh);
+    setFoldersState(fresh);
+    return fresh;
+  }, [username]);
 
   const listing = useRef(false);
   const refreshListing = useCallback(
@@ -248,6 +282,8 @@ export function useCrateCache(username: string): CrateCache {
   return {
     details,
     addedAt,
+    folderIds,
+    folders,
     sourceIds,
     sync,
     loading,
@@ -259,6 +295,7 @@ export function useCrateCache(username: string): CrateCache {
     setSync,
     setLoading,
     refreshListing,
+    refreshFolders,
     adopt,
     markCollected,
     markWanted,

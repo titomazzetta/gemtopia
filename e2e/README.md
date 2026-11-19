@@ -29,8 +29,8 @@ Screenshots land in `e2e/out/<flow>/`.
   `/api/wantlist`, `/api/collection` and `/api/scan` routes from a small
   invented crate: a VA compilation with a different artist on every track, a
   track whose length only its clip knows, a record with no clips, an album
-  filed under a "Listening" folder, a want, and a few strangers for search and
-  Dig. The routes' own code — session, CSRF, validation, limits — is covered
+  filed under a "Listening" folder, a double with a copy in two folders, a
+  want, and a few strangers for search and Dig. The routes' own code — session, CSRF, validation, limits — is covered
   by `scripts/test-api.mjs`, not here.
 - `lib/yt-stub.js` stands in for `https://www.youtube.com/iframe_api` so the
   player reaches "playing" and reports a current time; `window.__ytStub.vid`

@@ -3,7 +3,9 @@ import { z } from "zod";
 import { buildAuthHeader, parseTokenResponse } from "./oauth1";
 import type { Credit, MasterVersion } from "./digLinks";
 import { env, USER_AGENT } from "./env";
+import { folderIdOf } from "./folderId";
 import type {
+  CollectionFolder,
   CollectionPage,
   ReleaseDetail,
   ReleaseSummary,
@@ -260,7 +262,23 @@ const collectionSchema = z.object({
     z.object({
       id: z.number(),
       date_added: z.string().nullish(),
+      /**
+       * Which of the person's folders this copy sits in; 1 is Uncategorized.
+       * Deliberately unvalidated here and read with folderIdOf: a value that
+       * isn't a positive integer is "not known", not a failed listing.
+       */
+      folder_id: z.unknown().optional(),
       basic_information: basicInfoSchema,
+    }),
+  ),
+});
+
+const foldersSchema = z.object({
+  folders: z.array(
+    z.object({
+      id: z.number().int(),
+      name: z.string(),
+      count: z.number().nullish(),
     }),
   ),
 });
@@ -479,15 +497,50 @@ export async function getCollectionPage(
     `?page=${page}&per_page=${perPage}&sort=added&sort_order=desc`;
 
   const data = await getJson(path, user, collectionSchema);
+  /*
+   * A collection is copies, not records: the same pressing can sit in two
+   * folders as two copies, and the listing returns both — on this page or on
+   * another. Each row goes out with its own copy's folder, and the browser
+   * joins the copies of one record across the whole listing
+   * (client/folders.ts → mergeFolderIds), which is the only place that sees
+   * every page. Folder 0 is "All" and says nothing; a missing id is "not
+   * known", which the filter never hides.
+   */
+  const items: ReleaseSummary[] = data.releases.map((r) => {
+    const folder = folderIdOf(r.folder_id);
+    return {
+      ...toSummary(r.basic_information, r.date_added ?? null),
+      folderIds: folder === null ? [] : [folder],
+    };
+  });
   return {
-    items: data.releases.map((r) =>
-      toSummary(r.basic_information, r.date_added ?? null),
-    ),
+    items,
     page: data.pagination.page,
     pages: data.pagination.pages,
     perPage: data.pagination.per_page,
     total: data.pagination.items,
   };
+}
+
+/**
+ * The person's own collection folders, names and counts. One request;
+ * folder 0 ("All") is included as Discogs returns it, and the client leaves
+ * it out of the chips because it is the union of the rest.
+ */
+export async function getCollectionFolders(
+  user: UserToken,
+  username: string,
+): Promise<CollectionFolder[]> {
+  const data = await getJson(
+    `/users/${encodeURIComponent(username)}/collection/folders`,
+    user,
+    foldersSchema,
+  );
+  return data.folders.map((f) => ({
+    id: f.id,
+    name: f.name.trim().slice(0, 80) || `Folder ${f.id}`,
+    count: Math.max(0, Math.trunc(f.count ?? 0)),
+  }));
 }
 
 export async function getWantlistPage(

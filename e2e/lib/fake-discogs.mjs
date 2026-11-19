@@ -9,7 +9,8 @@
  * that syncs for real in the test browser, with records built to exercise the
  * UI: a VA compilation with a different artist on every track, tracks whose
  * length only the clip knows, a record with no clips at all, a record filed in
- * a "Listening" folder, a want. Answering at the browser keeps the flows
+ * a "Listening" folder, a double with a copy in two folders, a want. Answering
+ * at the browser keeps the flows
  * independent of Discogs' rate limits and of a token nobody can check in.
  *
  * Everything here is invented. Ids above 990000 are "strangers" — records
@@ -73,10 +74,23 @@ function release(id, spec) {
 }
 
 export const FOLDERS = [
-  { id: 0, name: "All", count: 6 },
+  { id: 0, name: "All", count: 7 },
   { id: 1, name: "Uncategorized", count: 5 },
   { id: 2, name: "Listening", count: 1 },
+  { id: 3, name: "DJ", count: 1 },
 ];
+
+/**
+ * One row per copy, the way /api/discogs/collection answers: a record filed
+ * in two folders is two rows, each with its own copy's folder. The doubles go
+ * first, so with a small page size (options.pageSize) a record's two copies
+ * land on different pages of the listing.
+ */
+function copies(summaries) {
+  const first = summaries.map((s) => ({ ...s, folderIds: s.folderIds.slice(0, 1) }));
+  const doubles = summaries.flatMap((s) => s.folderIds.slice(1).map((folder) => ({ ...s, folderIds: [folder] })));
+  return [...doubles, ...first];
+}
 
 export const COLLECTION = [
   release(101, {
@@ -116,8 +130,9 @@ export const COLLECTION = [
     tracks: [t("A", "Can You Feel It", "6:38"), t("B", "Mystery Of Love", "6:52")],
     videos: [v("hhhhhhhhhhh", "Mr. Fingers - Can You Feel It", 398)],
   }),
+  // Two copies: one in Uncategorized, a double in "DJ".
   release(106, {
-    title: "Crimson Arsenal E.P.", artist: "Nate Krafft", year: 1995, labels: ["Infra"], styles: ["Techno"], hue: 0, catno: "INFRA-003",
+    title: "Crimson Arsenal E.P.", artist: "Nate Krafft", year: 1995, labels: ["Infra"], styles: ["Techno"], hue: 0, folderIds: [1, 3], catno: "INFRA-003",
     tracks: [t("A1", "Mirror / ʀoʀʀiM", "5:34"), t("A2", "I.Q.", "5:10"), t("B1", "Antimatter", "6:20")],
     videos: [v("iiiiiiiiiii", "Nate Krafft - Mirror", 334), v("jjjjjjjjjjj", "Nate Krafft - Antimatter", 380)],
   }),
@@ -175,6 +190,8 @@ export async function installFakeDiscogs(context, options = {}) {
     wantlist: new Set(WANTLIST.map((r) => r.summary.id)),
     calls: [],
     scanAnswers: options.scanAnswers ?? [],
+    /** Answer the collection listing the way a build before folders did. */
+    omitFolderIds: options.omitFolderIds ?? false,
   };
   const json = (route, body, status = 200) =>
     route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
@@ -183,9 +200,11 @@ export async function installFakeDiscogs(context, options = {}) {
     const url = new URL(route.request().url());
     const source = url.searchParams.get("source") ?? "collection";
     const page = Number(url.searchParams.get("page") ?? "1");
-    const perPage = Number(url.searchParams.get("perPage") ?? "100");
+    const perPage = options.pageSize ?? Number(url.searchParams.get("perPage") ?? "100");
     const ids = source === "wantlist" ? state.wantlist : state.collection;
-    const items = [...ids].map((id) => byId.get(id)?.summary).filter(Boolean);
+    const summaries = [...ids].map((id) => byId.get(id)?.summary).filter(Boolean);
+    // A want has no folder; a collection row is a copy.
+    const items = source === "wantlist" || state.omitFolderIds ? summaries.map(({ folderIds: _none, ...row }) => row) : copies(summaries);
     const slice = items.slice((page - 1) * perPage, page * perPage);
     state.calls.push({ kind: "list", source, page });
     await json(route, { items: slice, page, pages: Math.max(1, Math.ceil(items.length / perPage)), total: items.length });
