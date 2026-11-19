@@ -662,12 +662,19 @@ await check("search rejects an unknown parameter", async () => {
 await check("the folder list needs a session, and takes no parameters from the caller", async () => {
   const anon = await alice.call("/api/discogs/folders", { cookie: "" });
   assert.equal(anon.status, 401);
-  // Signed in: the username is the session's, whatever the query says. What
-  // comes back then depends on Discogs, which this suite never reaches, so
-  // only "not refused as a bad request" is pinned.
+  assert.equal(anon.body?.error?.code, "unauthenticated");
+  // Signed in: the username is the session's, whatever the query says, so the
+  // request gets past our own checks and is put to Discogs. What comes back
+  // then is Discogs' to decide — in CI it refuses this suite's placeholder
+  // token (our 401 "discogs_unauthorized"); on a machine with no route to it
+  // the call just fails — so the status is not pinned. What is: *we* neither
+  // turned the session away nor called the query a bad request.
   const res = await alice.call("/api/discogs/folders?username=someone-else");
   assert.notEqual(res.status, 400);
-  assert.notEqual(res.status, 401);
+  assert.ok(
+    !["unauthenticated", "session_revoked"].includes(res.body?.error?.code),
+    `our own session check refused a live session: ${res.raw}`,
+  );
 });
 
 await check("search takes the artist field on its own, with the same floor as q", async () => {
