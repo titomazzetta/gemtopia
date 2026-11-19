@@ -16,6 +16,7 @@ import {
   getAllDetails,
   getLegacyPlaylists,
   getListedAt,
+  getSummaries,
   getSyncState,
   isMigrated,
   markMigrated,
@@ -93,6 +94,7 @@ import {
   computeFacets,
   emptyFilters,
   Filters,
+  pivotTo,
   type FilterState,
 } from "./Filters";
 import { Mark } from "@/components/Mark";
@@ -144,6 +146,8 @@ import { TagEditor } from "./TagEditor";
 import { useTrackTags } from "@/client/useTrackTags";
 import { forgetResume, readResume, resumePlan, writeResume, RESUME_WRITE_EVERY_MS, type ResumePlan } from "@/client/resume";
 import { forgetSearch } from "@/client/searchMemory";
+import { knownFolders, listedBeforeFolders, withFolders } from "@/client/folders";
+import { forgetFolderPreference, readFolderPreference, writeFolderPreference } from "@/client/folderPreference";
 import { suggestTags, TAGS_PER_TRACK, withTags } from "@/lib/tags";
 import { isClipKey, isTrackOnlyKey } from "@/lib/clipKey";
 import type { SearchHit } from "@/lib/discogs";
@@ -261,6 +265,8 @@ export function CrateApp({
   const {
     details,
     addedAt,
+    folderIds,
+    folders,
     sourceIds,
     sync,
     loading,
@@ -290,6 +296,20 @@ export function CrateApp({
   /* ---------------- view ---------------- */
   const [rail, setRail] = useState<Rail>("filters");
   const [filters, setFilters] = useState<FilterState>(emptyFilters);
+  /*
+   * The Folder filter is a standing choice (client/folderPreference.ts): put
+   * back at boot, written whenever it changes. Read after mount so the
+   * server's HTML and the first client render agree. The note names its
+   * account: someone else's is not read, and the write below replaces it.
+   */
+  useEffect(() => {
+    const kept = readFolderPreference(username);
+    if (!kept) return;
+    setFilters((current) => ({ ...current, folders: kept.folders, hideFolders: kept.hide }));
+  }, [username]);
+  useEffect(() => {
+    writeFolderPreference({ folders: filters.folders, hide: filters.hideFolders }, username);
+  }, [filters.folders, filters.hideFolders, username]);
   const [activePlaylistId, setActivePlaylistId] = useState<string | null>(null);
   /** A mouse or trackpad: hover, drag and keyboard hints apply. */
   const finePointer = useFinePointer();
@@ -954,9 +974,9 @@ export function CrateApp({
     const detailed = new Set(details.map((d) => d.id));
     const all = pending.length === 0 ? built : [...built, ...pendingPlayables(pending, detailed)];
     // Your tags ride along like BPMs do, so search, the Tags filter and the
-    // rows all read them off the track.
-    return withTags(all, trackTags.byKey);
-  }, [details, externalDetails, bpmByClip, addedAt, pending, trackTags.byKey]);
+    // rows all read them off the track; your Discogs folders the same way.
+    return withFolders(withTags(all, trackTags.byKey), folderIds, folders);
+  }, [details, externalDetails, bpmByClip, addedAt, pending, trackTags.byKey, folderIds, folders]);
 
   const byKey = useMemo(() => {
     const map = new Map<string, Playable>();
@@ -1090,6 +1110,7 @@ export function CrateApp({
     let count = 0;
     for (const key of [
       "tags",
+      "folders",
       "artists",
       "genres",
       "styles",
@@ -1560,12 +1581,26 @@ export function CrateApp({
    * apart; the details loop already pauses itself on a rate limit.
    */
   const wantlistListed = useRef(false);
-  const { refreshListing } = crate;
+  const { refreshListing, refreshFolders } = crate;
   useEffect(() => {
     if (loading || wantlistListed.current || source !== "collection") return;
     if (sync && (sync.status === "listing" || sync.status === "paused")) return;
     wantlistListed.current = true;
     void (async () => {
+      // Your folders' names first (one request; the chips are blank without
+      // them), then the wantlist's membership.
+      try {
+        const fresh = await refreshFolders();
+        // A folder renamed or removed on Discogs would leave its old name in
+        // the standing choice, selecting nothing anyone can see.
+        setFilters((current) => {
+          const kept = knownFolders(current.folders, fresh);
+          if (kept.length === current.folders.length) return current;
+          return { ...current, folders: kept, hideFolders: kept.length > 0 && current.hideFolders };
+        });
+      } catch (error) {
+        console.warn("[folders]", error);
+      }
       try {
         const [listedAt, state] = await Promise.all([
           getListedAt(username, "wantlist"),
@@ -1575,8 +1610,16 @@ export function CrateApp({
       } catch (error) {
         console.warn("[listing] wantlist", error);
       }
+      // A crate listed before folders were read has none recorded: read the
+      // listing again, once (one request per hundred records, no tracklists),
+      // so the Folder filter doesn't wait for the next sync to come due.
+      try {
+        if (listedBeforeFolders(await getSummaries(username, "collection"))) await refreshListing("collection");
+      } catch (error) {
+        console.warn("[listing] collection", error);
+      }
     })();
-  }, [loading, source, sync, username, refreshListing]);
+  }, [loading, source, sync, username, refreshListing, refreshFolders]);
 
   /*
    * Searching or filtering during a first sync: whatever matches and is still
@@ -2362,7 +2405,8 @@ export function CrateApp({
    */
   const pivotFilter = useCallback(
     (facet: FacetKey, value: string) => {
-      setFilters({ ...emptyFilters, [facet]: [value] });
+      // One value and nothing else — but the standing Folder choice stays.
+      setFilters((current) => pivotTo(current, facet, value));
       setActivePlaylistId(null);
       setRail("filters");
       setDigTarget(null);
@@ -2581,6 +2625,7 @@ export function CrateApp({
     await nuke();
     forgetResume();
     forgetSearch();
+    forgetFolderPreference();
     // Deliberate hard navigation: a client-side route change would keep the
     // in-memory queue and cached crate alive in this tab after we have just
     // wiped them from disk.

@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { Playable } from "@/lib/types";
 import {
   DECK_PRESETS,
   DEFAULT_PITCH_PERCENT,
@@ -11,332 +10,27 @@ import {
   comfortableWindow,
   STRAIN_META,
 } from "@/lib/mixing";
-import { tagHaystack } from "@/lib/tags";
 import { Search } from "./Icons";
+import {
+  applyFilters,
+  computeFacets,
+  emptyFilters,
+  folderChoices,
+  MULTI_FACETS,
+  pivotTo,
+  toggleFolder,
+  type FacetKey,
+  type Facets,
+  type FilterState,
+  type MultiFacetKey,
+  type StyleTempo,
+} from "@/client/filters";
+import { BPM_CEILING, BPM_FLOOR, BPM_HARD_MAX, BPM_HARD_MIN } from "@/lib/filterBounds";
 
-/**
- * Faceted filtering.
- *
- * Every option in this panel is derived from the collection that was actually
- * synced from Discogs — `computeFacets` walks the playable pool and counts
- * real values. There is no hardcoded genre list anywhere in this file. The
- * number beside each chip is how many clips in *your* crate carry that tag,
- * and the facets re-rank as the sync fills in.
- */
-
-export interface FilterState {
-  query: string;
-  /** Your own tags (lib/tags.ts). */
-  tags: string[];
-  artists: string[];
-  genres: string[];
-  styles: string[];
-  labels: string[];
-  countries: string[];
-  formats: string[];
-  decades: string[];
-  yearFrom: number | null;
-  yearTo: number | null;
-  bpmFrom: number | null;
-  bpmTo: number | null;
-  tracksOnly: boolean;
-  withBpmOnly: boolean;
-  /*
-   * Whether a facet with several values selected means "any of these" or "all
-   * of these".
-   *
-   * Every facet was OR-within, AND-across: pick Techno and Deep House and you
-   * get records tagged either way, and there was no way to ask for the ones
-   * tagged *both*. Both questions are worth asking and they find different
-   * records — "any" widens the crate, "all" finds the specific corner where
-   * two tags overlap, which on a well-tagged collection is often the most
-   * interesting shelf in it.
-   *
-   * Only the genuinely multi-valued facets appear here. A release has one
-   * artist string, one country and one decade in this model, so "all" would
-   * always be empty for those and the control is not offered.
-   */
-  matchAll: Partial<Record<MultiFacetKey, boolean>>;
-}
-
-/** Facets where a release can carry more than one value at once. */
-export type MultiFacetKey = "tags" | "genres" | "styles" | "labels" | "formats";
-
-export const MULTI_FACETS: readonly MultiFacetKey[] = [
-  "tags",
-  "genres",
-  "styles",
-  "labels",
-  "formats",
-];
-
-export const emptyFilters: FilterState = {
-  query: "",
-  tags: [],
-  artists: [],
-  genres: [],
-  styles: [],
-  labels: [],
-  countries: [],
-  formats: [],
-  decades: [],
-  yearFrom: null,
-  yearTo: null,
-  bpmFrom: null,
-  bpmTo: null,
-  tracksOnly: false,
-  withBpmOnly: false,
-  matchAll: {},
-};
-
-export type FacetKey =
-  | "tags"
-  | "artists"
-  | "genres"
-  | "styles"
-  | "labels"
-  | "countries"
-  | "formats"
-  | "decades";
-
-/**
- * Default tempo window. 75–180 covers everything from hip hop and downtempo
- * up through jungle, and is the range the two scaling buttons work outward
- * from. It is a *default*, not a limit — the inputs accept 40–260 so a
- * dubstep or drone crate is not artificially fenced in.
- */
-export const BPM_FLOOR = 75;
-export const BPM_CEILING = 180;
-export const BPM_HARD_MIN = 40;
-export const BPM_HARD_MAX = 260;
-
-/** A tempo band measured from the user's own catalogue, per style. */
-export interface StyleTempo {
-  style: string;
-  low: number;
-  high: number;
-  median: number;
-  count: number;
-}
-
-export interface Facets {
-  /** Your tags in this crate, most-used first. */
-  tags: Array<[string, number]>;
-  artists: Array<[string, number]>;
-  genres: Array<[string, number]>;
-  styles: Array<[string, number]>;
-  labels: Array<[string, number]>;
-  countries: Array<[string, number]>;
-  formats: Array<[string, number]>;
-  decades: Array<[string, number]>;
-  minYear: number;
-  maxYear: number;
-  minBpm: number;
-  maxBpm: number;
-  bpmKnown: number;
-  /**
-   * Tempo presets derived from the collection itself: for each style with
-   * enough catalogued BPMs, the 10th–90th percentile of what that style
-   * actually runs at *in this crate*. This is what replaces the hardcoded
-   * "House 118–128" guesses — your Detroit techno might sit at 132–138 and
-   * the chip will say so.
-   */
-  styleTempos: StyleTempo[];
-}
-
-/** Count every facet value across the pool so the UI can rank by frequency. */
-export function computeFacets(pool: Playable[]): Facets {
-  const counters: Record<FacetKey, Map<string, number>> = {
-    tags: new Map(),
-    artists: new Map(),
-    genres: new Map(),
-    styles: new Map(),
-    labels: new Map(),
-    countries: new Map(),
-    formats: new Map(),
-    decades: new Map(),
-  };
-
-  let minYear = Infinity;
-  let maxYear = -Infinity;
-  let minBpm = Infinity;
-  let maxBpm = -Infinity;
-  let bpmKnown = 0;
-
-  /** style -> every catalogued BPM for that style in this crate */
-  const tempoByStyle = new Map<string, number[]>();
-
-  const bump = (key: FacetKey, value: string) => {
-    if (!value) return;
-    const map = counters[key];
-    map.set(value, (map.get(value) ?? 0) + 1);
-  };
-
-  for (const item of pool) {
-    for (const t of item.tags ?? []) bump("tags", t);
-    bump("artists", item.artist);
-    for (const g of item.genres) bump("genres", g);
-    for (const s of item.styles) bump("styles", s);
-    for (const l of item.labels) bump("labels", l);
-    if (item.country) bump("countries", item.country);
-    for (const f of item.formats) bump("formats", f);
-
-    if (item.year) {
-      bump("decades", `${Math.floor(item.year / 10) * 10}s`);
-      minYear = Math.min(minYear, item.year);
-      maxYear = Math.max(maxYear, item.year);
-    }
-
-    if (item.bpm !== null) {
-      bpmKnown += 1;
-      minBpm = Math.min(minBpm, item.bpm);
-      maxBpm = Math.max(maxBpm, item.bpm);
-
-      for (const style of item.styles) {
-        const list = tempoByStyle.get(style);
-        if (list) list.push(item.bpm);
-        else tempoByStyle.set(style, [item.bpm]);
-      }
-    }
-  }
-
-  /* ---- tempo bands per style, from real readings ---- */
-
-  const percentile = (sorted: number[], p: number) =>
-    sorted[Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * p)))]!;
-
-  const styleTempos: StyleTempo[] = [...tempoByStyle.entries()]
-    // Four readings is the minimum before a band means anything.
-    .filter(([, values]) => values.length >= 4)
-    .map(([style, values]) => {
-      const sorted = [...values].sort((a, b) => a - b);
-      const low = Math.floor(percentile(sorted, 0.1));
-      const high = Math.ceil(percentile(sorted, 0.9));
-      // A zero-width band ("128–128") is technically accurate and practically
-      // useless as a filter — nothing else would ever fall inside it. Open it
-      // up to a mixable window instead.
-      const pad = high - low < 4 ? 2 : 0;
-      return {
-        style,
-        low: Math.max(BPM_HARD_MIN, low - pad),
-        high: Math.min(BPM_HARD_MAX, high + pad),
-        median: Math.round(percentile(sorted, 0.5)),
-        count: values.length,
-      };
-    })
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 8);
-
-  const rank = (m: Map<string, number>, cap = 400) =>
-    [...m.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, cap);
-
-  // Decades read better chronologically than by frequency.
-  const decades = [...counters.decades.entries()].sort((a, b) =>
-    a[0].localeCompare(b[0]),
-  );
-
-  return {
-    tags: rank(counters.tags),
-    artists: rank(counters.artists),
-    genres: rank(counters.genres),
-    styles: rank(counters.styles),
-    labels: rank(counters.labels),
-    countries: rank(counters.countries, 60),
-    formats: rank(counters.formats, 40),
-    decades,
-    minYear: Number.isFinite(minYear) ? minYear : 1950,
-    maxYear: Number.isFinite(maxYear) ? maxYear : new Date().getFullYear(),
-    minBpm: Number.isFinite(minBpm) ? Math.floor(minBpm) : BPM_FLOOR,
-    maxBpm: Number.isFinite(maxBpm) ? Math.ceil(maxBpm) : BPM_CEILING,
-    bpmKnown,
-    styleTempos,
-  };
-}
-
-/** Does one record satisfy one multi-valued facet selection? */
-function facetMatches(
-  values: readonly string[],
-  selected: Set<string>,
-  all: boolean | undefined,
-): boolean {
-  if (selected.size === 0) return true;
-  if (all) {
-    for (const wanted of selected) {
-      if (!values.includes(wanted)) return false;
-    }
-    return true;
-  }
-  return values.some((value) => selected.has(value));
-}
-
-export function applyFilters(
-  pool: Playable[],
-  filters: FilterState,
-): Playable[] {
-  const needle = filters.query.trim().toLowerCase();
-
-  const sets: Record<FacetKey, Set<string>> = {
-    tags: new Set(filters.tags),
-    artists: new Set(filters.artists),
-    genres: new Set(filters.genres),
-    styles: new Set(filters.styles),
-    labels: new Set(filters.labels),
-    countries: new Set(filters.countries),
-    formats: new Set(filters.formats),
-    decades: new Set(filters.decades),
-  };
-
-  return pool.filter((item) => {
-    if (filters.tracksOnly && item.matchKind !== "track") return false;
-    if (filters.withBpmOnly && item.bpm === null) return false;
-
-    if (filters.yearFrom !== null && (item.year ?? 0) < filters.yearFrom) return false;
-    if (filters.yearTo !== null && (item.year ?? 9999) > filters.yearTo) return false;
-
-    if (filters.bpmFrom !== null || filters.bpmTo !== null) {
-      if (item.bpm === null) return false;
-      if (filters.bpmFrom !== null && item.bpm < filters.bpmFrom) return false;
-      if (filters.bpmTo !== null && item.bpm > filters.bpmTo) return false;
-    }
-
-    if (!facetMatches(item.tags ?? [], sets.tags, filters.matchAll?.tags)) return false;
-    if (sets.artists.size > 0 && !sets.artists.has(item.artist)) return false;
-    /*
-     * "any" is satisfied when the record carries at least one of the selected
-     * values; "all" when it carries every one of them. Note the direction of
-     * the "all" test: it asks whether each *selected* value is present on the
-     * record, not whether each of the record's tags was selected — a record
-     * tagged Techno, Deep House and Detroit still matches "Techno AND Deep
-     * House". Getting that backwards would make "all" mean "exactly these",
-     * which almost nobody wants and which returns nothing on real data.
-     */
-    if (!facetMatches(item.genres, sets.genres, filters.matchAll?.genres)) return false;
-    if (!facetMatches(item.styles, sets.styles, filters.matchAll?.styles)) return false;
-    if (!facetMatches(item.labels, sets.labels, filters.matchAll?.labels)) return false;
-    if (!facetMatches(item.formats, sets.formats, filters.matchAll?.formats)) return false;
-
-    if (sets.countries.size > 0) {
-      if (!item.country || !sets.countries.has(item.country)) return false;
-    }
-
-    if (sets.decades.size > 0) {
-      if (!item.year) return false;
-      if (!sets.decades.has(`${Math.floor(item.year / 10) * 10}s`)) return false;
-    }
-
-    if (needle) {
-      // Your tags as "#deep": typing deep finds them along with titles, and
-      // typing #deep finds only them.
-      const haystack =
-        `${item.title} ${item.artist} ${item.releaseTitle} ${item.labels.join(" ")} ${tagHaystack(item.tags)}`.toLowerCase();
-      if (!haystack.includes(needle)) return false;
-    }
-
-    return true;
-  });
-}
+// The filter model lives in client/filters.ts; re-exported here so the panel
+// and the model keep one import for the app.
+export { applyFilters, computeFacets, emptyFilters, MULTI_FACETS, pivotTo, BPM_CEILING, BPM_FLOOR, BPM_HARD_MAX, BPM_HARD_MIN };
+export type { FacetKey, Facets, FilterState, MultiFacetKey, StyleTempo };
 
 /* ------------------------------------------------------------------ */
 
@@ -349,6 +43,8 @@ function ChipGroup({
   matchAll,
   onMatchAllChange,
   hash = false,
+  hide,
+  onHideChange,
 }: {
   label: string;
   options: Array<[string, number]>;
@@ -360,6 +56,12 @@ function ChipGroup({
   onMatchAllChange?: (all: boolean) => void;
   /** Your own tags: each chip reads "#deep", the way they're searched for. */
   hash?: boolean;
+  /**
+   * only / hide, for folders: "only these" keeps what's selected, "hide
+   * these" drops it — the switch that turns a listening folder off.
+   */
+  hide?: boolean;
+  onHideChange?: (hide: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [search, setSearch] = useState("");
@@ -409,13 +111,44 @@ function ChipGroup({
                         ? `Records tagged with every selected ${label.toLowerCase()}`
                         : `Records tagged with any selected ${label.toLowerCase()}`
                   }
-                  className={`px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide transition-colors ${
+                  className={`px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide transition-colors pointer-coarse:px-3 pointer-coarse:py-2 pointer-coarse:text-[11px] ${
                     Boolean(matchAll) === all
                       ? "bg-accent/20 text-accent"
                       : "text-neutral-600 hover:text-neutral-300"
                   }`}
                 >
                   {all ? "all" : "any"}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/*
+            only / hide, as soon as one is selected: one folder is enough to
+            ask "everything but this".
+          */}
+          {onHideChange && selected.length > 0 && (
+            <div
+              className="flex overflow-hidden rounded-sm border border-ink-700"
+              role="group"
+              aria-label={`${label} mode`}
+            >
+              {([false, true] as const).map((off) => (
+                <button
+                  key={String(off)}
+                  type="button"
+                  onClick={() => onHideChange(off)}
+                  aria-pressed={Boolean(hide) === off}
+                  title={off ? `Everything except the selected ${label.toLowerCase()}s` : `Only the selected ${label.toLowerCase()}s`}
+                  className={`px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide transition-colors pointer-coarse:px-3 pointer-coarse:py-2 pointer-coarse:text-[11px] ${
+                    Boolean(hide) === off
+                      ? off
+                        ? "bg-amber-500/15 text-amber-300"
+                        : "bg-accent/20 text-accent"
+                      : "text-neutral-600 hover:text-neutral-300"
+                  }`}
+                >
+                  {off ? "hide" : "only"}
                 </button>
               ))}
             </div>
@@ -443,16 +176,22 @@ function ChipGroup({
       <div className="flex flex-wrap gap-1.5">
         {visible.map(([name, count]) => {
           const active = selected.includes(name);
+          // A folder you're hiding is ticked, but green would read as "this
+          // is what plays": it is struck through in amber instead.
+          const hidden = active && Boolean(hide);
           return (
             <button
               key={name}
               type="button"
               onClick={() => onToggle(name)}
               aria-pressed={active}
+              title={hidden ? `Hidden — tap to show ${name} again` : undefined}
               className={`max-w-full truncate rounded-full border px-2 py-1 text-[11px] transition-colors ${
-                active
-                  ? "border-accent/60 bg-accent/15 text-accent"
-                  : "border-ink-700 bg-ink-850 text-neutral-400 hover:border-ink-600 hover:text-neutral-200"
+                hidden
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-300/80"
+                  : active
+                    ? "border-accent/60 bg-accent/15 text-accent"
+                    : "border-ink-700 bg-ink-850 text-neutral-400 hover:border-ink-600 hover:text-neutral-200"
               }`}
             >
               {hash && (
@@ -460,7 +199,7 @@ function ChipGroup({
                   #
                 </span>
               )}
-              {name}
+              <span className={hidden ? "line-through decoration-amber-300/60" : undefined}>{name}</span>
               <span className="ml-1 text-neutral-600">{count}</span>
             </button>
           );
@@ -894,6 +633,21 @@ export function Filters({
         </label>
       </section>
 
+      {/*
+        Your Discogs folders — "DJ", "Listening" — with only / hide. Absent
+        until the folder list has been read, in wantlist mode (a want has no
+        folder), and when the whole crate sits in one folder: a group with no
+        choice in it is a question with no answer.
+      */}
+      <ChipGroup
+        label="Folder"
+        options={folderChoices(facets.folders, filters.folders)}
+        selected={filters.folders}
+        onToggle={(name) => onChange(toggleFolder(filters, name))}
+        hide={filters.hideFolders}
+        onHideChange={(hide) => onChange({ ...filters, hideFolders: hide })}
+        collapsedCount={12}
+      />
       <ChipGroup label="Decade" options={facets.decades} selected={filters.decades} onToggle={toggle("decades")} collapsedCount={12} />
       <ChipGroup label="Style" options={facets.styles} selected={filters.styles} onToggle={toggle("styles")} matchAll={filters.matchAll?.styles ?? false} onMatchAllChange={setMatchAll("styles")} />
       <ChipGroup label="Genre" options={facets.genres} selected={filters.genres} onToggle={toggle("genres")} matchAll={filters.matchAll?.genres ?? false} onMatchAllChange={setMatchAll("genres")} collapsedCount={8} />

@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  CollectionFolder,
   ReleaseDetail,
   ReleaseSummary,
   Source,
@@ -261,6 +262,23 @@ export async function getListedAt(owner: string, source: Source): Promise<number
 export async function setListedAt(owner: string, source: Source, at: number): Promise<void> {
   await tx<void>(STORE_META, "readwrite", ([store]) => {
     store!.put({ key: `listed:${owner}:${source}`, value: at });
+    return Promise.resolve();
+  });
+}
+
+/** The person's Discogs folders as last read, so the chips are there offline. */
+export async function getFolders(owner: string): Promise<CollectionFolder[] | null> {
+  const row = await tx<{ key: string; value: CollectionFolder[] } | undefined>(
+    STORE_META,
+    "readonly",
+    ([store]) => store!.get(`folders:${owner}`),
+  );
+  return Array.isArray(row?.value) ? row.value : null;
+}
+
+export async function setFolders(owner: string, folders: CollectionFolder[]): Promise<void> {
+  await tx<void>(STORE_META, "readwrite", ([store]) => {
+    store!.put({ key: `folders:${owner}`, value: folders });
     return Promise.resolve();
   });
 }

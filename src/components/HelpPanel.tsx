@@ -45,8 +45,10 @@ export const HELP: ReadonlyArray<Section> = [
     body: (fine) => (
       <>
         <b>Shuffle</b> plays what&apos;s on screen. Cut it down first with filters — style, label,
-        decade, tempo. Tap the artist or record of what&apos;s playing to hear the whole release in
-        running order.{fine && <> Click a column header to sort.</>}
+        decade, tempo, or your Discogs <b>folders</b>: tick one to hear only it, or switch to{" "}
+        <b>hide</b> to leave it out (the listening albums, say) — that choice stays for next time.
+        Tap the artist or record of what&apos;s playing to hear the whole release in running order.
+        {fine && <> Click a column header to sort.</>}
       </>
     ),
   },

@@ -190,6 +190,7 @@ There's nothing to download or update: it is always the live version.
 |---|---|
 | **Shuffle the crate** | Fisher–Yates over every clip Discogs has for your collection, spread so the same release never lands twice in a row. |
 | **Filter on real metadata** | Style, genre, label, artist, format, country, decade, year and tempo — every option counted from *your* synced collection. Multi-select is **any** or **all**, so you can ask for Techno *or* Deep House, or for the shelf tagged both. |
+| **Your Discogs folders** | If you've sorted your shelf into folders on Discogs — *DJ*, *Listening*, *Sell* — they're a filter here. Tick a folder to hear **only** it, or flip the switch to **hide** it, and the shuffle, the count and everything else on screen follow. *Don't play my listening albums* is a choice you make once: unlike the other filters, the Folder choice is still there on your next visit, on that device, until you untick it or press **Reset**. A record with copies in two folders counts in both — hide one and it stays, as long as another copy is filed elsewhere — and a record whose folder isn't known yet is never hidden. If the whole collection sits in one folder there is no Folder group: nothing to choose between. Read from Discogs with the collection (one extra request a visit); Gemtopia never moves a record between folders, and folder names stay in your browser. |
 | **Works on a phone** | Sheets rather than stacked panels: source and playlists in one, filters in another, the player in a third. Transport and TAP sit in a sticky bottom bar at thumb height, at thumb size (40px skips, 44px play and TAP). Tap the playing track and the whole record opens above that bar — so the scrubber, previous and next stay under your thumb while you flip through the EP. Dig is one scroll with the crate/beyond switch pinned. |
 | **Sort the crate** | Click a column: title, artist, label, year, BPM, length. Ascending, descending, then back to shuffle order. Unmeasured tempos always sink, in both directions. |
 | **Hear the whole record** | Something grabs you on shuffle: tap the artist or the record and the whole release opens in running order — every track, the one playing marked, the ones with no audio still listed. Play it through, then drop straight back into your shuffle where you left it. |
@@ -673,6 +674,11 @@ The number beside each chip is how many clips in your crate carry that tag, and
 the whole panel re-ranks as the sync fills in. If a style shows up, it's because
 you own records tagged with it.
 
+The **Folder** chips are the same idea one level up: they are the folders you
+made on Discogs, and the folder each copy sits in arrives with the collection
+listing the app already reads. Nothing is inferred — an album is in *Listening*
+because you filed it there.
+
 ### Playlists are Gemtopia's, not Discogs'
 
 Discogs has no playlist concept. The nearest thing is a **List**, and a List is
@@ -790,6 +796,12 @@ playlist to anyone but its owner.**
   [docs/E2EE-DESIGN.md](./docs/E2EE-DESIGN.md) is the design for that step and
   why it isn't the first one. Details in
   [THREAT_MODEL.md §5](./THREAT_MODEL.md#chat-encryption-at-rest).
+- **Your folder names never reach Gemtopia's database.** They are read from
+  Discogs for the signed-in account only (the route takes no username from the
+  caller), kept in your browser with the collection index, and can't ride on a
+  playlist entry, a share link or an export — the builders don't read them and
+  the API schema refuses the field. The choice of which folders to hide is a
+  note on the device, tied to your account and removed when you sign out.
 - **Encrypted on every hop.** HTTPS with two-year HSTS preload to the browser;
   to the database, TLS 1.2+ with the certificate verified and SCRAM channel
   binding, decided in code so a pasted `sslmode=disable` can't switch it off.
@@ -929,9 +941,9 @@ route around is worse than no rule. Everything else still holds: no direct
 push, no force-push, nothing merges red.
 
 **What CI gates**, in order, so a failure names its own cause: typecheck, lint,
-the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 848 offline tests, the schema applied to a
+the dependency audit (`scripts/audit-gate.mjs`: any high or critical advisory fails, except a dev-tool-only one with a written, dated exception in `.github/audit-allowlist.json`; nothing that ships is ever excepted), 895 offline tests, the schema applied to a
 throwaway Postgres, a production build, an assertion that no server-only secret
-reached the client bundle, then 204 API tests against a running server. CodeQL
+reached the client bundle, then 207 API tests against a running server. CodeQL
 runs the `security-and-quality` suite separately.
 
 The audit step earns its keep. The **first** CI run on this repository failed —
@@ -1057,6 +1069,8 @@ scripts/
 ├── test-selection.mjs         ticking runs, moving a block, what a bulk add skips
 ├── test-sleeve.mjs            a scanned photo: what the model may say, the ranking, your copy first
 ├── test-tags.mjs              one stored form, batches in order, where tags can't go
+├── test-resume.mjs            the notes a device keeps, fed garbage, stale and someone else's
+├── test-folders.mjs           your Discogs folders: only / hide, doubles, where the names can't go
 ├── test-source-text.mjs       no hidden characters in the source
 ├── test-pull-list.mjs         the running order you take to the shelves
 ├── test-search-play.mjs       play a search result from the track you asked for
@@ -1094,6 +1108,11 @@ src/
 │   ├── db.ts                  IndexedDB crate cache
 │   ├── sync.ts                resumable, rate-limit-aware background sync
 │   ├── syncQueue.ts           tapped and searched-for records load first
+│   ├── filters.ts             the filter model: state, facets counted from your crate, the apply
+│   ├── folders.ts             your Discogs folders on the rows; a record's copies joined
+│   ├── folderPreference.ts    the one filter that outlives a visit, as a note tied to its account
+│   ├── resume.ts              where you were — set, clip, position — for the reload a phone forces
+│   ├── searchMemory.ts        the last search and its rows, so it comes back without a request
 │   ├── clipDrag.ts            drag a record (or a selection) onto a playlist, safely
 │   ├── sleeveImage.ts         a photo re-encoded without its metadata; barcodes read on the device
 │   ├── selection.ts           picking several: ranges, blocks, what a bulk add skips
@@ -1133,25 +1152,25 @@ src/
 npm run test           # everything below
 npm run test:env        # 50 cases, no server needed
 npm run test:headers    # 24
-npm run test:playables  # 45
+npm run test:playables  # 49
 npm run test:sorting    # 26
 npm run test:share      # 28
 npm run test:scrub      # 12
-npm run test:ownership  # 27
+npm run test:ownership  # 32
 npm run test:recent     # 12
 npm run test:adopt      # 15
-npm run test:search     # 11
+npm run test:search     # 13
 npm run test:writes     # 7
 npm run test:playback   # 12
 npm run test:watchdog   # 24
-npm run test:freshness  # 8
+npm run test:freshness  # 18
 npm run test:bpm-scale  # 10
 npm run test:order      # 10
 npm run test:tempo      # 37
 npm run test:mixing     # 82
 npm run test:bpm-range  # 22
 npm run test:beat-meter # 15
-npm run test:record     # 32
+npm run test:record     # 36
 npm run test:mark       # 14
 npm run test:views      # 16
 npm run test:dig-feed   # 9
@@ -1162,7 +1181,10 @@ npm run test:pull-list  # 9
 npm run test:selection  # 21
 npm run test:sleeve     # 13 — a scanned photo: what the model may say, which searches it earns, your copy first
 npm run test:tags       # 29
-npm run test:search-play # 4
+npm run test:playlist-file # 13 — export and import: what a file may carry
+npm run test:resume     # 17 — the notes a device keeps, fed garbage, stale and someone else's
+npm run test:folders    # 24 — your Discogs folders: only / hide, doubles, and where the names can't go
+npm run test:search-play # 7
 npm run test:invites    # 28
 npm run test:manifest   # 8
 npm run test:collab     # 25
@@ -1170,9 +1192,10 @@ npm run test:collab-view # 11
 npm run test:chat       # 40
 npm run test:audit-gate # 15
 npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
-npm run test:db-tls     # 11 — 848 offline in all
+npm run test:db-tls     # 11 — 895 offline in all
 npm run test:source-text # every tracked text file, for hidden characters
-npm run test:api        # 204 checks, needs a running server + Postgres
+npm run test:api        # 207 checks, needs a running server + Postgres
+npm run e2e             # 56 checks in a real Chromium, Discogs and YouTube faked — see e2e/README.md
 npm run typecheck
 npm run lint
 npm run audit:ci
@@ -1251,7 +1274,9 @@ asserted. It covers authentication, CSRF, five IDOR cases, playlist privacy,
 input validation, and the BPM precedence rules.
 
 CI runs all of it plus a production build and a check that no server-only secret
-ever landed in the client bundle.
+ever landed in the client bundle. The one exception is `npm run e2e`: the browser
+flows need a Chromium download, so they are run by hand against a built app
+before a change goes up ([e2e/README.md](./e2e/README.md)).
 
 ---
 

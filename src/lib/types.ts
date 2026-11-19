@@ -46,6 +46,24 @@ export interface ReleaseSummary {
   /** Discogs thumbnail URL, may be empty. */
   thumb: string;
   coverImage: string;
+  /**
+   * The Discogs collection folders this record is filed in — "DJ", "Listening",
+   * whatever the person sorted their shelf into on Discogs. Only the
+   * collection listing knows (the release endpoint describes a pressing, not
+   * your copy), and only for the collection; a want has none. The listing
+   * route sends one row per copy with that copy's folder; the browser stores
+   * one summary per record with every folder a copy sits in
+   * (client/folders.ts). Absent on summaries cached before folders were read,
+   * which the filter treats as "not known" rather than "in no folder".
+   */
+  folderIds?: number[];
+}
+
+/** One of the person's own Discogs collection folders. Folder 0 is "All". */
+export interface CollectionFolder {
+  id: number;
+  name: string;
+  count: number;
 }
 
 /** Buy signals. Discogs returns these on the release endpoint for free. */
@@ -212,6 +230,13 @@ export interface Playable {
    * leaves the browser — a playlist entry, an export — is built from it.
    */
   tags?: readonly string[];
+  /**
+   * The names of the Discogs folders the record is filed in, merged in
+   * client-side from the collection listing and the folder list. Absent when
+   * not known (a want, or a record listed before folders were read) — which
+   * the Folder filter lets through rather than hides.
+   */
+  folders?: readonly string[];
 }
 
 /**

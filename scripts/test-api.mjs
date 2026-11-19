@@ -659,6 +659,17 @@ await check("search rejects an unknown parameter", async () => {
   );
 });
 
+await check("the folder list needs a session, and takes no parameters from the caller", async () => {
+  const anon = await alice.call("/api/discogs/folders", { cookie: "" });
+  assert.equal(anon.status, 401);
+  // Signed in: the username is the session's, whatever the query says. What
+  // comes back then depends on Discogs, which this suite never reaches, so
+  // only "not refused as a bad request" is pinned.
+  const res = await alice.call("/api/discogs/folders?username=someone-else");
+  assert.notEqual(res.status, 400);
+  assert.notEqual(res.status, 401);
+});
+
 await check("search takes the artist field on its own, with the same floor as q", async () => {
   // Accepted: not a 400. What comes back then depends on Discogs, which this
   // suite never reaches, so only the validation is pinned here.
@@ -848,6 +859,7 @@ await check("every route rejects a revoked session, not just playlists", async (
     // check only that the cookie decrypted — not that it was still current.
     ["/api/discogs/collection", "GET", undefined],
     ["/api/discogs/releases?ids=1", "GET", undefined],
+    ["/api/discogs/folders", "GET", undefined],
     // The admin surface sits behind the same check before it asks who you are.
     ["/api/admin/invites", "GET", undefined],
     ["/api/admin/invites", "POST", { hours: 1 }],

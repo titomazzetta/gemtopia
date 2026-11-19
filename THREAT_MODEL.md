@@ -59,6 +59,7 @@ secret, or the Anthropic key exists in client JavaScript.
 | Your tags (your own words on tracks) | Moderate — personal notes, can say what a set is for | Postgres `track_tags`, scoped by `user_id`; never in a playlist, share link, chat or export (§5) |
 | A photo of a record you scanned | Low–moderate — a sleeve, but a phone photo carries location and device metadata | **Transient.** Re-encoded in the browser (metadata gone), sent once to the model, kept nowhere: not on disk, in the database, or in logs (§7) |
 | Collection index (1,500 releases) | Low | The user's own IndexedDB, never uploaded |
+| Your Discogs folder names, and which you hide | Low–moderate — your own words for your shelf ("Sell", "Mum's") | The user's own IndexedDB (the names) and `localStorage` (the choice, tied to the account); read from Discogs for the session's account only; never in Postgres, a playlist, a share link, chat or an export (§5) |
 | Where you left off; your last search | Low — a playlist id, a clip key, a position, a query and public search rows | The user's own `localStorage`, parsed as untrusted on the way back in, expires in 12 h, wiped on sign-out (§5) |
 | Captured tab audio | **High** while in memory | Never leaves the browser; see §6 |
 
@@ -111,6 +112,7 @@ Server logs record error context only, never tokens.
 | Cross-origin reads of API responses | `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store` on every `/api/*` response. |
 | Secrets in the client bundle | No variable is prefixed `NEXT_PUBLIC_`. CI greps `.next/static` for the build-time secret and fails if it appears. |
 | A scanned photo leaking location or device data | The browser draws the photo onto a canvas and sends the new JPEG, which carries none of the camera's metadata. The server keeps nothing and logs nothing about the image. §7, "Reading a sleeve". |
+| One account reading another's Discogs folders | `/api/discogs/folders` takes no parameters: the username in the upstream URL is the session's, as on the collection listing. `test-folders.mjs` reads the route's source and fails if it ever reads a query string, a body, a header or a cookie itself; `test-api.mjs` covers signed-out, a revoked session, and a `?username=` that is not an input. §5, "Your Discogs folders". |
 | Listening habits leaking between users | The BPM catalogue is keyed `(user_id, clip_key)`. Covered by "another user's catalogue is separate". The one deliberate exception: a reading for a record on a playlist you share is copied to that set, for its members only (§5). |
 
 ### Denial of service
@@ -118,7 +120,7 @@ Server logs record error context only, never tokens.
 | Threat | Control |
 |---|---|
 | A flood of photos spending the model budget | One image per request, ≤ 900 KB decoded, type checked by signature; 20 a minute per user, bad requests included; the same per-user daily output-token budget as the ranking pass; a 30 s timeout on the model call. A refused request never reaches the model. |
-| One user burning the shared 60 req/min Discogs budget | Sliding-window limits per authenticated user: 12 batch fetches/min, 40 listings/min, 6 analyses/min. The client sync engine self-paces below that and backs off on `429`. |
+| One user burning the shared 60 req/min Discogs budget | Sliding-window limits per authenticated user: 12 batch fetches/min, 40 listings/min, 10 folder-list reads/min (the app makes one a visit), 6 analyses/min. The client sync engine self-paces below that and backs off on `429`. |
 | Unauthenticated sign-in flood | 10 `/api/auth/login` and 20 `/api/auth/callback` per minute per IP. |
 | Hung upstream pinning invocations | `AbortSignal.timeout(15_000)` on Discogs, `45_000` on Anthropic. |
 | Connection exhaustion | Pool capped at 3 per isolate, against Neon's pooled endpoint. |
@@ -553,10 +555,10 @@ caller sees. The `dig_log` table is keyed on `user_id`.
 
 A phone reloads the page after a while in the background, so the app keeps
 two small notes in the browser's `localStorage` to pick up where it left off
-(`client/resume.ts`, `client/searchMemory.ts`). They are the only state the
-app writes there beyond preferences, and `localStorage` is writable by
-anything running on this origin, so they are treated as untrusted input on
-the way back in:
+(`client/resume.ts`, `client/searchMemory.ts`). With the Folder choice
+(below) they are the only state the app writes there beyond display
+preferences, and `localStorage` is writable by anything running on this
+origin, so they are treated as untrusted input on the way back in:
 
 - **What they hold.** The resume note: the username it belongs to, the
   crate or wantlist, the open playlist's id, the current clip's key, the
@@ -579,6 +581,52 @@ the way back in:
 - **Bounded in time and to a person.** Both expire after twelve hours; the
   resume note names the account it belongs to and is ignored by any other
   login on the same device; **Sign out & wipe local cache** removes both.
+
+### Your Discogs folders
+
+The Folder filter reads the folders a person made on Discogs — "DJ",
+"Listening", "Sell", "Mum's". A folder name is the user's own words about
+their shelf, so it is handled like the collection index: theirs, on their
+device, and nowhere else.
+
+- **Read for the session's account only.** `/api/discogs/folders` takes no
+  parameters at all; the username in the upstream URL is the session's, the
+  same rule as the collection listing. `test-folders.mjs` reads the route's
+  source and fails if it reads anything from the request but the session, or
+  grows a second method; `test-api.mjs` covers signed-out, a revoked session,
+  and a `?username=` that is not an input. Ten reads a minute per user; the
+  app makes one a visit.
+- **Upstream data can cost a chip, never the sync.** The folder list is
+  parsed with a schema and refused whole if it doesn't fit; names are
+  trimmed, cut to 80 characters and rendered as text. The folder on each
+  collection row is read loosely on purpose (`lib/folderId.ts`): the listing
+  is the app's critical path, so anything that isn't a positive integer is
+  "not known" rather than a failed listing — and the filter never hides a
+  record whose folder isn't known. A missing or malformed field fails open
+  to *showing your records*, not to an empty crate.
+- **Never sent on.** Folder names live in the browser's IndexedDB beside
+  the collection index, which is never uploaded. They ride on the crate's
+  rows the way BPMs and tags do, and like tags they have no way out:
+  playlist entries and export files are built field by field, and the
+  playlist API's strict schema refuses an entry carrying `folders` or
+  `folderIds` — pinned in `test-folders.mjs`. The AI analysis is built from
+  release metadata and never sees them.
+- **Read-only.** Gemtopia reads folders; nothing in it creates one or moves
+  a record between them. The write surface is unchanged
+  (`test-write-surface.mjs`): one more GET to Discogs, no new write.
+- **The choice is a note on the device, tied to its account.**
+  `client/folderPreference.ts` keeps which folders are ticked and whether
+  they are shown or hidden, because "don't play my listening albums" is
+  meant to outlast a visit — so, unlike the two notes above, it has no
+  expiry. It is parsed with the same posture: a wrong version, shape or type
+  is no choice at all, and names are de-duplicated and bounded (60 names of
+  80 characters). It names its account, so another login on the same device
+  starts with no choice, never sees these names in the panel, and replaces
+  the note. Once the fresh folder list is in, names that no longer exist —
+  a folder renamed or removed on Discogs — are dropped. The most a forged
+  note can do is show or hide records in the signed-in account's own crate,
+  with the chips lit and the filter count saying so. **Sign out & wipe
+  local cache** removes it.
 
 ## 6. Session lifetime and revocation
 
@@ -885,17 +933,19 @@ npm run audit:ci && npm ls --prod --depth=0
 # 5. Types, lint, and the test suites
 npm run typecheck && npm run lint
 npm run test:tempo                    # 37 cases, no server needed
-npm run test:mixing                   # 34 cases, no server needed
-npm run dev & npm run test:api        # 59 cases: auth, CSRF, IDOR, revocation, privacy, validation
+npm run test:mixing                   # 82 cases, no server needed
+npm run test:folders                  # 24 cases: what a folder name can reach, and what reads it
+npm run dev & npm run test:api        # 207 cases: auth, CSRF, IDOR, revocation, privacy, validation
 ```
 
 `test-api.mjs` forges its own session cookies using `SESSION_SECRET` — which is
 only possible because the test holds the key. Without it, no session can be
 manufactured. That is the sealing guarantee demonstrated rather than asserted.
 
-CI (`.github/workflows/ci.yml`) runs typecheck, lint, the tempo suite, a
-Postgres-backed API suite, build, and the dependency audit gate on every
-push, and fails on any of them.
+CI (`.github/workflows/ci.yml`) runs typecheck, lint, the dependency audit
+gate, every offline suite (`npm run test` lists them), a build with the
+bundle checked for secrets, and the Postgres-backed API suite on every push,
+and fails on any of them.
 
 ---
 

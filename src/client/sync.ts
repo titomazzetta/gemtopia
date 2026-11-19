@@ -11,6 +11,7 @@ import {
   setSyncState,
 } from "./db";
 import { mergePriority, nextBatch } from "./syncQueue";
+import { mergeFolderIds } from "./folders";
 
 /**
  * Incremental background sync.
@@ -97,6 +98,8 @@ export function startSync(options: {
        * of what this does. CodeQL flagged it; it was right.
        */
       let pages: number;
+      /** A record's folders across the pages of this run (client/folders.ts). */
+      const folderSeen = new Map<number, number[]>();
 
       do {
         if (cancelled) return;
@@ -110,7 +113,7 @@ export function startSync(options: {
           `/api/discogs/collection?source=${options.source}&page=${page}&perPage=100`,
         );
 
-        await putSummaries(options.owner, options.source, data.items);
+        await putSummaries(options.owner, options.source, mergeFolderIds(data.items, folderSeen));
         pages = data.pages;
         total = data.total;
 
@@ -308,6 +311,7 @@ export async function listSource(options: {
   isCancelled?: () => boolean;
 }): Promise<{ listed: number; complete: boolean; pruned: number }> {
   const seen = new Set<number>();
+  const folderSeen = new Map<number, number[]>();
   let page = 1;
   let pages = 1;
   let total: number | null = null;
@@ -321,7 +325,7 @@ export async function listSource(options: {
         pages: number;
         total: number;
       }>(`/api/discogs/collection?source=${options.source}&page=${page}&perPage=100`);
-      await putSummaries(options.owner, options.source, data.items);
+      await putSummaries(options.owner, options.source, mergeFolderIds(data.items, folderSeen));
       for (const item of data.items) seen.add(item.id);
       if (total !== null && data.total !== total) moved = true;
       total = data.total;

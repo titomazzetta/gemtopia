@@ -3,6 +3,7 @@
 import type {
   AnalysisResult,
   ChatMessage,
+  CollectionFolder,
   DigResponse,
   Playlist,
   PlaylistItemRow,
@@ -450,6 +451,11 @@ export const discogsSearchApi = {
     if (params.q) query.set("q", params.q);
     return request<{ results: SearchHit[] }>(`/api/discogs/search?${query.toString()}`);
   },
+};
+
+export const foldersApi = {
+  /** The signed-in person's own Discogs collection folders: names and counts. */
+  list: () => request<{ folders: CollectionFolder[] }>("/api/discogs/folders"),
 };
 
 export const releasesApi = {
