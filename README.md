@@ -1195,7 +1195,7 @@ npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
 npm run test:db-tls     # 11 — 895 offline in all
 npm run test:source-text # every tracked text file, for hidden characters
 npm run test:api        # 207 checks, needs a running server + Postgres
-npm run e2e             # 56 checks in a real Chromium, Discogs and YouTube faked — see e2e/README.md
+npm run e2e             # 75 checks in a real Chromium, Discogs and YouTube faked — see e2e/README.md
 npm run typecheck
 npm run lint
 npm run audit:ci

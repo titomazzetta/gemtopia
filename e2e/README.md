@@ -36,6 +36,12 @@ Screenshots land in `e2e/out/<flow>/`.
   player reaches "playing" and reports a current time; `window.__ytStub.vid`
   is the clip it was last asked to play.
 
+The flows: `crate` (the rig itself: sync, play, search), `usability` (search
+by artist, the wantlist heart, a compilation's rows, picking up where you
+left off after a reload), `folders` (the Folder filter: only / hide, doubles,
+the standing choice) and `scan` (photos to cards, playing a track before
+adding it, ticks and titles as separate targets, adds in photo order).
+
 A flow is a file in `flows/` exporting one `async function` that returns
 `true` when every check passed. Keep flows independent of each other: each
 opens its own contexts and uses its own usernames.
