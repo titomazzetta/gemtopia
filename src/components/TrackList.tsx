@@ -1019,6 +1019,10 @@ export function TrackList({
                     type="button"
                     onClick={() => onRemove(item, index)}
                     title="Remove from playlist"
+                    // Named for its track: every row has one of these, and
+                    // "Remove from playlist" forty times tells a screen
+                    // reader nothing about which.
+                    aria-label={`Remove ${item.title} from this playlist`}
                     className="shrink-0 rounded-sm p-1.5 text-neutral-600 transition-opacity hover:bg-ink-800 hover:text-red-400 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
                     <Trash className="h-3.5 w-3.5" />
