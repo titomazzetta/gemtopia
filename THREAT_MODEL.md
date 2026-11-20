@@ -108,7 +108,7 @@ Server logs record error context only, never tokens.
 | Token exfiltration via XSS | The token is `HttpOnly` and never in `localStorage`. |
 | XSS in the first place | CSP `script-src 'self' 'nonce-…' 'strict-dynamic'`, fresh nonce per request, `default-src 'none'`, `object-src 'none'`, `base-uri 'none'`. React escapes all interpolated text; the codebase contains **zero** uses of `dangerouslySetInnerHTML`. |
 | Error messages leaking internals | `lib/api.ts` is the only place errors become HTTP. Everything maps to a stable code plus a sentence safe to render; the real error goes to `console.error` server-side. Upstream Discogs and Anthropic bodies are never echoed back. |
-| Referrer leakage | `Referrer-Policy: no-referrer`; artwork `<img>` also sets `referrerpolicy="no-referrer"`. |
+| Referrer leakage | `Referrer-Policy: strict-origin-when-cross-origin`: another site is told the origin and never a path or query, and a share token lives in the path (§9). Every link out to Discogs or YouTube is `rel="noreferrer"` and artwork `<img>` sets `referrerpolicy="no-referrer"`, so those send nothing at all. |
 | Cross-origin reads of API responses | `Cross-Origin-Resource-Policy: same-origin`, `Cache-Control: no-store` on every `/api/*` response. |
 | Secrets in the client bundle | No variable is prefixed `NEXT_PUBLIC_`. CI greps `.next/static` for the build-time secret and fails if it appears. |
 | A scanned photo leaking location or device data | The browser draws the photo onto a canvas and sends the new JPEG, which carries none of the camera's metadata. The server keeps nothing and logs nothing about the image. §7, "Reading a sleeve". |
@@ -189,6 +189,53 @@ The column exists so that a future opt-in share feature has to be written as a
 new repository function that *deliberately* drops the `user_id` predicate. That
 is a change that stands out in review, which is the entire point of putting the
 flag there before the feature.
+
+### What a share link shows a chat
+
+A link pasted into Messages, WhatsApp or Slack is fetched by that service and
+turned into a card from the page's Open Graph tags. The card is a copy nobody
+can take back: it is made once, by the chat, and stays in that conversation
+after the owner revokes the link. So what goes on it is a disclosure decided
+in advance, in one pure module (`lib/shareCard.ts`):
+
+- **On the card:** the set's name and how many tracks it has. The name is what
+  the person sharing typed and chose to send; the count says what kind of
+  thing it is.
+- **Never on the card:** a track, an artist, a record, the owner, or the
+  playlist's id. The running order is what the link protects, and it dies
+  with the link. `test-api.mjs` reads the tags of a live shared page and
+  fails if the owner's name, the playlist id or any track is among them.
+- **The address is configuration, not the request.** `og:url` and `og:image`
+  are built from `APP_ORIGIN`, the value the OAuth callback is built from.
+  The `Host` header is whatever the caller says it is; a card that echoed it
+  would let anyone mint a Gemtopia card that points at their own site. The
+  API suite sends a forged `Host` and `X-Forwarded-Host` and checks neither
+  reaches the page.
+- **A token that is not token-shaped gets no address**, and the generic card.
+  So does an unknown or revoked one: a dead link's page names nothing.
+- **The name is cleaned for where it is going.** On the page it is a heading
+  React escapes. In somebody else's chat it sits beside their own words, so
+  direction overrides, zero-width and control characters and lone surrogates
+  are removed and it is cut at 80 characters. Markup in a name stays text;
+  escaping it is the renderer's job, and the API suite checks a `<script>`
+  name arrives as text.
+- **One static picture** (`public/og-set.png`), the same for every set. No
+  per-request image, so no image endpoint to feed, and no sleeve artwork,
+  which is Discogs' and not ours to put on a card.
+
+The page is still `noindex` and still asks not to be cached. It is no longer
+`nofollow`: Discogs' API terms ask that the link back to the page the data
+came from pass search-engine credit (README, "Credit where Discogs asks for
+it"). That costs nothing here. A crawler that never indexes the page has
+nothing to follow, and every link on it goes to a record's public Discogs
+page or to this app's front door.
+
+Chat services fetch the page and the picture from their own servers, so
+`Cross-Origin-Resource-Policy: same-origin` does not stand in their way and
+no exemption was made for the picture.
+
+The page and its card share one read of the set per request (React `cache`),
+so the card costs no second query and the two cannot disagree.
 
 ### Collaborative playlists
 
@@ -414,6 +461,17 @@ removed. Swapping someone's record for another counts as a removal. A refused
 edit is a 403 (`not_your_record`) and writes nothing; the UI only offers the
 remove button where it would be allowed.
 
+**Undo is an ordinary edit.** Taking a track out offers to put it back, and
+that is built in the browser from the list as it stands now plus the rows that
+were taken (`client/selection.planPutBack`), then saved through the same route
+under the same rules. It never restores a snapshot, so it cannot roll back
+what someone else added in the meantime, and it has no route of its own to
+authorise. Two consequences on a shared set, both deliberate: a record put
+back counts as added by whoever pressed Undo, because that is who added it;
+and a tempo somebody else had set on that row is not brought back. An edit
+carries no tempos, so the row returns with the reading of the person who
+pressed Undo if they have logged one, exactly as a record they add would.
+
 ### Collaborator levels
 
 The owner sets, per person, how much of a shared set they may change. One
@@ -627,6 +685,39 @@ device, and nowhere else.
   note can do is show or hide records in the signed-in account's own crate,
   with the chips lit and the filter count saying so. **Sign out & wipe
   local cache** removes it.
+
+### Asking the browser to keep the crate
+
+The crate is the one thing here that is slow to get back, and it lives in
+storage a browser may clear by itself: when the device runs short of space,
+and in Safari when a site has had no tap or click in seven days of browser
+use. That is an availability matter, not a confidentiality one, and nothing
+on the server is affected: playlists, tempos and tags are on the account.
+
+`client/storagePersistence.ts` asks for better with
+`navigator.storage.persist()`:
+
+- **No new data and no new request.** The call changes how the browser
+  treats storage this origin already has. Nothing is stored for it and
+  nothing is sent to anyone.
+- **No prompt nobody asked for.** Chromium and Safari answer silently, so the
+  app asks for the person once a visit, once there is a crate. Firefox answers
+  with a permission prompt, so there the request waits for a button in the
+  account menu. Telling the two apart reads the user-agent string, which is
+  the only thing that can; a wrong guess shows the prompt once or leaves the
+  button to be pressed.
+- **Only the browser's answer is reported.** The account menu says "kept"
+  when `persisted()` says so and offers the button when it does not; with no
+  Storage API it says nothing. It does not promise the crate is safe: WebKit
+  says storage in persistent mode "might be excluded from eviction", and
+  neither it nor MDN says whether that covers the seven-day rule.
+- **Sign-out is unchanged.** *Sign out & wipe local cache* still deletes the
+  crate; a browser's agreement to keep storage does not stand in the way of
+  the site deleting its own.
+
+`test-storage-persistence.mjs` drives the rules with a fake storage manager,
+and `e2e/flows/storage.mjs` replaces `navigator.storage` in a real browser
+with one that counts what it is asked.
 
 ## 6. Session lifetime and revocation
 
@@ -854,18 +945,18 @@ Content-Security-Policy: default-src 'none'; script-src 'self' 'nonce-<random>'
   font-src 'self' data:; connect-src 'self'; frame-src
   https://www.youtube-nocookie.com https://www.youtube.com; media-src 'self' blob:;
   worker-src 'self' blob:; manifest-src 'self'; frame-ancestors 'none';
-  base-uri 'none'; form-action 'self'; object-src 'none';
+  base-uri 'none'; form-action 'self' https://www.discogs.com; object-src 'none';
   upgrade-insecure-requests
 Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
 X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
-Referrer-Policy: no-referrer
+Referrer-Policy: strict-origin-when-cross-origin
 Permissions-Policy: camera=(), geolocation=(), payment=(), usb=(), …
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Resource-Policy: same-origin
 ```
 
-Two deliberate compromises, stated rather than hidden:
+Three deliberate compromises, stated rather than hidden:
 
 - **`style-src 'unsafe-inline'`.** Next.js emits inline `<style>` tags that
   cannot currently carry a nonce. Scripts — the actual XSS execution vector —
@@ -874,6 +965,14 @@ Two deliberate compromises, stated rather than hidden:
 - **`Cross-Origin-Embedder-Policy` is omitted.** The YouTube iframe sends no
   CORP headers and would be blocked under COEP, breaking the app entirely.
   COOP is still set.
+- **`Referrer-Policy` is `strict-origin-when-cross-origin`, not `no-referrer`.**
+  It was `no-referrer` once, and this section went on saying so after the
+  header changed. An embed host is entitled to know which site embeds it, and
+  some of YouTube's subresource requests inherit the page's policy. What a
+  cross-origin request carries is the origin alone, never a path or query, so
+  a share token (which is a path) still cannot leak this way; a downgrade to
+  HTTP carries nothing. The history, including a first explanation that
+  claimed more than it could prove, is in the comment in `next.config.ts`.
 
 Note `microphone=()` is **not** in `Permissions-Policy`: mic capture is the
 documented fallback for browsers without tab audio capture.
@@ -935,7 +1034,8 @@ npm run typecheck && npm run lint
 npm run test:tempo                    # 37 cases, no server needed
 npm run test:mixing                   # 82 cases, no server needed
 npm run test:folders                  # 24 cases: what a folder name can reach, and what reads it
-npm run dev & npm run test:api        # 207 cases: auth, CSRF, IDOR, revocation, privacy, validation
+npm run test:share-card               # 13 cases: what a share link's card may carry, and where its address comes from
+npm run dev & npm run test:api        # 213 cases: auth, CSRF, IDOR, revocation, privacy, validation
 ```
 
 `test-api.mjs` forges its own session cookies using `SESSION_SECRET` — which is
@@ -1128,7 +1228,22 @@ Honest list of what is *not* solved.
    attacker with script execution could drive the app's own authenticated
    `fetch` calls. `HttpOnly` limits blast radius; it does not eliminate it.
 
-10. **No formal pen test.** This is one developer's threat model, not an audit.
+10. **A share link's card outlives the link.** Revoking kills the page; it
+    cannot reach into a chat and remove the card that chat made (§5). The card
+    holds the set's name and track count and nothing else, which is the whole
+    of the mitigation. A name is free text, so a person who types something
+    private into one and shares the link has shared that too.
+
+11. **After a reload, the owner cannot see which sets have a live link.** The
+    playlist listing deliberately never returns share tokens, and it does not
+    return a "shared" flag either, so the Share button's state lasts only as
+    long as the page that minted the link. From a fresh page, pressing Share
+    on a set that already has a link replaces it (the old link dies, which
+    fails safe) and a second press revokes. Nothing is exposed that was not
+    already shared, but "what have I shared?" has no answer on screen. Planned
+    with the share-token hardening: the listing says whether, never what.
+
+12. **No formal pen test.** This is one developer's threat model, not an audit.
 
 ### Scanning a sleeve: what is left to a third party
 
