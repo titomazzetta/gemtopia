@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { createCipheriv, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { createServer, request as httpRequest } from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
@@ -1315,6 +1315,88 @@ await check("the public page renders and refuses indexing", async () => {
   assert.match(res.headers.get("x-robots-tag") ?? html, /noindex/i);
 });
 
+/** One <meta> tag's content, by property or name, as the page sent it. */
+const metaOf = (html, key) => {
+  const tag = html.match(new RegExp(`<meta[^>]*(?:property|name)="${key}"[^>]*>`, "i"))?.[0] ?? null;
+  return tag ? (tag.match(/content="([^"]*)"/i)?.[1] ?? null) : null;
+};
+
+await check("a pasted link gets a card: the set's name and count, at the configured address", async () => {
+  const html = await (await fetch(`${BASE}/s/${shareToken}`)).text();
+  assert.equal(metaOf(html, "og:title"), "B2B set");
+  assert.equal(metaOf(html, "og:site_name"), "Gemtopia");
+  assert.match(metaOf(html, "og:description") ?? "", /^1 track, /);
+  // The same address the owner was handed, which is built from APP_ORIGIN.
+  assert.equal(metaOf(html, "og:url"), shareUrl);
+  const image = new URL(metaOf(html, "og:image"));
+  assert.equal(image.origin, new URL(shareUrl).origin);
+  assert.equal(image.pathname, "/og-set.png");
+  // noindex stays. nofollow would cancel the credit Discogs' terms ask its links to pass.
+  const robots = metaOf(html, "robots") ?? "";
+  assert.match(robots, /noindex/);
+  assert.ok(!/nofollow/.test(robots), `robots is "${robots}"`);
+});
+
+await check("the card says nothing about who made the set or what is in it", async () => {
+  const html = await (await fetch(`${BASE}/s/${shareToken}`)).text();
+  const card = ["og:title", "og:description", "og:site_name", "og:url", "og:image", "description"].map((k) => metaOf(html, k) ?? "").join(" | ");
+  assert.ok(!card.includes(alice.username), "the owner is on the card");
+  assert.ok(!card.includes(sharedPlaylistId), "the playlist id is on the card");
+  // The set holds one clip; neither its key nor its release is on the card.
+  assert.ok(!card.includes("ccccccccccc") && !card.includes("2001"), `a track is on the card: ${card}`);
+  // And the page as a whole still names no owner.
+  assert.ok(!html.includes(alice.username), "the page names its owner");
+});
+
+await check("the card's picture is a public file of the size chats ask for", async () => {
+  const html = await (await fetch(`${BASE}/s/${shareToken}`)).text();
+  const res = await fetch(new URL(new URL(metaOf(html, "og:image")).pathname, BASE));
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("content-type") ?? "", /^image\/png/);
+  const bytes = Buffer.from(await res.arrayBuffer());
+  assert.ok(bytes.length < 600_000, `${bytes.length} bytes: WhatsApp wants under 600 KB`);
+  assert.equal(bytes.subarray(1, 4).toString("latin1"), "PNG");
+  assert.equal(bytes.readUInt32BE(16), 1200);
+  assert.equal(bytes.readUInt32BE(20), 630);
+});
+
+await check("the card's address never comes from the request", async () => {
+  // Whatever Host a caller claims, and whatever a proxy header says, the card
+  // points at APP_ORIGIN. Otherwise anyone could mint a Gemtopia-looking card
+  // for their own site by asking for this page under another name.
+  const target = new URL(`${BASE}/s/${shareToken}`);
+  const spoofed = await new Promise((resolve, reject) => {
+    const req = httpRequest(
+      { host: target.hostname, port: target.port, path: target.pathname, method: "GET", headers: { Host: "evil.example", "X-Forwarded-Host": "evil.example" } },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => (body += chunk));
+        res.on("end", () => resolve({ status: res.statusCode, body }));
+      },
+    );
+    req.on("error", reject);
+    req.end();
+  });
+  assert.ok(!spoofed.body.includes("evil.example"), "a claimed host reached the page");
+  if (spoofed.status === 200) assert.equal(metaOf(spoofed.body, "og:url"), shareUrl);
+});
+
+await check("a set's name cannot break out of its card, or steer the text around it", async () => {
+  const rlo = String.fromCodePoint(0x202e);
+  const name = `</title><script>alert(1)</script>"${rlo}x`;
+  const made = await alice.call("/api/playlists", { method: "POST", body: { name, entries: [clip(2002, "ddddddddddd")] } });
+  assert.equal(made.status, 201);
+  const link = await alice.call(`/api/playlists/${made.body.playlist.id}/share`, { method: "POST", body: { shared: true } });
+  assert.equal(link.status, 200);
+  const html = await (await fetch(link.body.shareUrl.replace(/^https?:\/\/[^/]+/, BASE))).text();
+  assert.ok(!html.includes("<script>alert(1)</script>"), "the name arrived as markup");
+  const title = metaOf(html, "og:title") ?? "";
+  assert.ok(title.includes("alert(1)"), `the card lost the name: ${title}`);
+  assert.ok(!title.includes(rlo), "a direction override is on the card");
+  await alice.call(`/api/playlists/${made.body.playlist.id}`, { method: "DELETE" });
+});
+
 await check("revoking kills the link permanently", async () => {
   const off = await alice.call(`/api/playlists/${sharedPlaylistId}/share`, {
     method: "POST",
@@ -1329,6 +1411,14 @@ await check("revoking kills the link permanently", async () => {
 
   const page = await fetch(`${BASE}/s/${shareToken}`);
   assert.equal(page.status, 404);
+});
+
+await check("a dead link's page is the generic card: no name, no address", async () => {
+  const html = await (await fetch(`${BASE}/s/${shareToken}`)).text();
+  assert.ok(!html.includes("B2B set"), "a revoked set is still named");
+  assert.equal(metaOf(html, "og:url"), null);
+  const title = metaOf(html, "og:title");
+  assert.ok(title === null || title === "A set on Gemtopia", `og:title is "${title}"`);
 });
 
 console.log("\nBPM re-read");

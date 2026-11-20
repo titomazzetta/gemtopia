@@ -1,7 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { cache } from "react";
+import { env } from "@/lib/env";
 import { getPlaylistByShareToken } from "@/lib/repo";
+import { CARD_IMAGE, shareCard } from "@/lib/shareCard";
+import { isReleaseId, releaseUrl } from "@/lib/discogs-links";
+import { DiscogsCredit, DiscogsDisclaimer } from "@/components/DiscogsCredit";
 import { SharedPlayer } from "@/components/SharedPlayer";
 import { Mark } from "@/components/Mark";
 
@@ -27,18 +32,59 @@ export const dynamic = "force-dynamic";
  * is not a leak. The token is in the address bar of the person reading it —
  * they hold the credential already, and a credential echoed back to its own
  * holder discloses nothing. What would matter is the token reaching a *third*
- * party, and it does not: `Referrer-Policy: no-referrer` is set globally, so
- * the URL never travels in a header to YouTube or to the Discogs links below,
- * and a browser audit of this page confirms the only third-party host it
- * contacts at all is youtube.com.
+ * party, and it does not: the site's `Referrer-Policy` is
+ * `strict-origin-when-cross-origin`, so a request to another site carries the
+ * origin at most and never the path the token is in; the Discogs links below
+ * are `noreferrer` and send nothing at all; and a browser audit of this page
+ * confirms the only third-party host it contacts is youtube.com.
  */
 
-export const metadata: Metadata = {
-  // A share link is private-by-obscurity: the token is the credential. Search
-  // engines must never index one, or "unlisted" quietly becomes "public".
-  robots: { index: false, follow: false, nocache: true },
-  title: "A set on Gemtopia",
-};
+/** One read of the set per request, shared by the card and the page. */
+const loadShared = cache((token: string) => getPlaylistByShareToken(token));
+
+/**
+ * The tab title, and the card a chat builds when the link is pasted into it.
+ * What goes on that card, and why its address never comes from the request,
+ * is in lib/shareCard.ts.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  let set: { name: string; tracks: number } | null = null;
+  try {
+    const playlist = await loadShared(token);
+    if (playlist) set = { name: playlist.name, tracks: playlist.items.length };
+  } catch {
+    // The page reports the failure. The card just stays the generic one.
+  }
+  const card = shareCard({ origin: env.APP_ORIGIN, token, set });
+  return {
+    /*
+     * A share link is private-by-obscurity: the token is the credential.
+     * Search engines must never index one, or "unlisted" quietly becomes
+     * "public" — hence noindex, and no cached copy.
+     *
+     * Not nofollow, though. Discogs' API terms ask that the link back to the
+     * page the data came from pass ranking credit, and a page-wide nofollow
+     * would cancel every Discogs link below. Nothing on this page is a link
+     * worth hiding: the records on Discogs, and the front door.
+     */
+    robots: { index: false, follow: true, nocache: true },
+    title: card.pageTitle,
+    description: card.description,
+    openGraph: {
+      type: "website",
+      siteName: card.siteName,
+      title: card.title,
+      description: card.description,
+      ...(card.url ? { url: card.url } : {}),
+      images: [{ url: card.image, width: CARD_IMAGE.width, height: CARD_IMAGE.height, alt: CARD_IMAGE.alt }],
+    },
+  };
+}
 
 function formatWhen(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
@@ -54,7 +100,7 @@ export default async function SharedPlaylistPage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const playlist = await getPlaylistByShareToken(token);
+  const playlist = await loadShared(token);
 
   // Unknown, malformed and revoked all land here identically.
   if (!playlist) notFound();
@@ -87,6 +133,7 @@ export default async function SharedPlaylistPage({
       {/* Record-only tracks are listed below but have nothing to play. */}
       {playlist.items.some((item) => item.videoId !== null) && (
         <SharedPlayer
+          total={playlist.items.length}
           tracks={playlist.items.flatMap((item) =>
             item.videoId === null ? [] : [{
             clipKey: item.clipKey,
@@ -131,18 +178,29 @@ export default async function SharedPlaylistPage({
               can go and find it. rel="noreferrer" so Discogs is not told which
               share token the visitor came from — the token is a credential and
               must not travel in a Referer header.
+
+              It fills the row's height (the negative margin takes back the
+              row's padding), so on a phone it is a target the size of the row
+              rather than a 15px word.
             */}
-            <a
-              href={`https://www.discogs.com/release/${item.releaseId}`}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="shrink-0 text-[10px] text-neutral-700 hover:text-accent"
-            >
-              Discogs ↗
-            </a>
+            {isReleaseId(item.releaseId) && (
+              <a
+                href={releaseUrl(item.releaseId)}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="-my-2.5 flex shrink-0 items-center self-stretch px-2 text-[11px] text-neutral-500 hover:text-accent"
+              >
+                Discogs ↗
+              </a>
+            )}
           </li>
         ))}
       </ol>
+
+      {/* Directly under the records it is about; each row links to its own page. */}
+      <p className="mt-2.5 text-right text-[11px] text-neutral-500">
+        <DiscogsCredit />
+      </p>
 
       {/*
         The invitation. Someone reading a shared set list is, almost by
@@ -178,8 +236,8 @@ export default async function SharedPlaylistPage({
           Open your own crate
         </Link>
         <p className="mt-2.5 text-[11px] text-neutral-600">
-          Sign in with Discogs. Free, and the only thing it ever writes to
-          your account is a record you pressed add on.
+          Sign in with Discogs. Free, and it writes to your account only when
+          you press something: the heart for your wantlist, or add for a record.
         </p>
       </section>
 
@@ -202,6 +260,7 @@ export default async function SharedPlaylistPage({
           Whoever shared this can revoke the link at any time, which kills it
           permanently rather than pausing it.
         </p>
+        <DiscogsDisclaimer />
       </footer>
     </main>
   );
