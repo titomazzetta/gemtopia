@@ -69,7 +69,10 @@ export class Rig {
     return this;
   }
 
-  /** A fresh browser context: cookies, the fake Discogs, the YouTube stub, the tour dismissed. */
+  /**
+   * A fresh browser context: cookies, the fake Discogs, the YouTube stub, the tour dismissed.
+   * Pass `null` for `who` to be a visitor with no account: no cookies at all.
+   */
   async context(who, { viewport = DESKTOP, fake = {}, welcome = true } = {}) {
     const { isMobile, hasTouch, deviceScaleFactor, ...size } = viewport;
     const ctx = await this.browser.newContext({
@@ -80,10 +83,12 @@ export class Rig {
       reducedMotion: "reduce",
       locale: "en-US",
     });
-    await ctx.addCookies([
-      { name: "gt_session", value: who.session, url: BASE },
-      { name: "gt_csrf", value: who.csrf, url: BASE },
-    ]);
+    if (who) {
+      await ctx.addCookies([
+        { name: "gt_session", value: who.session, url: BASE },
+        { name: "gt_csrf", value: who.csrf, url: BASE },
+      ]);
+    }
     if (welcome) {
       await ctx.addInitScript(() => {
         try {

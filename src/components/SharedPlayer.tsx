@@ -62,7 +62,11 @@ function loadApi(): Promise<void> {
   });
 }
 
-export function SharedPlayer({ tracks }: { tracks: SharedTrack[] }) {
+/**
+ * `tracks` are the ones with a clip. `total` is every track in the set, so the
+ * counter can say why "2 of 5" sits under a heading that says six.
+ */
+export function SharedPlayer({ tracks, total }: { tracks: SharedTrack[]; total: number }) {
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [ready, setReady] = useState(false);
@@ -101,14 +105,19 @@ export function SharedPlayer({ tracks }: { tracks: SharedTrack[] }) {
         // youtube-nocookie: YouTube's own reduced-tracking host. It still sets
         // storage on playback, but nothing before the visitor presses play.
         host: "https://www.youtube-nocookie.com",
+        // Fills the box below, which is what holds the minimum size.
+        width: "100%",
+        height: "100%",
         videoId: tracks[0]?.videoId,
         playerVars: {
           playsinline: 1,
           rel: 0,
           modestbranding: 1,
           // The share token is in this page's URL. `origin` is sent to YouTube
-          // regardless, but the global Referrer-Policy is `no-referrer`, so
-          // the full URL — and with it the token — never leaves in a header.
+          // regardless; the site's Referrer-Policy is
+          // strict-origin-when-cross-origin, so a request to another site
+          // carries the origin at most. The path — and with it the token —
+          // never leaves in a header.
           origin: window.location.origin,
         },
         events: {
@@ -136,15 +145,21 @@ export function SharedPlayer({ tracks }: { tracks: SharedTrack[] }) {
     };
   }, [tracks, advance]);
 
-  // Load whichever track the index points at, after the first render.
-  const firstRun = useRef(true);
+  /*
+   * Load a track when the index moves to it — and only then.
+   *
+   * The player is built with the first track already cued, so there is
+   * nothing to load until someone skips or a track ends. This used to skip
+   * only the very first render, and then ran again the moment the player
+   * reported ready: `loadVideoById` on the first track, which is "load and
+   * play". Wherever the browser allowed it, opening a share link started the
+   * music by itself. A link opened from a message is not a tap on play.
+   */
+  const loadedIndex = useRef(0);
   useEffect(() => {
-    if (firstRun.current) {
-      firstRun.current = false;
-      return;
-    }
     const track = tracks[index];
-    if (!ready || !track) return;
+    if (!ready || !track || loadedIndex.current === index) return;
+    loadedIndex.current = index;
     playerRef.current?.loadVideoById(track.videoId);
   }, [index, ready, tracks]);
 
@@ -157,65 +172,76 @@ export function SharedPlayer({ tracks }: { tracks: SharedTrack[] }) {
   const current = tracks[index];
   if (!current) return null;
 
+  const recordOnly = Math.max(0, total - tracks.length);
+
   return (
     <div className="mb-8 rounded-lg border border-ink-800 bg-ink-900 p-3">
-      <div className="flex gap-3">
+      {/*
+        Stacked on a phone, side by side from a tablet up. Beside a 200px
+        video a 393px-wide phone had 107px left for the title, three buttons
+        and a caption, which is how the buttons came to be 26px and the
+        caption came to hang out of the card.
+      */}
+      <div className="flex flex-col gap-3 sm:flex-row">
         {/*
-          YouTube's API terms require the player stay visible at a minimum
-          size and unobscured. It sits here doing the job album art would.
+          YouTube's API terms require the player stay visible and unobscured,
+          at 200 by 200 pixels or more. The box holds that size on every
+          screen: 16:9 where that is tall enough, and never under 200px high.
+          It sits here doing the job album art would.
         */}
-        <div className="w-[200px] shrink-0 overflow-hidden rounded-sm bg-black">
-          <div ref={mountRef} className="aspect-video w-full" />
+        <div className="aspect-video min-h-[200px] w-full shrink-0 overflow-hidden rounded-sm bg-black sm:w-[356px]">
+          <div ref={mountRef} className="h-full w-full" />
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
+        <div className="flex min-w-0 flex-1 flex-col justify-between gap-3 py-0.5">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-neutral-100">
               {current.title}
             </p>
-            <p className="truncate text-xs text-neutral-500">
+            <p className="truncate text-xs text-neutral-400">
               {current.artist}
-              <span className="text-neutral-700"> — {current.releaseTitle}</span>
+              <span className="text-neutral-500"> — {current.releaseTitle}</span>
             </p>
-            <p className="mt-1 font-mono text-[10px] text-neutral-700">
-              {index + 1} / {tracks.length}
+            {/*
+              Counts what plays, and says what doesn't: a set of six with one
+              record-only track read "1 / 5" under a heading that said six.
+            */}
+            <p className="mt-1 text-[11px] text-neutral-500">
+              Clip {index + 1} of {tracks.length}
+              {recordOnly > 0 && <> · {recordOnly} record only</>}
             </p>
           </div>
 
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => advance(-1)}
-              className="rounded-sm p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-neutral-100"
-              aria-label="Previous track"
-            >
-              <Prev className="h-3.5 w-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={toggle}
-              disabled={!ready}
-              className="rounded-full bg-accent p-2 text-ink-950 transition-transform hover:scale-105 disabled:opacity-40"
-              aria-label={playing ? "Pause" : "Play"}
-            >
-              {playing ? (
-                <Pause className="h-3.5 w-3.5" />
-              ) : (
-                <Play className="h-3.5 w-3.5" />
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => advance(1)}
-              className="rounded-sm p-1.5 text-neutral-500 hover:bg-ink-800 hover:text-neutral-100"
-              aria-label="Next track"
-            >
-              <Next className="h-3.5 w-3.5" />
-            </button>
-
-            <span className="ml-2 text-[10px] text-neutral-700">
-              plays straight through
-            </span>
+          <div>
+            {/* The sizes of the app's own bar: 40px skips, a 44px play. */}
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => advance(-1)}
+                className="grid h-10 w-10 place-items-center rounded-full text-neutral-400 hover:bg-ink-800 hover:text-neutral-100"
+                aria-label="Previous track"
+              >
+                <Prev className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={toggle}
+                disabled={!ready}
+                className="grid h-11 w-11 place-items-center rounded-full bg-accent text-ink-950 transition-transform hover:scale-105 disabled:opacity-40"
+                aria-label={playing ? "Pause" : "Play"}
+              >
+                {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => advance(1)}
+                className="grid h-10 w-10 place-items-center rounded-full text-neutral-400 hover:bg-ink-800 hover:text-neutral-100"
+                aria-label="Next track"
+              >
+                <Next className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-1.5 text-[11px] text-neutral-500">Plays straight through.</p>
           </div>
         </div>
       </div>
