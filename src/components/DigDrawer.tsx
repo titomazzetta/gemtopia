@@ -11,6 +11,8 @@ import { useFinePointer } from "@/client/useFinePointer";
 import { formatTime } from "./NowPlaying";
 import { Disc, Heart, NoPreview, Play, Plus, Search, Shuffle, Sparkle } from "./Icons";
 import { formatBpm } from "@/lib/mixing";
+import { DiscogsCredit } from "./DiscogsCredit";
+import { isReleaseId, releaseUrl } from "@/lib/discogs-links";
 
 /**
  * Off-the-cuff digging.
@@ -1129,6 +1131,11 @@ export function DigDrawer({
           </div>
         )}
       </div>
+
+      {/* Beside the record and the lanes it led to, on every screen. */}
+      <p className="shrink-0 border-t border-ink-800 px-4 py-1.5 text-right text-[10px] text-neutral-600">
+        <DiscogsCredit href={isReleaseId(seed.releaseId) ? releaseUrl(seed.releaseId) : undefined} />
+      </p>
 
       <footer className="hidden shrink-0 border-t border-ink-800 px-4 py-2 text-[10px] leading-relaxed text-neutral-600 lg:block">
         Every chip above is Discogs metadata from this release, and every record

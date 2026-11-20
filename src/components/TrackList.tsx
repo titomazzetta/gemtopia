@@ -253,6 +253,7 @@ export function TrackList({
   phoneMeta = false,
   emptyMessage,
   emptyAction,
+  footer,
   reorderable = false,
   onReorder,
   transitions,
@@ -296,6 +297,11 @@ export function TrackList({
    */
   phoneMeta?: boolean;
   emptyMessage: string;
+  /**
+   * A line after the last row, scrolling with the list — where the list
+   * credits where its records came from.
+   */
+  footer?: React.ReactNode;
   /**
    * Offered beneath the empty message. An empty crate is the one moment the
    * app knows exactly what you were looking for and cannot give it to you,
@@ -1034,6 +1040,7 @@ export function TrackList({
           })}
         </ul>
       </div>
+      {footer && <div className="px-3 py-3 text-right text-[11px] text-neutral-500">{footer}</div>}
       </div>
     </div>
   );

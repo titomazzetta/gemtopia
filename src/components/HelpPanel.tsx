@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useFinePointer } from "@/client/useFinePointer";
 import { SHORTCUTS } from "./Shortcuts";
+import { DiscogsCredit, DiscogsDisclaimer } from "./DiscogsCredit";
 import { ChatIcon, Compass, Disc, ListIcon, Metronome, Plus, Share, Shuffle, Users } from "./Icons";
 
 /**
@@ -273,6 +274,13 @@ export function HelpPanel({
           >
             Replay the welcome tour
           </button>
+          {/* Discogs' two notices, in Discogs' words (lib/discogsNotices.ts). */}
+          <div className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-neutral-500">
+            <p>
+              <DiscogsCredit />
+            </p>
+            <DiscogsDisclaimer />
+          </div>
         </div>
       </div>
     </div>

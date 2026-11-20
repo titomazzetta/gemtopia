@@ -1,4 +1,5 @@
 import { Mark } from "@/components/Mark";
+import { DiscogsDisclaimer } from "@/components/DiscogsCredit";
 
 const FEATURES = [
   ["Shuffle the crate", "Fisher–Yates across every clip Discogs has for your collection, spread so the same release never lands back to back."],
@@ -218,6 +219,8 @@ export function SignIn({
           anywhere in this app, so no button, no bug and no crafted request can
           reach one. It never posts, comments, or lists anything for sale.
         </p>
+        {/* Discogs' own wording, as its API terms ask (lib/discogsNotices.ts). */}
+        <DiscogsDisclaimer className="text-neutral-400" />
       </section>
     </main>
   );

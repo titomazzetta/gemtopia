@@ -122,6 +122,8 @@ import { CollabPanel } from "./CollabPanel";
 import { ChatPanel } from "./ChatPanel";
 import { ScanSheet } from "./ScanSheet";
 import { YouTubeLink } from "./YouTubeLink";
+import { DiscogsCredit } from "./DiscogsCredit";
+import { collectionUrl, isReleaseId, releaseUrl, wantlistUrl } from "@/lib/discogs-links";
 import { isCollabPlaylist, collabLine, canEditSet, canRemoveEntry } from "@/client/collabView";
 import { totalUnread, unreadBadge } from "@/client/chatView";
 import { InsightsPanel } from "./InsightsPanel";
@@ -3946,6 +3948,15 @@ export function CrateApp({
                     ? undefined
                     : (key: SortKey) => setSort((current) => nextSort(current, key))
                 }
+                footer={
+                  // After the last row: your crate links to the page on Discogs
+                  // these records are listed on, your collection or your
+                  // wantlist; a set mixes records from anywhere, so it links
+                  // to the front door.
+                  <DiscogsCredit
+                    href={activePlaylist ? undefined : source === "wantlist" ? wantlistUrl(username) : collectionUrl(username)}
+                  />
+                }
                 emptyMessage={
                   activePlaylist
                     ? "This playlist is empty. Add tracks with the + button or the A key."
@@ -4445,6 +4456,13 @@ export function CrateApp({
                 <div className="mt-2">
                   <YouTubeLink videoId={current.videoId} />
                 </div>
+              )}
+
+              {/* Beside the record it describes, linking to that record's page. */}
+              {current && isReleaseId(current.releaseId) && (
+                <p className="mt-2 text-center text-[11px] text-neutral-500">
+                  <DiscogsCredit href={releaseUrl(current.releaseId)} />
+                </p>
               )}
 
               {/*

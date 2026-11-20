@@ -17,6 +17,7 @@ import { prepareImage, readBarcodeHere, releaseImage, type PreparedImage } from 
 import { searchRecord } from "@/client/searchPlay";
 import { recordTracks } from "@/client/recordOrder";
 import { CameraIcon, InCollection, NoPreview, Pause, Play, Plus } from "./Icons";
+import { DiscogsCredit } from "./DiscogsCredit";
 
 /**
  * Scan records: photos in, a card per record out, then one add.
@@ -657,6 +658,10 @@ export function ScanSheet({
           </ol>
           <p role="status" className="text-xs text-accent [&:not(:empty)]:mt-3">
             {note}
+          </p>
+          {/* The cards are Discogs' answers to the photos: several records, so one credit under them all. */}
+          <p className="mt-3 text-right text-[11px] text-neutral-500">
+            <DiscogsCredit />
           </p>
         </div>
 

@@ -24,6 +24,8 @@ import {
 } from "./Icons";
 import { ShareButton } from "./ShareButton";
 import { YouTubeLink } from "./YouTubeLink";
+import { DiscogsCredit } from "./DiscogsCredit";
+import { isReleaseId, releaseUrl } from "@/lib/discogs-links";
 import { WantButton, type WantHeart } from "./WantButton";
 import { TagEditor } from "./TagEditor";
 import { writeClipDrag } from "@/client/clipDrag";
@@ -853,6 +855,13 @@ export function NowPlaying({
               ? `${queuePosition + 1} / ${queueLength} in queue`
               : "queue empty"}
           </p>
+
+          {/* Beside the record it describes, linking to that record's page. */}
+          {current && isReleaseId(current.releaseId) && (
+            <p className="text-center text-[10px] text-neutral-600">
+              <DiscogsCredit href={releaseUrl(current.releaseId)} />
+            </p>
+          )}
         </div>
       </div>
     </aside>

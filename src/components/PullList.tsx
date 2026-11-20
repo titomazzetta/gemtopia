@@ -14,6 +14,7 @@ import {
   togglePulled,
 } from "@/client/pullList";
 import { Play } from "./Icons";
+import { DiscogsCredit } from "./DiscogsCredit";
 
 /**
  * The whole set at once. See client/pullList.ts.
@@ -428,6 +429,11 @@ export function PullList({
               );
             })}
           </ol>
+        )}
+        {items.length > 0 && (
+          <p className="px-4 py-3 text-right text-[11px] text-neutral-500">
+            <DiscogsCredit />
+          </p>
         )}
       </div>
     </div>

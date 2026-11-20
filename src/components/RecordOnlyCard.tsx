@@ -8,6 +8,8 @@ import { formatBpm } from "@/lib/mixing";
 import { formatTime } from "./NowPlaying";
 import { Disc, Mic, Plus } from "./Icons";
 import { TagEditor } from "./TagEditor";
+import { DiscogsCredit } from "./DiscogsCredit";
+import { releaseUrl } from "@/lib/discogs-links";
 
 /**
  * A track YouTube has no clip for — "record only".
@@ -236,13 +238,16 @@ export function RecordOnlyCard({
         <p className="mt-3 flex flex-wrap items-baseline gap-x-2 font-mono text-xs tabular-nums text-neutral-300">
           {facts.length > 0 && <span>{facts.join(" · ")}</span>}
           <a
-            href={`https://www.discogs.com/release/${item.releaseId}`}
+            href={releaseUrl(item.releaseId)}
             target="_blank"
             rel="noreferrer noopener"
             className="font-sans text-[11px] text-neutral-500 underline decoration-dotted underline-offset-2 hover:text-neutral-200"
           >
             On Discogs ↗
           </a>
+        </p>
+        <p className="mt-1 text-[11px] text-neutral-500">
+          <DiscogsCredit href={releaseUrl(item.releaseId)} />
         </p>
 
         <p className="mt-3 text-xs leading-relaxed text-neutral-500">
