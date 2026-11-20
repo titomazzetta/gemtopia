@@ -36,7 +36,13 @@ export const HELP: ReadonlyArray<Section> = [
         allows 60 requests a minute — but anything already loaded plays straight away. Tracks with no
         YouTube clip are still listed, marked <b>record only</b> with a disc: tap one — here, in a
         record&apos;s tracklist or in a Discogs search — for its side, length, a tap pad and Add to
-        playlist.
+        playlist.{" "}
+        <b>Kept on this device:</b> the crate lives in this browser, and a browser may clear what a
+        site has saved — Safari does when you haven&apos;t touched the site in seven days of
+        browsing. Gemtopia asks the browser to keep it; the account menu (your name, at the top)
+        shows the answer, and has the button where a browser wants you to ask yourself. On an
+        iPhone, having Gemtopia on your Home Screen counts. Playlists, tempos and tags are on your
+        account, not here, and aren&apos;t lost that way.
       </>
     ),
   },

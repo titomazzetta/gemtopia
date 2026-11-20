@@ -146,7 +146,7 @@ jobs:
         run: |
           for suite in mark bpm-range beat-meter record views dig-feed dig-links \
                        sync-queue clip-drag pull-list search-play invites manifest collab collab-view chat \
-                       playlist-file tags selection sleeve resume folders share-card notices source-text; do
+                       playlist-file tags selection sleeve resume folders share-card notices storage source-text; do
             npm run "test:$suite"
           done
 
