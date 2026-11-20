@@ -42,9 +42,22 @@
   --color-neutral-200: #e5e5e5;
   --color-neutral-300: #d4d4d4;
   --color-neutral-400: #a3a3a3;
-  --color-neutral-500: #737373;
-  --color-neutral-600: #525252;
-  --color-neutral-700: #404040;
+  /*
+   * The three quiet greys are not Tailwind's. Its 500, 600 and 700 (#737373,
+   * #525252, #404040) come out at 4.2, 2.6 and 1.9 to 1 on this ground, and
+   * between them they set nearly every caption, meta line, count and
+   * placeholder in the app: an accessibility scan of 36 screens found text
+   * under WCAG AA's 4.5 to 1 on all 36. These are the darkest greys that
+   * clear it on every surface text sits on here, ink-950 to ink-800 and the
+   * playing row's tint; the hierarchy they used to carry by getting darker is
+   * carried by size and position instead. 600 and 700 are one value on
+   * purpose: there is no room under 500 for two.
+   *
+   * scripts/test-mark.mjs measures them, so a "subtler" grey fails the build.
+   */
+  --color-neutral-500: #949494;
+  --color-neutral-600: #8a8a8a;
+  --color-neutral-700: #8a8a8a;
   --color-amber-300: #fcd34d;
   --color-amber-400: #fbbf24;
   --color-amber-500: #f59e0b;
