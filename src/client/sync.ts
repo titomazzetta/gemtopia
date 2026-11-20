@@ -313,7 +313,9 @@ export async function listSource(options: {
   const seen = new Set<number>();
   const folderSeen = new Map<number, number[]>();
   let page = 1;
-  let pages = 1;
+  // No initialiser, as in the sync above: the body assigns it from the first
+  // response before the condition reads it, so a starting `= 1` was dead.
+  let pages: number;
   let total: number | null = null;
   let moved = false;
   try {
