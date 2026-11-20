@@ -4,7 +4,8 @@ import { Fragment, useCallback, useRef, useState } from "react";
 import type { SearchHit } from "@/lib/discogs";
 import type { Playable, ReleaseDetail } from "@/lib/types";
 import { releasesApi } from "@/client/api";
-import { releaseUrl } from "@/lib/discogs-links";
+import { releaseUrl, searchUrl } from "@/lib/discogs-links";
+import { DiscogsCredit } from "./DiscogsCredit";
 import {
   badgeFor,
   confirmAddMessage,
@@ -127,6 +128,8 @@ export function DiscogsSearch({
   const [hits, setHits] = useState<Array<{ hit: SearchHit; group: SearchGroup }> | null>(() =>
     remembered ? groupBySet(remembered.hits, sets) : null,
   );
+  /** The words the results on screen came from, which the box may no longer hold. */
+  const [searched, setSearched] = useState(remembered?.query ?? "");
   const [status, setStatus] = useState<"idle" | "searching" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [rows, setRows] = useState<Record<number, RowState>>({});
@@ -254,6 +257,7 @@ export function DiscogsSearch({
 
       const body = (await response.json()) as { results: SearchHit[] };
       setHits(groupBySet(body.results, sets));
+      setSearched(query.trim());
       writeSearch({ query: query.trim(), field, hits: body.results });
       // A pending confirmation belongs to a row that no longer exists.
       setConfirmId(null);
@@ -596,6 +600,16 @@ export function DiscogsSearch({
           );
         })}
       </ul>
+
+      {/*
+        Under the results it is about, linked to Discogs' own search for the
+        same words; each result, opened, links to its own Discogs page.
+      */}
+      {hits !== null && hits.length > 0 && (
+        <p className="px-4 py-3 text-right text-[11px] text-neutral-500">
+          <DiscogsCredit href={searched === "" ? undefined : searchUrl(searched)} />
+        </p>
+      )}
     </div>
   );
 }

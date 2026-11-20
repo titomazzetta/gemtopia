@@ -3,6 +3,7 @@
 import type { InsightsResponse } from "@/client/api";
 import type { Weighted } from "@/lib/types";
 import { Refresh, Sparkle } from "./Icons";
+import { DiscogsCredit } from "./DiscogsCredit";
 
 /**
  * Playlist dissection.
@@ -294,7 +295,8 @@ export function InsightsPanel({
               : ""}
             {data.cachedAt
               ? ` Cached ${new Date(data.cachedAt).toLocaleString()}.`
-              : ""}
+              : ""}{" "}
+            <DiscogsCredit />
           </p>
         </div>
       )}

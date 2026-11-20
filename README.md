@@ -679,6 +679,28 @@ made on Discogs, and the folder each copy sits in arrives with the collection
 listing the app already reads. Nothing is inferred — an album is in *Listening*
 because you filed it there.
 
+### Credit where Discogs asks for it
+
+Discogs' API terms ask an application for two notices, in their words, and both
+are in the app rather than only here:
+
+- *"This application uses Discogs’ API but is not affiliated with, sponsored or
+  endorsed by Discogs. ‘Discogs’ is a trademark of Zink Media, LLC."* — on the
+  sign-in page, in **How it works**, and at the foot of every shared set.
+- *"Data provided by Discogs."* — beside the data, as a link to the Discogs page
+  the data is on: the record that's playing (under the player, on a record-only
+  track's card, in Dig), your collection or your wantlist (at the end of your
+  crate), Discogs' own search for the same words (under search results). A set,
+  a pull list, Insights and a batch of scan cards each mix many records, so
+  there the notice links to Discogs itself; on a shared set every row also
+  links to its own record.
+
+The link is an ordinary one. Their terms ask that it pass search-engine credit,
+so it is never `nofollow` — which is also why a shared set's page says
+`noindex` but not `nofollow`. The wording lives in one file
+(`src/lib/discogsNotices.ts`) and `npm run test:notices` fails if a screen that
+shows Discogs data loses its credit.
+
 ### Playlists are Gemtopia's, not Discogs'
 
 Discogs has no playlist concept. The nearest thing is a **List**, and a List is
@@ -1301,5 +1323,10 @@ before a change goes up ([e2e/README.md](./e2e/README.md)).
 
 MIT — see [LICENSE](./LICENSE).
 
-Not affiliated with Discogs, YouTube, Bandcamp, Spotify, or Anthropic. Gemtopia
-uses the Discogs API under their terms and embeds YouTube's player under theirs.
+This application uses Discogs’ API but is not affiliated with, sponsored or
+endorsed by Discogs. ‘Discogs’ is a trademark of Zink Media, LLC.
+
+Data provided by [Discogs](https://www.discogs.com/).
+
+Nor is it affiliated with YouTube, Bandcamp, Spotify or Anthropic. Gemtopia uses
+the Discogs API under their terms and embeds YouTube's player under theirs.
