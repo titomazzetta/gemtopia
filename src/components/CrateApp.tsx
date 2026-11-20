@@ -123,6 +123,7 @@ import { ChatPanel } from "./ChatPanel";
 import { ScanSheet } from "./ScanSheet";
 import { YouTubeLink } from "./YouTubeLink";
 import { DiscogsCredit } from "./DiscogsCredit";
+import { KeepCrate } from "./KeepCrate";
 import { collectionUrl, isReleaseId, releaseUrl, wantlistUrl } from "@/lib/discogs-links";
 import { isCollabPlaylist, collabLine, canEditSet, canRemoveEntry } from "@/client/collabView";
 import { totalUnread, unreadBadge } from "@/client/chatView";
@@ -3253,6 +3254,9 @@ export function CrateApp({
                 </span>
               </button>
             )}
+
+            {/* Whether this browser has agreed to keep the crate, and the button to ask. */}
+            <KeepCrate hasCrate={details.length > 0} />
 
             <button
               type="button"

@@ -72,8 +72,9 @@ export class Rig {
   /**
    * A fresh browser context: cookies, the fake Discogs, the YouTube stub, the tour dismissed.
    * Pass `null` for `who` to be a visitor with no account: no cookies at all.
+   * `userAgent` gives the browser another name, for rules that go by it.
    */
-  async context(who, { viewport = DESKTOP, fake = {}, welcome = true } = {}) {
+  async context(who, { viewport = DESKTOP, fake = {}, welcome = true, userAgent } = {}) {
     const { isMobile, hasTouch, deviceScaleFactor, ...size } = viewport;
     const ctx = await this.browser.newContext({
       viewport: size,
@@ -82,6 +83,8 @@ export class Rig {
       deviceScaleFactor: deviceScaleFactor ?? 1,
       reducedMotion: "reduce",
       locale: "en-US",
+      // Only the name: the engine is still Chromium. For code that reads the name.
+      ...(userAgent ? { userAgent } : {}),
     });
     if (who) {
       await ctx.addCookies([
