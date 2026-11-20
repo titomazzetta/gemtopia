@@ -54,7 +54,7 @@ export default async function run() {
     const recordText = (await record.textContent()) ?? "";
     rig.ok("the record's rows name the track's own artist on a compilation", /A1\s*Mirror\s*Nate Krafft/.test(recordText) && /Dolphin Dreams\s*Larry Heard/.test(recordText), recordText.replace(/\s+/g, " ").slice(0, 200));
     rig.ok("…and a track with no printed length shows its clip's runtime", /5:32/.test(recordText), recordText.replace(/\s+/g, " ").slice(0, 200));
-    await vis(page.getByRole("button", { name: /^Close search|Close$/ })).click().catch(() => {});
+    await vis(page.getByRole("button", { name: /^(Close search|Close)$/ })).click().catch(() => {});
 
     // The way out to YouTube, from the desktop player.
     await vis(page.getByRole("button", { name: /^B1\s*Antimatter/ })).click();
