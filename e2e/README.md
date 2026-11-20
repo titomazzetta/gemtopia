@@ -36,11 +36,21 @@ Screenshots land in `e2e/out/<flow>/`.
   player reaches "playing" and reports a current time; `window.__ytStub.vid`
   is the clip it was last asked to play.
 
-The flows: `crate` (the rig itself: sync, play, search), `usability` (search
-by artist, the wantlist heart, a compilation's rows, picking up where you
-left off after a reload), `folders` (the Folder filter: only / hide, doubles,
-the standing choice) and `scan` (photos to cards, playing a track before
-adding it, ticks and titles as separate targets, adds in photo order).
+The flows: `crate` (the rig itself: sync, play, search, and Discogs credited
+beside each), `usability` (search by artist, the wantlist heart, a
+compilation's rows, picking up where you left off after a reload), `folders`
+(the Folder filter: only / hide, doubles, the standing choice), `scan` (photos
+to cards, playing a track before adding it, ticks and titles as separate
+targets, adds in photo order), `sets` (a set you just named is the current
+one; a removed track comes back from the message or from the set's bar),
+`share` (a share link as a visitor with no cookies: its card, its player, its
+notices, no request to the API, and revocation) and `storage` (asking the
+browser to keep the crate, with `navigator.storage` replaced by one that
+counts what it is asked).
+
+Two things `rig.context` can do beyond a signed-in desktop: pass `null` for
+the person and the context is a visitor with no cookies at all, and pass
+`userAgent` to give the browser another name, for rules that go by it.
 
 A flow is a file in `flows/` exporting one `async function` that returns
 `true` when every check passed. Keep flows independent of each other: each

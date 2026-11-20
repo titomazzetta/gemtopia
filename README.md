@@ -199,10 +199,11 @@ There's nothing to download or update: it is always the live version.
 | **BPM catalogue** | Detect tempo from the audio as it plays — with a live beat meter showing exactly what it hears — or tap it in with `T`. Genre-aware: a record Discogs tags as drum & bass is counted at 174, not 87. **Measure** plays through everything on screen unattended, skipping what is already done. |
 | **Pick several at once** | Tick tracks in your crate or in a playlist — **Select** (on a phone it's the box button; in a playlist it sits on the set-prep line), or on a desktop the box on any row, Cmd/Ctrl-click and Shift-click, or the box at the top for everything a search or filter shows — and one bar acts on them all: add them to your current set in one tap (or **Other…** for another, or a new one), **Tag** them all, **Remove** them from the playlist, or drag (on a phone, hold) any one of them to move them together, with the same green line; on a desktop, drop them on a set in the sidebar. Tracks already in the set are skipped and the toast says so, and a shared set's chat gets one line for the lot. On a shared set you take out only what you added: a lock on the rest says who added it, and **Leave** under the set's **⋯** takes it off your list. |
 | **Your own tags** | Put your own words on any track — *deep*, *opening*, *closing*, whatever you file things under — from the player, a record-only track's card, or the phone's player sheet. Your most-used tags are one tap away. Type `#deep` in the search box, or pick tags in the **Your tags** filter (any or all of them), and there they are, in your collection and your wantlist. Tags are **private**: they never travel with a playlist, a shared set, a share link or an export. |
-| **One tap into the set you're building** | The first time you add something on a visit, you pick the set; after that every **+**, the record card, the player's add button and <kbd>A</kbd> put it straight into that set — the button says which (*Add to B2B at the Lot*), and so does the toast. **Other…**, <kbd>Shift</kbd>-click on a **+** or <kbd>Shift</kbd>+<kbd>A</kbd> picks a different one, which becomes the set from then on. With a playlist open, that playlist is the set. |
+| **One tap into the set you're building** | The first time you add something on a visit, you pick the set; after that every **+**, the record card, the player's add button and <kbd>A</kbd> put it straight into that set — the button says which (*Add to B2B at the Lot*), and so does the toast. A set you have just named in the picker is that set from its first track. **Other…**, <kbd>Shift</kbd>-click on a **+** or <kbd>Shift</kbd>+<kbd>A</kbd> picks a different one, which becomes the set from then on. With a playlist open, that playlist is the set. |
+| **Take one out, and put it back** | Taking a track out of a set says which one went — *Took “Antimatter” out of Night one* — and offers **Undo**: in the message for a few seconds, then as **Undo remove** on the set's bar until you take out something else or change the order. One step, the last thing you took out, back where it stood; several ticked and removed together come back together. |
 | **A whole record, or a whole playlist, in one go** | **Add all** on a record's tracklist — in Dig, on a Discogs search result, or on the phone's player sheet — puts every track of the EP into your current set in running order, the ones with no preview as record-only rows, with one tap (Shift-click to choose the set). **Merge into…** in a playlist's **⋯** adds everything in it to another set you pick; the first playlist stays as it is. Both are one save: tracks already in the set are skipped and the toast says so, and a shared set's chat gets one line for the lot. |
 | **Duplicate, export, import** | **Duplicate** any playlist you're on — yours or a shared one — for your own private copy, set BPMs and all, to rework the order or borrow from without touching the original or anyone's view of it. It opens straight away. Each playlist's **⋯** has Duplicate, Merge into…, **Export** (that one playlist as a file), Rename and Delete; **Export all** saves every playlist in one file, and **Import** takes either. Files carry the records and their order — not who added them. |
-| **Share a set** | One tap mints a read-only link to a playlist that anyone can open and play — no account, no route back to yours. Turn sharing off and the link is dead, not dormant. See [the one exception](#the-one-exception-and-why-it-looks-like-one). |
+| **Share a set** | One tap mints a read-only link to a playlist that anyone can open and play — no account, no route back to yours. Pasted into a chat it arrives as a card with the set's name and how many tracks, and never a track, an artist or who made it. The page it opens is made for a phone: the player across the top with thumb-sized controls, and every row linked to its record on Discogs. Turn sharing off and the link is dead, not dormant. See [the one exception](#the-one-exception-and-why-it-looks-like-one). |
 | **Set prep** | Every transition in a playlist checked against your decks' pitch range, in three tiers: **comfortable**, **pushing it**, or **out of range**. Flags the hard ones before you pack the bag. |
 | **Share a find** | A share icon on every row and in the player. Sends the Discogs release page — not a Gemtopia link — because the friend you're sending it to probably doesn't have an account here. Native share sheet on a phone, clipboard on desktop. **Open on YouTube**, next to it on the player and the phone's player sheet, opens the clip itself in a new tab — for the notes people keep there. (A Discogs want is a whole record; for one track off a record you don't want whole, a playlist here holds single tracks.) |
 | **Wantlist, both ways** | Shuffle your wantlist like a crate, and add to it from anywhere in the app — it writes to your real Discogs wantlist. Which records are on it is kept current in the background (one request per hundred wants, no tracklists), so every device knows what you're after. Anything playing that you don't own (a dig preview, a search preview, a friend's record on a shared set) gets a **heart right on the player**, the phone bar included, or press **W**. |
@@ -213,6 +214,8 @@ There's nothing to download or update: it is always the live version.
 | **Record-only tracks** | Most vinyl has no YouTube clip for every track. Those tracks are listed from the Discogs tracklist anyway — a disc on the artwork, a *record only* tag, side and length. Tap one — in the crate, in a record's running order, in Dig, or in a Discogs search result — for its card: put the record on and tap along (or press <kbd>T</kbd>), or press **Listen** and let the microphone measure it, and its BPM is in your catalogue. A tap always outranks what the mic heard. Add it to a playlist like any other track (<kbd>A</kbd>, or the **+** on its row), so you can **write the set list from the shelf** while listening to the real records. The player and shuffle skip them. |
 | **Build a set together (B2B)** | Turn any playlist into a shared one with a join link — anyone with a Gemtopia account presses **Join**. Everyone adds and reorders; you take out only what you added, and the owner has the last word. Shared playlists are edged in amber, and every row says who brought the record. A **chat** on every shared playlist, Telegram-style, with small notes when the set changes — *komron added Shiva — Kerri Chandler · 1998 · 124 BPM* — and an unread count, like a messenger, on the chat button, on the playlist and by the logo — the same on your phone and laptop. A tempo anyone logs becomes the set's BPM for everyone on it. |
 | **Install it as an app** | Add to Home Screen on an iPhone, **Install** in Chrome or Edge, **Add to Dock** in Safari on a Mac. Full screen, its own icon, safe-area aware on iPhones. |
+| **A crate that stays put** | Your crate lives in your browser, and browsers clear things: Safari removes what a site has saved when you haven't touched the site in seven days of browsing. Gemtopia asks the browser to keep it — by itself where the browser answers silently (Chrome, Edge, Safari), from a button in the account menu where it would put a permission prompt in front of you (Firefox). The menu shows what the browser answered and promises no more than that. Playlists, tempos and tags are on your account either way. |
+| **Readable in a dark room** | Every grey the app writes text in — captions, counts, placeholders, the release beside each track — clears WCAG AA (4.5 to 1) on every surface it sits on, and the build measures it, so a "subtler" grey fails CI instead of failing a reader. |
 | **Invite-only** | New accounts need a one-time code from an admin — an hour or a day, single use. Everyone already in keeps their access. |
 | **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, marked, instead of silently not existing — track by track where Discogs has a tracklist. On a first sync every record shows up within a minute as *loading* — tap one and it's fetched next. The header splits the count: what plays, what's record only, what Discogs has no audio for, what's still loading, and what hasn't finished syncing — the last of which is a button. |
 | **Shown how, not left to guess** | A four-card welcome on your first visit — what it is, how to hear it, how to build a set, digging and B2B — worded for the device you're on (drag on a desktop, + on a phone). After that, **?** (or the ? button, phones included) opens *How it works*: every feature in a few lines, the keyboard shortcuts, and the tour again. |
@@ -851,8 +854,19 @@ an anonymous request reach?" has exactly one answer to read.
 - The response carries the set list and nothing else — no user id, no username,
   no other playlist, no route back to the owner's account. A test asserts each
   of those absences by name.
-- The page is `noindex, nofollow`. A share link is private by obscurity, and an
-  indexed one would be simply public.
+- The page is `noindex` and asks not to be cached. A share link is private by
+  obscurity, and an indexed one would be simply public. It is not `nofollow`:
+  Discogs' terms ask that the links back to it pass search-engine credit, and
+  every link on the page goes to a record's public Discogs page or to this
+  app's front door.
+- Pasted into a chat, the link becomes a card, and a card is a copy nobody can
+  take back: the chat keeps it after the link is revoked. So the card carries
+  the set's **name** and **how many tracks**, and nothing else — no track, no
+  artist, nothing about who made it. Its address is built from configuration,
+  never from the request's `Host` header; a token that isn't token-shaped gets
+  no address; the name has direction overrides and invisible characters taken
+  out before it lands in somebody else's conversation; and the picture is one
+  static file, the same for every set. A dead link's page has the generic card.
 
 The threat this accepts is exactly the one a share link is for: whoever holds
 the URL can read that playlist. Nothing more.
@@ -1064,6 +1078,7 @@ db/schema.sql                  tables, constraints, ownership cascades
 scripts/
 ├── migrate.mjs                idempotent schema application
 ├── verify-discogs.mjs         real OAuth handshake, no deps, redacts on failure
+├── make-og-card.mjs           draws the one picture every share link's card carries
 ├── test-env.mjs               configuration contract
 ├── test-headers.mjs           security headers, both directions
 ├── test-playables.mjs         clip choice, record-only tracks, silent records
@@ -1088,15 +1103,18 @@ scripts/
 ├── test-dig-links.mjs         which credits are worth following
 ├── test-sync-queue.mjs        what a first sync fetches next
 ├── test-clip-drag.mjs         a drop accepts our records and nothing else
-├── test-selection.mjs         ticking runs, moving a block, what a bulk add skips
+├── test-selection.mjs         ticking runs, moving a block, what a bulk add skips, putting back what was taken out
 ├── test-sleeve.mjs            a scanned photo: what the model may say, the ranking, your copy first
 ├── test-tags.mjs              one stored form, batches in order, where tags can't go
 ├── test-resume.mjs            the notes a device keeps, fed garbage, stale and someone else's
 ├── test-folders.mjs           your Discogs folders: only / hide, doubles, where the names can't go
+├── test-share-card.mjs        a share link's card: what it may carry, where its address comes from
+├── test-discogs-notices.mjs   Discogs' two notices: the wording, the screens, the link targets
+├── test-storage-persistence.mjs  asking the browser to keep the crate: when, and what to claim
 ├── test-source-text.mjs       no hidden characters in the source
 ├── test-pull-list.mjs         the running order you take to the shelves
 ├── test-search-play.mjs       play a search result from the track you asked for
-├── test-mark.mjs              the logo's three cuts
+├── test-mark.mjs              the logo's three cuts, and the palette measured for contrast
 ├── test-tempo.mjs             estimator vs synthetic signals
 ├── test-mixing.mjs            beatmatch maths, tiers and set length
 ├── test-envelope.mjs          chat encryption: tamper, wrong key, moved rows, rotation
@@ -1124,7 +1142,10 @@ src/
 │   ├── recommend.ts           playlist profiling and candidate scoring
 │   ├── llm.ts                 optional Claude pass + anti-hallucination filter
 │   ├── validation.ts          every accepted payload shape, in one file
-│   └── ratelimit.ts           sliding-window limiter
+│   ├── ratelimit.ts           sliding-window limiter
+│   ├── shareCard.ts           what a pasted share link shows a chat (pure; the page and a test read it)
+│   ├── discogsNotices.ts      Discogs' two notices, written once (shared with the browser)
+│   └── discogs-links.ts       canonical Discogs URLs: a record, a collection, a wantlist, a search
 ├── app/api/                   auth · discogs · dig · wantlist · collection · playlists · track-meta · insights · scan
 ├── client/                    browser-only
 │   ├── db.ts                  IndexedDB crate cache
@@ -1160,6 +1181,7 @@ src/
 │   ├── useCrateCache.ts       what you own, and its persistence
 │   ├── ownership.ts           what the app may claim about what you own
 │   ├── share.ts               exactly what crosses into the share sheet
+│   ├── storagePersistence.ts  asking the browser to keep the crate, without a prompt nobody asked for
 │   ├── tempo.ts               pure tempo estimator + tap tempo + BPM parsing
 │   ├── useTempoDetector.ts    tab/mic capture → onset envelope
 │   └── api.ts                 typed client, CSRF on every mutation
@@ -1193,19 +1215,22 @@ npm run test:mixing     # 82
 npm run test:bpm-range  # 22
 npm run test:beat-meter # 15
 npm run test:record     # 36
-npm run test:mark       # 14
+npm run test:mark       # 18 — the logo's cuts, the accents, and every text grey against every surface it sits on
 npm run test:views      # 16
 npm run test:dig-feed   # 9
 npm run test:dig-links  # 11
 npm run test:sync-queue # 7
 npm run test:clip-drag  # 12
 npm run test:pull-list  # 9
-npm run test:selection  # 21
+npm run test:selection  # 30 — picking several, and putting back what was taken out
 npm run test:sleeve     # 13 — a scanned photo: what the model may say, which searches it earns, your copy first
 npm run test:tags       # 29
 npm run test:playlist-file # 13 — export and import: what a file may carry
 npm run test:resume     # 17 — the notes a device keeps, fed garbage, stale and someone else's
 npm run test:folders    # 24 — your Discogs folders: only / hide, doubles, and where the names can't go
+npm run test:share-card # 13 — what a pasted share link shows a chat, and where its address comes from
+npm run test:notices    # 9 — Discogs' two notices: the wording, the screens, the link targets, never nofollow
+npm run test:storage    # 12 — asking the browser to keep the crate: when to ask, when to wait, what to claim
 npm run test:search-play # 7
 npm run test:invites    # 28
 npm run test:manifest   # 8
@@ -1214,10 +1239,10 @@ npm run test:collab-view # 11
 npm run test:chat       # 40
 npm run test:audit-gate # 15
 npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
-npm run test:db-tls     # 11 — 895 offline in all
+npm run test:db-tls     # 11 — 942 offline in all
 npm run test:source-text # every tracked text file, for hidden characters
-npm run test:api        # 207 checks, needs a running server + Postgres
-npm run e2e             # 75 checks in a real Chromium, Discogs and YouTube faked — see e2e/README.md
+npm run test:api        # 213 checks, needs a running server + Postgres
+npm run e2e             # 146 checks in a real Chromium, Discogs and YouTube faked — see e2e/README.md
 npm run typecheck
 npm run lint
 npm run audit:ci
@@ -1235,6 +1260,14 @@ our own response header. Hardening that removes a capability the product
 depends on is invisible in review: the diff that breaks it looks exactly like
 the diff that secures it. Now a tightening pass has to change a test on its way
 through.
+
+**`test-mark.mjs`** measures colour instead of trusting it. It already checked
+that both accents clear AA on the ground. It now does the same for every grey
+the app writes text in, against each surface text sits on, because three of
+them were Tailwind's stock values and came out at 4.2, 2.6 and 1.9 to 1 here:
+nothing looked wrong at a desk, and an accessibility scan found text under AA
+on all 36 screens it was pointed at. The tokens were lifted, the same screens
+scanned clean, and the test is what keeps the next "a bit subtler" out.
 
 **`test-env.mjs`** covers the configuration contract, and exists because of a
 bug that reached a user on their very first run. Every optional field rejected a
@@ -1316,6 +1349,15 @@ before a change goes up ([e2e/README.md](./e2e/README.md)).
   is the natural companion to the tempo checks.
 - Transition checks assume a constant tempo per record. Live drummers and
   hand-played records drift; the flag is a guide, not a guarantee.
+- After a reload the app doesn't show which of your sets have a live share
+  link. Pressing **Share** on one that has replaces its link with a new one
+  (the old link stops working); pressing it again turns sharing off. Showing
+  the state is planned.
+- A share link's card stays in a chat after the link is revoked. It holds the
+  set's name and track count, nothing else.
+- Asking the browser to keep your crate is a request, and the answer is the
+  browser's. Neither WebKit nor MDN says whether Safari's seven-day rule
+  spares a site it has agreed to keep.
 
 ---
 
