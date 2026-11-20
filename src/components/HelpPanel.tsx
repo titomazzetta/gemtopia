@@ -79,8 +79,9 @@ export const HELP: ReadonlyArray<Section> = [
           </>
         ) : null}
         : add them all to a set, tag them, remove them, or {fine ? "drag" : "hold"} one to move them
-        together. On a shared set you can take out what you added (everything, with full control); a
-        lock marks the rest, and{" "}
+        together. Take a track out by mistake and the message that names it offers <b>Undo</b> — so
+        does the set&apos;s bar, until your next change. On a shared set you can take out what you added
+        (everything, with full control); a lock marks the rest, and{" "}
         <b>Leave</b> under its <b>⋯</b> takes it off your list.{" "}
         <b>Set prep</b> checks every transition against your decks&apos; pitch range.{" "}
         <b>Add all</b> on a record&apos;s tracklist (in Dig, on a search result, or on the phone&apos;s

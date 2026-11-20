@@ -15,8 +15,10 @@ import {
   isNoopBlockMove,
   moveBlock,
   planAdd,
+  planPutBack,
   planRemove,
   presentOnly,
+  putBackMessage,
   removedMessage,
   selectAll,
   selectRange,
@@ -113,6 +115,99 @@ check("both rows of a doubled clip go when it's ticked", () => {
   assert.equal(plan.removed, 2);
 });
 
+check("a remove remembers what it took and where each row stood", () => {
+  const rows = ["a", "b", "c", "d"].map((k, i) => ({ clipKey: k, mine: i !== 2 }));
+  const plan = planRemove(rows, new Set(["b", "c", "d"]), (row) => row.mine);
+  assert.deepEqual(plan.taken.map((t) => [t.index, t.entry.clipKey]), [[1, "b"], [3, "d"]]);
+  assert.equal(plan.removed, plan.taken.length);
+});
+
+/* ---------------- putting back what was taken out ---------------- */
+
+const row = (k) => ({ clipKey: k });
+const rowKeys = (rows) => rows.map((r) => r.clipKey);
+
+check("undoing a remove puts every row back where it stood", () => {
+  const before = ["a", "b", "c", "d", "e"].map(row);
+  const plan = planRemove(before, new Set(["b", "d", "e"]), () => true);
+  const back = planPutBack(plan.keep, plan.taken, 1000);
+  assert.deepEqual(rowKeys(back.entries), rowKeys(before));
+  assert.equal(back.restored, 3);
+  assert.equal(back.already, 0);
+  assert.equal(back.overflow, 0);
+});
+
+check("remove then undo is the list as it was, for every way of ticking a list", () => {
+  const before = ["a", "b", "c", "d", "e", "f"].map(row);
+  for (let mask = 1; mask < 2 ** before.length; mask += 1) {
+    const ticked = new Set(before.filter((_, i) => mask & (1 << i)).map((r) => r.clipKey));
+    const plan = planRemove(before, ticked, () => true);
+    const back = planPutBack(plan.keep, plan.taken, 1000);
+    assert.deepEqual(rowKeys(back.entries), rowKeys(before), `ticked ${[...ticked].join("")}`);
+    assert.equal(back.restored, ticked.size);
+  }
+});
+
+check("both rows of a doubled clip come back together", () => {
+  const before = ["a", "b", "a", "c"].map(row);
+  const plan = planRemove(before, new Set(["a"]), () => true);
+  const back = planPutBack(plan.keep, plan.taken, 1000);
+  assert.deepEqual(rowKeys(back.entries), ["a", "b", "a", "c"]);
+  assert.equal(back.restored, 2);
+});
+
+check("an undo never takes out what someone added in the meantime", () => {
+  const before = ["a", "b", "c"].map(row);
+  const plan = planRemove(before, new Set(["b"]), () => true);
+  // A collaborator adds x and y before the undo is pressed.
+  const now = [...plan.keep, row("x"), row("y")];
+  const back = planPutBack(now, plan.taken, 1000);
+  assert.deepEqual(rowKeys(back.entries), ["a", "b", "c", "x", "y"]);
+  assert.equal(back.entries.length, now.length + 1, "it only ever adds");
+});
+
+check("a row whose place is gone goes to the end, and rows keep their order", () => {
+  const before = ["a", "b", "c", "d", "e"].map(row);
+  const plan = planRemove(before, new Set(["d", "e"]), () => true);
+  // Meanwhile the list shrank to one row.
+  const back = planPutBack([row("a")], plan.taken, 1000);
+  assert.deepEqual(rowKeys(back.entries), ["a", "d", "e"]);
+});
+
+check("a clip that is already back is not doubled", () => {
+  const before = ["a", "b", "c"].map(row);
+  const plan = planRemove(before, new Set(["b", "c"]), () => true);
+  // Someone re-added b themselves.
+  const back = planPutBack([row("a"), row("b")], plan.taken, 1000);
+  assert.deepEqual(rowKeys(back.entries), ["a", "b", "c"]);
+  assert.equal(back.restored, 1);
+  assert.equal(back.already, 1);
+});
+
+check("an undo stops at the set's limit and counts what didn't fit", () => {
+  const before = ["a", "b", "c", "d"].map(row);
+  const plan = planRemove(before, new Set(["c", "d"]), () => true);
+  // The set filled up to its limit of three while the rows were out.
+  const back = planPutBack([row("a"), row("b"), row("x")], plan.taken, 3);
+  assert.equal(back.restored, 0);
+  assert.equal(back.overflow, 2);
+  assert.deepEqual(rowKeys(back.entries), ["a", "b", "x"]);
+  const roomForOne = planPutBack([row("a"), row("b")], plan.taken, 3);
+  assert.equal(roomForOne.restored, 1);
+  assert.equal(roomForOne.overflow, 1);
+  assert.deepEqual(rowKeys(roomForOne.entries), ["a", "b", "c"]);
+});
+
+check("an undo touches neither the list nor the rows it was given, and ignores nonsense places", () => {
+  const now = ["a", "c"].map(row);
+  const taken = [{ index: 1, entry: row("b") }, { index: -3, entry: row("x") }, { index: 1.5, entry: row("y") }];
+  const copy = JSON.stringify([now, taken]);
+  const back = planPutBack(now, taken, 1000);
+  assert.equal(JSON.stringify([now, taken]), copy);
+  assert.deepEqual(rowKeys(back.entries), ["a", "b", "c"]);
+  assert.equal(back.restored, 1);
+});
+
 /* ---------------- moving a block ---------------- */
 
 const L = () => ["a", "b", "c", "d", "e", "f"];
@@ -198,6 +293,15 @@ check("a bulk remove says why anything ticked is still there", () => {
   );
   assert.equal(removedMessage("B2B", { removed: 0, refused: 1 }), "That one was added by someone else — you can take out only what you added");
   assert.equal(removedMessage("B2B", { removed: 0, refused: 4 }), "Those were added by others — you can take out only what you added");
+  // One track is named, so a slip of the thumb shows which one went.
+  assert.equal(removedMessage("B2B", { removed: 1, refused: 0 }, "Antimatter"), "Took “Antimatter” out of B2B");
+  assert.equal(removedMessage("B2B", { removed: 2, refused: 0 }, "Antimatter"), "Took 2 tracks out of B2B");
+  assert.equal(putBackMessage("B2B", { restored: 1, already: 0, overflow: 0 }, 1000), "Put 1 track back in B2B");
+  assert.equal(putBackMessage("B2B", { restored: 3, already: 1, overflow: 0 }, 1000), "Put 3 tracks back in B2B · 1 already back");
+  assert.equal(putBackMessage("B2B", { restored: 0, already: 1, overflow: 0 }, 1000), "Already back in B2B");
+  assert.equal(putBackMessage("B2B", { restored: 0, already: 2, overflow: 0 }, 1000), "Those are already back in B2B");
+  assert.equal(putBackMessage("B2B", { restored: 0, already: 0, overflow: 2 }, 1000), "B2B is full — a set holds 1,000");
+  assert.equal(putBackMessage("B2B", { restored: 1, already: 0, overflow: 1 }, 1000), "Put 1 track back in B2B · 1 didn't fit — a set holds 1,000");
 });
 
 check("tagging a selection says what happened", () => {

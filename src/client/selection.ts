@@ -135,6 +135,12 @@ export function planAdd<T extends { key: string }, E>(
   return { entries, already, notReady, overflow };
 }
 
+/** A row taken out of a playlist, and where it stood before it went. */
+export interface TakenRow<E> {
+  index: number;
+  entry: E;
+}
+
 export interface RemovePlan<E> {
   /** The playlist without the removed rows, in its order. */
   keep: E[];
@@ -142,6 +148,8 @@ export interface RemovePlan<E> {
   removed: number;
   /** Ticked rows you can't take out (on a shared set: someone else's). */
   refused: number;
+  /** The rows taken out, with their places — what an undo needs. */
+  taken: TakenRow<E>[];
 }
 
 /**
@@ -156,19 +164,75 @@ export function planRemove<E extends { clipKey: string }>(
   canRemove: (entry: E, index: number) => boolean,
 ): RemovePlan<E> {
   const keep: E[] = [];
-  let removed = 0;
+  const taken: TakenRow<E>[] = [];
   let refused = 0;
   entries.forEach((entry, index) => {
     if (!selection.has(entry.clipKey)) {
       keep.push(entry);
     } else if (canRemove(entry, index)) {
-      removed += 1;
+      taken.push({ index, entry });
     } else {
       refused += 1;
       keep.push(entry);
     }
   });
-  return { keep, removed, refused };
+  return { keep, removed: taken.length, refused, taken };
+}
+
+export interface PutBackPlan<E> {
+  /** The playlist with the rows back in it. */
+  entries: E[];
+  /** Rows put back. */
+  restored: number;
+  /** Rows left out because the set holds that clip again already. */
+  already: number;
+  /** Rows that no longer fit under the set's limit. */
+  overflow: number;
+}
+
+/**
+ * Putting back rows that were just taken out — the undo for a remove.
+ *
+ * Built from the playlist as it is *now*, never from a copy of how it was.
+ * On a shared set someone may have added a record in the seconds between the
+ * remove and the undo, and restoring a snapshot would quietly take theirs out
+ * again (the reason `canRestore` withdraws a reorder's undo). Putting rows
+ * back into the current list cannot do that: it only ever adds.
+ *
+ * Each row returns to the place it stood in, or to the end if the list is
+ * now shorter than that, in the order the rows had among themselves. With
+ * nothing else changed that is exactly the list as it was. A clip the set
+ * holds again already is left alone — somebody put it back first — and
+ * nothing goes in past the set's limit.
+ */
+export function planPutBack<E extends { clipKey: string }>(
+  current: readonly E[],
+  taken: readonly TakenRow<E>[],
+  limit: number,
+): PutBackPlan<E> {
+  const entries = [...current];
+  // Judged against the list before this undo touches it, so both rows of a
+  // doubled clip come back together rather than the first blocking the second.
+  const present = new Set(current.map((entry) => entry.clipKey));
+  let restored = 0;
+  let already = 0;
+  let overflow = 0;
+  const rows = taken
+    .filter((row) => Number.isInteger(row.index) && row.index >= 0)
+    .sort((a, b) => a.index - b.index);
+  for (const row of rows) {
+    if (present.has(row.entry.clipKey)) {
+      already += 1;
+      continue;
+    }
+    if (entries.length >= limit) {
+      overflow += 1;
+      continue;
+    }
+    entries.splice(Math.min(row.index, entries.length), 0, row.entry);
+    restored += 1;
+  }
+  return { entries, restored, already, overflow };
 }
 
 /** Distinct, in-range row indices, ascending. */
@@ -230,16 +294,45 @@ export function addedMessage(name: string, plan: AddPlan<unknown>, limit: number
   return [`Nothing new for ${name}`, ...extras].join(" · ");
 }
 
-/** After a bulk remove: what came out, and why anything ticked is still there. */
-export function removedMessage(name: string, plan: Pick<RemovePlan<unknown>, "removed" | "refused">): string {
+/**
+ * After a remove: what came out, and why anything ticked is still there.
+ *
+ * One track is named when its title is known. The bin on a phone's row is a
+ * small target beside another one, and "Took 1 track out" does not say whether
+ * it was the track you meant.
+ */
+export function removedMessage(
+  name: string,
+  plan: Pick<RemovePlan<unknown>, "removed" | "refused">,
+  title?: string,
+): string {
   if (plan.removed === 0) {
     return plan.refused === 1
       ? "That one was added by someone else — you can take out only what you added"
       : "Those were added by others — you can take out only what you added";
   }
-  const head = `Took ${tracks(plan.removed)} out of ${name}`;
+  const head =
+    plan.removed === 1 && title ? `Took “${title}” out of ${name}` : `Took ${tracks(plan.removed)} out of ${name}`;
   if (plan.refused === 0) return head;
   return `${head} · ${plan.refused.toLocaleString("en-US")} added by others stay — you can take out only what you added`;
+}
+
+/** After an undone remove: what went back, and why anything didn't. */
+export function putBackMessage(
+  name: string,
+  plan: Pick<PutBackPlan<unknown>, "restored" | "already" | "overflow">,
+  limit: number,
+): string {
+  if (plan.restored === 0) {
+    if (plan.overflow > 0) return `${name} is full — a set holds ${limit.toLocaleString("en-US")}`;
+    return plan.already === 1 ? `Already back in ${name}` : `Those are already back in ${name}`;
+  }
+  const extras: string[] = [];
+  if (plan.already > 0) extras.push(`${plan.already.toLocaleString("en-US")} already back`);
+  if (plan.overflow > 0) {
+    extras.push(`${plan.overflow.toLocaleString("en-US")} didn't fit — a set holds ${limit.toLocaleString("en-US")}`);
+  }
+  return [`Put ${tracks(plan.restored)} back in ${name}`, ...extras].join(" · ");
 }
 
 /** After tagging a selection. */

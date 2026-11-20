@@ -171,14 +171,17 @@ import {
   moveBlock,
   NO_SELECTION,
   planAdd,
+  planPutBack,
   planRemove,
   presentOnly,
+  putBackMessage,
   removedMessage,
   selectAll,
   selectRange,
   taggedMessage,
   toggleKey,
   type Selection,
+  type TakenRow,
 } from "@/client/selection";
 import { PLAYLIST_MAX_TRACKS } from "@/lib/limits";
 
@@ -367,7 +370,17 @@ export function CrateApp({
     entries: NewEntry[];
     label: string;
   } | null>(null);
-  const [toast, setToast] = useState<string | null>(null);
+  /**
+   * What the last "take out" took, and where each row stood — for one step of
+   * undo. Put back into the set as it is *now* (client/selection planPutBack),
+   * so undoing never removes what somebody else added in the meantime.
+   */
+  const [lastRemoval, setLastRemoval] = useState<{
+    playlistId: string;
+    taken: TakenRow<NewEntry>[];
+  } | null>(null);
+  /** `undo`: this message is about a remove, and offers to put it back. */
+  const [toast, setToast] = useState<{ text: string; undo: boolean } | null>(null);
   /** The add-to-playlist picker, open for one track, a selection, a record or a whole set. */
   const [picker, setPicker] = useState<PickerState | null>(null);
 
@@ -489,8 +502,19 @@ export function CrateApp({
   }, [current]);
 
   const say = useCallback((message: string) => {
-    setToast(message);
-    window.setTimeout(() => setToast((t) => (t === message ? null : t)), 2800);
+    const shown = { text: message, undo: false };
+    setToast(shown);
+    window.setTimeout(() => setToast((t) => (t === shown ? null : t)), 2800);
+  }, []);
+
+  /**
+   * A message with Undo on it, after a remove. It stays longer than a plain
+   * one: there is something to read and then something to reach for.
+   */
+  const sayWithUndo = useCallback((message: string) => {
+    const shown = { text: message, undo: true };
+    setToast(shown);
+    window.setTimeout(() => setToast((t) => (t === shown ? null : t)), 7000);
   }, []);
 
   /* ================= your tags ================= */
@@ -1798,6 +1822,15 @@ export function CrateApp({
       try {
         const playlist = await playlistsApi.create(name, plan.entries);
         setPlaylists((previous) => [playlist, ...previous]);
+        /*
+         * A set started with tracks is the set you are building: the next A or
+         * + goes to it in one tap, as it would after picking an existing set.
+         * Without this the picker came back for the second track, as if the
+         * set you had named a moment ago were not the obvious answer. A set
+         * made empty, from the rail, has had nothing added to it yet, so it
+         * does not jump the queue.
+         */
+        if (plan.entries.length > 0) setRecentPlaylists((r) => promote(r, playlist.id));
         if (seeds.length === 0) say(`Created "${name}"`);
         else if (seeds.length === 1) say(`Started "${name}" with ${seeds[0]?.title}`);
         else {
@@ -2031,8 +2064,10 @@ export function CrateApp({
       // the version that looks right dragging down is off by one going up.
       const entries = moveEntry(activePlaylist.entries.map(reEntry), from, to);
       // A hand edit supersedes the last Keep / Smooth: undoing past it would
-      // silently throw the drag away too.
+      // silently throw the drag away too. And one step of undo means the last
+      // thing you did, so an earlier remove's offer goes with it.
       setLastOrder(null);
+      setLastRemoval(null);
       void mutateEntries(activePlaylist, entries);
     },
     [activePlaylist, mutateEntries],
@@ -2041,12 +2076,23 @@ export function CrateApp({
   const removeFromPlaylist = useCallback(
     (index: number) => {
       if (!activePlaylist) return;
+      const row = activePlaylist.entries[index];
+      if (!row) return;
+      const { id, name } = activePlaylist;
+      const taken = [{ index, entry: reEntry(row) }];
+      setLastOrder(null);
       void mutateEntries(
         activePlaylist,
         activePlaylist.entries.filter((_, i) => i !== index).map(reEntry),
-      );
+      ).then((saved) => {
+        if (!saved) return;
+        // Said only once it is saved, and named: the bin is a small target
+        // on a phone, and this is how you learn which track it took.
+        setLastRemoval({ playlistId: id, taken });
+        sayWithUndo(removedMessage(name, { removed: 1, refused: 0 }, row.title));
+      });
     },
-    [activePlaylist, mutateEntries],
+    [activePlaylist, mutateEntries, sayWithUndo],
   );
 
   /** A record this device already holds, by key: the crate, the open set, or the queue. */
@@ -2107,25 +2153,28 @@ export function CrateApp({
     ) {
       return;
     }
-    const name = activePlaylist.name;
+    const { id, name } = activePlaylist;
     const from = selectionContext;
+    const taken = removal.taken.map(({ index, entry }) => ({ index, entry: reEntry(entry) }));
     setLastOrder(null);
     void mutateEntries(activePlaylist, removal.keep.map(reEntry)).then((saved) => {
       if (!saved) return;
-      say(removedMessage(name, removal));
+      setLastRemoval({ playlistId: id, taken });
+      sayWithUndo(removedMessage(name, removal));
       // Only the ticks this was about: if you've moved on and started
       // ticking elsewhere while it saved, those stay.
       setSelectionState((state) =>
         state.context === from ? { context: "", keys: NO_SELECTION, selecting: false, anchor: null } : state,
       );
     });
-  }, [activePlaylist, removal, mutateEntries, say, selectionContext]);
+  }, [activePlaylist, removal, mutateEntries, say, sayWithUndo, selectionContext]);
 
   /** Ticked rows dragged together: they land as a block, in their order. */
   const moveSelectionTo = useCallback(
     (indices: number[], slot: number) => {
       if (!activePlaylist || !inYourOrder) return;
       setLastOrder(null);
+      setLastRemoval(null);
       void mutateEntries(activePlaylist, moveBlock(activePlaylist.entries.map(reEntry), indices, slot));
     },
     [activePlaylist, inYourOrder, mutateEntries],
@@ -2342,6 +2391,7 @@ export function CrateApp({
       entries: activePlaylist.entries.map(reEntry),
       label: "Undo smooth order",
     });
+    setLastRemoval(null);
     setViewChoice(null);
     void mutateEntries(activePlaylist, reordered.map(reEntry));
     say("Reordered so the tempos climb.");
@@ -2375,6 +2425,7 @@ export function CrateApp({
       entries: activePlaylist.entries.map(reEntry),
       label: "Undo reorder",
     });
+    setLastRemoval(null);
     setViewChoice(null);
     void mutateEntries(activePlaylist, adopted.map(reEntry));
     say(`Your order is now by ${viewName(playlistView.view)}.`);
@@ -2396,6 +2447,35 @@ export function CrateApp({
     void mutateEntries(activePlaylist, lastOrder.entries);
     say("Put your order back.");
   }, [activePlaylist, lastOrder, undoAvailable, mutateEntries, say]);
+
+  /*
+   * Putting back what the last remove took. Worked out against the set as it
+   * stands this render, with the version it has now: the remove has been
+   * saved since the offer was made, and on a shared set others may have
+   * edited too. Nothing is offered once there is nothing left to put back.
+   */
+  const removalSet = lastRemoval ? (playlists.find((p) => p.id === lastRemoval.playlistId) ?? null) : null;
+  const putBack = useMemo(
+    () =>
+      removalSet && lastRemoval && canEditSet(removalSet.role)
+        ? planPutBack(removalSet.entries.map(reEntry), lastRemoval.taken, PLAYLIST_MAX_TRACKS)
+        : null,
+    [removalSet, lastRemoval],
+  );
+  const canUndoRemoval = Boolean(putBack && putBack.restored > 0);
+
+  const undoRemoval = useCallback(() => {
+    if (!removalSet || !putBack || putBack.restored === 0) return;
+    const name = removalSet.name;
+    void mutateEntries(removalSet, putBack.entries).then((saved) => {
+      // Kept on a failed save (somebody edited the set in that instant; it
+      // has been re-read), so the offer is still there to press again.
+      if (!saved) return;
+      setLastRemoval(null);
+      say(putBackMessage(name, putBack, PLAYLIST_MAX_TRACKS));
+    });
+  }, [removalSet, putBack, mutateEntries, say]);
+  const undoRemovalHere = canUndoRemoval && removalSet?.id === activePlaylist?.id;
 
   /* ================= digging ================= */
 
@@ -3692,8 +3772,10 @@ export function CrateApp({
                 state={playlistView}
                 onChange={changePlaylistView}
                 onKeep={canChangeSet ? keepPlaylistView : undefined}
-                onUndo={canChangeSet && undoAvailable ? undoReorder : undefined}
-                undoLabel={lastOrder?.label}
+                onUndo={
+                  !canChangeSet ? undefined : undoRemovalHere ? undoRemoval : undoAvailable ? undoReorder : undefined
+                }
+                undoLabel={undoRemovalHere ? "Undo remove" : lastOrder?.label}
                 busy={loading}
               />
             </div>
@@ -4682,10 +4764,31 @@ export function CrateApp({
           // there covered play/pause and the track name for its whole life.
           // No bar on a desktop, so this is the old bottom-4.
           // And above the selection bar when there is one (SelectionBar).
+          // w-max: a box hung from left-1/2 shrinks to half the screen, which
+          // wrapped every message longer than a few words on a phone.
           style={{ bottom: "calc(var(--mobile-bar-h, 0px) + var(--selection-bar-h, 0px) + 1rem)" }}
-          className="pointer-events-none fixed left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-full border border-ink-700 bg-ink-850/95 px-4 py-2 text-center text-xs text-neutral-200 shadow-xl backdrop-blur-sm"
+          className={`pointer-events-none fixed left-1/2 z-50 flex w-max max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-1 rounded-full border border-ink-700 bg-ink-850/95 text-center text-xs text-neutral-200 shadow-xl backdrop-blur-sm ${
+            toast.undo && canUndoRemoval ? "py-1 pl-4 pr-1.5" : "px-4 py-2"
+          }`}
         >
-          {toast}
+          <span>{toast.text}</span>
+          {toast.undo && canUndoRemoval && (
+            /*
+              The one message you can press. The rest of it lets a tap through
+              to whatever is underneath; this is a real button, thumb-sized on
+              a phone, because the remove it undoes was one small tap.
+            */
+            <button
+              type="button"
+              onClick={() => {
+                setToast(null);
+                undoRemoval();
+              }}
+              className="pointer-events-auto flex min-h-8 shrink-0 items-center rounded-full px-3 font-semibold text-accent hover:bg-ink-800 pointer-coarse:min-h-11"
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
     </div>
