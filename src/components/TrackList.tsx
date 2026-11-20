@@ -1015,7 +1015,7 @@ export function TrackList({
                     onClick={() => onRemoveRefused?.(item, index)}
                     title="Added by someone else — not yours to take out"
                     aria-label={`${item.title} was added by someone else — not yours to take out`}
-                    className="shrink-0 rounded-sm p-1.5 text-neutral-700 transition-opacity hover:bg-ink-800 hover:text-neutral-400 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
+                    className="shrink-0 rounded-sm p-1.5 text-neutral-700 transition-opacity hover:bg-ink-800 hover:text-neutral-200 focus-visible:opacity-100 lg:opacity-0 lg:group-hover:opacity-100"
                   >
                     <Lock className="h-3.5 w-3.5" />
                   </button>

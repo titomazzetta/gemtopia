@@ -18,7 +18,9 @@
  * room.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { cutForSize, MICRO_MAX, DISPLAY_MIN, LOCKUP_RATIO } from "../src/client/markCuts.ts";
 
 let ran = 0;
@@ -140,6 +142,97 @@ check("both accents clear AA against the ground", () => {
       contrast >= 4.5,
       `accent.${name} ${value} is ${contrast.toFixed(2)}:1 on ${ground} — under AA`,
     );
+  }
+});
+
+/*
+ * The quiet greys: neutral-500, 600 and 700, which between them set nearly
+ * every caption, meta line, count and placeholder in the app.
+ *
+ * They were Tailwind's stock values, and on this ground those are 4.2, 2.6
+ * and 1.9 to 1. Nothing looked wrong in review, because a reviewer reads a
+ * screen at a desk; an accessibility scan found text under AA on every one of
+ * 36 screens. Measured here against each surface text actually sits on, so
+ * the next "a bit subtler" fails the build rather than a reader.
+ */
+const GREYS = ["--color-neutral-400", "--color-neutral-500", "--color-neutral-600", "--color-neutral-700"];
+
+/** One colour laid over another at an opacity, as `bg-accent/10` over a surface is. */
+function over(top, alpha, under) {
+  const channel = (i) => {
+    const [t, u] = [top, under].map((value) => parseInt(value.slice(i, i + 2), 16));
+    return Math.round(u + alpha * (t - u)).toString(16).padStart(2, "0");
+  };
+  return `#${channel(1)}${channel(3)}${channel(5)}`;
+}
+
+check("every grey the app writes text in clears AA on every surface text sits on", () => {
+  const surfaces = [
+    ["the ground (ink-950)", hex("--color-ink-950")],
+    ["ink-900", hex("--color-ink-900")],
+    ["ink-850", hex("--color-ink-850")],
+    ["ink-800, a ticked or hovered row", hex("--color-ink-800")],
+    // The row that is playing: bg-accent/10 over the list.
+    ["the playing row", over(hex("--color-accent"), 0.1, hex("--color-ink-900"))],
+  ];
+  for (const token of GREYS) {
+    for (const [name, surface] of surfaces) {
+      const contrast = ratio(hex(token), surface);
+      assert.ok(
+        contrast >= 4.5,
+        `${token} ${hex(token)} is ${contrast.toFixed(2)}:1 on ${name} ${surface} — under AA for text`,
+      );
+    }
+  }
+});
+
+check("the quiet greys keep their order", () => {
+  // Never lighter than the step above: a "500" brighter than "400" would
+  // turn every secondary line into the loudest thing in its row.
+  const steps = GREYS.map((token) => luminance(hex(token)));
+  for (let i = 1; i < steps.length; i += 1) {
+    assert.ok(steps[i] <= steps[i - 1], `${GREYS[i]} is lighter than ${GREYS[i - 1]}`);
+  }
+  assert.ok(steps[1] < steps[0], "neutral-500 should still read as quieter than neutral-400");
+});
+
+/** Every run of class names written in a component: the text between two quote marks. */
+function classRuns() {
+  const root = fileURLToPath(new URL("../src", import.meta.url));
+  const files = (dir) =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      return statSync(path).isDirectory() ? files(path) : path.endsWith(".tsx") ? [path] : [];
+    });
+  return files(root).flatMap((path) =>
+    readFileSync(path, "utf8")
+      .split(/["'`]/)
+      .map((run) => ({ path: path.slice(root.length + 1), tokens: run.split(/\s+/) })),
+  );
+}
+const QUIET = /^text-neutral-(?:500|600|700)$/;
+
+check("the lighter surfaces carry no quiet text", () => {
+  // ink-700, ink-600 and the stronger accent tints are bars, active tabs and
+  // pressed chips. A quiet grey is under 4.5:1 on them (4.35 on ink-700), so
+  // what is written on them is the accent or near-white, never a caption.
+  const light = /^(?:[a-z-]+:)*bg-(?:ink-(?:700|600|500)|accent\/(?:1[5-9]|[2-9]\d))$/;
+  for (const { path, tokens } of classRuns()) {
+    if (!tokens.some((token) => light.test(token))) continue;
+    const quiet = tokens.find((token) => QUIET.test(token));
+    assert.ok(!quiet, `${path}: ${quiet} on ${tokens.find((token) => light.test(token))}`);
+  }
+});
+
+check("quiet text still answers the pointer", () => {
+  // Hovering used to take a quiet grey up to neutral-400, a visible step when
+  // the greys were darker. From today's values it is 1.2 to 1.4:1 — a hover
+  // nobody can see. A quiet control lights up to 300 or brighter, or to the accent.
+  const faint = /^(?:group-)?hover:text-neutral-(?:400|500|600|700)$/;
+  for (const { path, tokens } of classRuns()) {
+    const quiet = tokens.find((token) => QUIET.test(token));
+    const hover = tokens.find((token) => faint.test(token));
+    assert.ok(!(quiet && hover), `${path}: ${quiet} with ${hover}`);
   }
 });
 
