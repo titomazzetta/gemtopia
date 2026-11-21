@@ -215,7 +215,7 @@ There's nothing to download or update: it is always the live version.
 | **Build a set together (B2B)** | Turn any playlist into a shared one with a join link — anyone with a Gemtopia account presses **Join**. Everyone adds and reorders; you take out only what you added, and the owner has the last word. Shared playlists are edged in amber, and every row says who brought the record. A **chat** on every shared playlist, Telegram-style, with small notes when the set changes — *komron added Shiva — Kerri Chandler · 1998 · 124 BPM* — and an unread count, like a messenger, on the chat button, on the playlist and by the logo — the same on your phone and laptop. A tempo anyone logs becomes the set's BPM for everyone on it. |
 | **Install it as an app** | Add to Home Screen on an iPhone, **Install** in Chrome or Edge, **Add to Dock** in Safari on a Mac. Full screen, its own icon, safe-area aware on iPhones. |
 | **A crate that stays put** | Your crate lives in your browser, and browsers clear things: Safari removes what a site has saved when you haven't touched the site in seven days of browsing. Gemtopia asks the browser to keep it — by itself where the browser answers silently (Chrome, Edge, Safari), from a button in the account menu where it would put a permission prompt in front of you (Firefox). The menu shows what the browser answered and promises no more than that. Playlists, tempos and tags are on your account either way. |
-| **Readable in a dark room** | Every grey the app writes text in — captions, counts, placeholders, the release beside each track — clears WCAG AA (4.5 to 1) on every surface it sits on, and the build measures it, so a "subtler" grey fails CI instead of failing a reader. |
+| **Readable in a dark room** | Every grey the app writes text in — captions, counts, placeholders, the release beside each track — clears WCAG AA (4.5 to 1) on the surfaces it sits on, and inside a selected chip the count turns to the dimmer green so it does there too. Only the tint under a record you're dragging dips lower, for as long as the drag. The build measures it, so a "subtler" grey fails CI instead of failing a reader. |
 | **Invite-only** | New accounts need a one-time code from an admin — an hour or a day, single use. Everyone already in keeps their access. |
 | **Nothing is hidden from you** | Records with no preview on Discogs still appear in the crate, marked, instead of silently not existing — track by track where Discogs has a tracklist. On a first sync every record shows up within a minute as *loading* — tap one and it's fetched next. The header splits the count: what plays, what's record only, what Discogs has no audio for, what's still loading, and what hasn't finished syncing — the last of which is a button. |
 | **Shown how, not left to guess** | A four-card welcome on your first visit — what it is, how to hear it, how to build a set, digging and B2B — worded for the device you're on (drag on a desktop, + on a phone). After that, **?** (or the ? button, phones included) opens *How it works*: every feature in a few lines, the keyboard shortcuts, and the tour again. |
@@ -1215,7 +1215,7 @@ npm run test:mixing     # 82
 npm run test:bpm-range  # 22
 npm run test:beat-meter # 15
 npm run test:record     # 36
-npm run test:mark       # 18 — the logo's cuts, the accents, and every text grey against every surface it sits on
+npm run test:mark       # 20 — the logo's cuts, the accents, every text grey against every surface it sits on
 npm run test:views      # 16
 npm run test:dig-feed   # 9
 npm run test:dig-links  # 11
@@ -1239,7 +1239,7 @@ npm run test:collab-view # 11
 npm run test:chat       # 40
 npm run test:audit-gate # 15
 npm run test:envelope   # 21 — chat encryption: tamper, AAD, rotation
-npm run test:db-tls     # 11 — 942 offline in all
+npm run test:db-tls     # 11 — 944 offline in all
 npm run test:source-text # every tracked text file, for hidden characters
 npm run test:api        # 213 checks, needs a running server + Postgres
 npm run e2e             # 146 checks in a real Chromium, Discogs and YouTube faked — see e2e/README.md
@@ -1267,7 +1267,11 @@ the app writes text in, against each surface text sits on, because three of
 them were Tailwind's stock values and came out at 4.2, 2.6 and 1.9 to 1 here:
 nothing looked wrong at a desk, and an accessibility scan found text under AA
 on all 36 screens it was pointed at. The tokens were lifted, the same screens
-scanned clean, and the test is what keeps the next "a bit subtler" out.
+scanned clean, and the test is what keeps the next "a bit subtler" out. A
+second scan, with filter chips selected, found what the first never saw: the
+count inside a selected chip sits on the chip's own green tint, where a quiet
+grey is 4 to 1. It turns to the dimmer accent now, and the test reads every
+button that can carry a tint for a quiet grey written so that it can't change.
 
 **`test-env.mjs`** covers the configuration contract, and exists because of a
 bug that reached a user on their very first run. Every optional field rejected a

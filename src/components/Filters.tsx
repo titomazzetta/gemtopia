@@ -179,6 +179,10 @@ function ChipGroup({
           // A folder you're hiding is ticked, but green would read as "this
           // is what plays": it is struck through in amber instead.
           const hidden = active && Boolean(hide);
+          // The count and the # sit on the chip's own tint once it is
+          // selected, where a quiet grey is 4.0:1 — under AA. They go
+          // to the dimmer accent instead, which still reads as secondary.
+          const onTint = active && !hidden;
           return (
             <button
               key={name}
@@ -195,12 +199,12 @@ function ChipGroup({
               }`}
             >
               {hash && (
-                <span aria-hidden="true" className="text-neutral-600">
+                <span aria-hidden="true" className={onTint ? "text-accent-dim" : "text-neutral-600"}>
                   #
                 </span>
               )}
               <span className={hidden ? "line-through decoration-amber-300/60" : undefined}>{name}</span>
-              <span className="ml-1 text-neutral-600">{count}</span>
+              <span className={`ml-1 ${onTint ? "text-accent-dim" : "text-neutral-600"}`}>{count}</span>
             </button>
           );
         })}
@@ -563,7 +567,7 @@ export function Filters({
                     title={`${band.count} catalogued clips, median ${band.median} BPM`}
                   >
                     {band.style}
-                    <span className="ml-1 font-mono text-neutral-600">
+                    <span className={`ml-1 font-mono ${active ? "text-accent-dim" : "text-neutral-600"}`}>
                       {band.low}–{band.high}
                     </span>
                   </button>
