@@ -55,7 +55,8 @@ function MetaChip({
 }) {
   const content = (
     <>
-      {label && <span className="mr-1 text-neutral-600">{label}</span>}
+      {/* On a selected chip's tint a quiet grey is under AA; the dimmer accent isn't. */}
+      {label && <span className={`mr-1 ${active ? "text-accent-dim" : "text-neutral-600"}`}>{label}</span>}
       <span className={active ? "text-accent" : "text-neutral-300"}>{value}</span>
     </>
   );

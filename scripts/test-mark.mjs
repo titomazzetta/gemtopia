@@ -224,6 +224,68 @@ check("the lighter surfaces carry no quiet text", () => {
   }
 });
 
+/** A selected chip's tint: `bg-accent/15` over each surface a chip sits on. */
+const SELECTED_TINTS = ["--color-ink-950", "--color-ink-900", "--color-ink-850"].map((token) => [
+  `accent/15 over ${token.replace("--color-", "")}`,
+  over(hex("--color-accent"), 0.15, hex(token)),
+]);
+
+check("on a selected chip's tint, the dimmer accent clears AA", () => {
+  // Quiet greys are 3.9 to 4.4:1 there, so text inside a chip that can be
+  // selected switches to the dimmer accent when it is (the next check).
+  for (const [name, tint] of SELECTED_TINTS) {
+    const contrast = ratio(hex("--color-accent-dim"), tint);
+    assert.ok(contrast >= 4.5, `accent-dim is ${contrast.toFixed(2)}:1 on ${name} ${tint}`);
+  }
+});
+
+check("text inside a chip switches colour when the chip is selected", () => {
+  /*
+   * The first scan had no chip selected, so it never saw the count inside one
+   * sitting on the chip's own tint at 4.0:1. A second scan, with a filter chip
+   * on, did. Every <button> that can carry a light tint is read for a quiet
+   * grey (600 or 700, under AA on every tint) written as a plain class that
+   * cannot change with the button's state. A class chosen by a condition is
+   * trusted to be the one above; this is a net for the plain kind.
+   */
+  const tinted = /bg-(?:accent\/(?:1[5-9]|[2-9]\d)|ink-(?:700|600))(?![\w/])/;
+  const plainQuiet = /className="[^"]*\btext-neutral-(?:600|700)\b[^"]*"/;
+  /** The button's own className (the first in the block), and everything after it. */
+  const ownClass = (block) => {
+    const at = block.indexOf("className=");
+    if (at < 0) return { own: "", rest: block };
+    const start = at + "className=".length;
+    if (block[start] === '"') {
+      const end = block.indexOf('"', start + 1);
+      return { own: block.slice(start + 1, end), rest: block.slice(end + 1) };
+    }
+    let depth = 0;
+    for (let i = start; i < block.length; i += 1) {
+      if (block[i] === "{") depth += 1;
+      else if (block[i] === "}" && (depth -= 1) === 0) return { own: block.slice(start, i + 1), rest: block.slice(i + 1) };
+    }
+    return { own: "", rest: block };
+  };
+  const root = fileURLToPath(new URL("../src", import.meta.url));
+  const files = (dir) =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name);
+      return statSync(path).isDirectory() ? files(path) : path.endsWith(".tsx") ? [path] : [];
+    });
+  let tintable = 0;
+  for (const path of files(root)) {
+    for (const [button] of readFileSync(path, "utf8").matchAll(/<button\b[\s\S]*?<\/button>/g)) {
+      const { own, rest } = ownClass(button);
+      if (!tinted.test(own)) continue;
+      tintable += 1;
+      const quiet = rest.match(plainQuiet)?.[0];
+      assert.ok(!quiet, `${path.slice(root.length + 1)}: ${quiet} inside a button that can be tinted`);
+    }
+  }
+  // If the reading above ever stops finding the chips, this says so.
+  assert.ok(tintable >= 10, `only ${tintable} buttons that can be tinted were found`);
+});
+
 check("quiet text still answers the pointer", () => {
   // Hovering used to take a quiet grey up to neutral-400, a visible step when
   // the greys were darker. From today's values it is 1.2 to 1.4:1 — a hover
