@@ -83,9 +83,9 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.4.5",
-    "playwright": "1.63.0",
-    "postcss": "8.5.32",
+    "eslint-config-next": "16.4.6",
+    "playwright": "1.65.1",
+    "postcss": "8.5.33",
     "tailwindcss": "4.3.5",
     "typescript": "^5.9.3"
   }
